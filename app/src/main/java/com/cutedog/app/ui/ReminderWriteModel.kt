@@ -12,14 +12,18 @@ import kotlinx.coroutines.*
 
 /** Owns a write across Activity recreation, so rotating cannot repeat a completed insert. */
 class ReminderWriteModel : ViewModel() {
-    data class Result(val originalId: Long, val savedId: Long, val message: String)
+    data class Result(val originalId: Long, val savedId: Long, val message: String, val draftToken: String)
     private val operationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     var running by mutableStateOf(false)
         private set
     var result by mutableStateOf<Result?>(null)
         private set
 
-    fun save(context: Context, item: Reminder) {
+    var committedDrafts by mutableStateOf<Map<String, Long>>(emptyMap())
+        private set
+
+    fun save(context: Context, item: Reminder, draftToken: String) {
+        if (committedDrafts.containsKey(draftToken)) return
         if (running || result != null) return
         val application = context.applicationContext
         running = true
@@ -33,11 +37,12 @@ class ReminderWriteModel : ViewModel() {
                     repository.get(id) ?: item.copy(id = id)
                 }
                 savedId = saved.id
+                committedDrafts = (committedDrafts + (draftToken to savedId)).entries.toList().takeLast(32).associate { it.toPair() }
                 withContext(Dispatchers.IO) { ReminderScheduler(application).schedule(saved) }
-                result = Result(item.id, savedId, "事项已保存。可在小狗设置中检查提醒权限。")
+                result = Result(item.id, savedId, "事项已保存。可在小狗设置中检查提醒权限。", draftToken)
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (e: Exception) {
-                result = Result(item.id, savedId, if (savedId > 0) "事项已保存，但提醒调度失败。请检查权限后重新打开应用恢复提醒。" else "保存失败：${e.message ?: "请稍后重试"}")
+                result = Result(item.id, savedId, if (savedId > 0) "事项已保存，但提醒调度失败。请检查权限后重新打开应用恢复提醒。" else "保存失败：${e.message ?: "请稍后重试"}", draftToken)
             } finally { running = false }
         }
     }

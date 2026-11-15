@@ -26,6 +26,8 @@ class Device:
         self.serial, self.output = serial, output
         self.width, self.height = 720, 1280
         self.calls = []
+        self.external_dialogs = []
+        self.app_pids = set()
 
     def adb(self, *args, timeout=90, check=True):
         result = subprocess.run(["adb", "-s", self.serial, *map(str, args)],
@@ -56,13 +58,37 @@ class Device:
         last = None
         while time.monotonic() < end:
             try:
-                node = self.find(text, contains)
+                tree = self.tree()
+                if self.recover_launcher_dialog(tree):
+                    continue
+                node = self.find(text, contains, tree)
                 if (node is not None) == present:
                     return node
             except Exception as error:
                 last = str(error)
             time.sleep(1)
         raise AssertionError(f"Expected text {text!r} present={present}; last error={last}")
+
+    def recover_launcher_dialog(self, tree):
+        """Record/dismiss only a known unrelated first-boot Pixel Launcher ANR.
+
+        Never dismiss CuteDog errors or assert success because a modal was closed.
+        All requested application assertions must still execute afterwards.
+        """
+        title = next((n.get("text", "") for n in tree.iter("node")
+                      if n.get("resource-id") == "android:id/alertTitle"), "")
+        if "Pixel Launcher" not in title or "isn't responding" not in title:
+            return False
+        if len(self.external_dialogs) >= 3:
+            raise RuntimeError("Pixel Launcher repeatedly ANRs; emulator is not stable")
+        close = next((n for n in tree.iter("node") if n.get("resource-id") == "android:id/aerr_close"), None)
+        if close is None:
+            return False
+        shot = self.screenshot("environment-launcher-anr-" + str(len(self.external_dialogs) + 1))
+        self.external_dialogs.append({"title": title, "action": "Close the unrelated Pixel Launcher app",
+                                      "screenshot": shot})
+        self.tap_node(close)
+        return True
 
     def tap_node(self, node):
         if node is None:
@@ -117,10 +143,27 @@ class Device:
             (self.output / (name + "-xml-error.txt")).write_text(str(error))
         return str(path.relative_to(self.output))
 
+    def long_drag(self, start_x, start_y, end_x, end_y):
+        # A slow swipe moves immediately and correctly means "stroke" to CuteDog.
+        # Its documented drag gesture holds still first, then moves without lifting.
+        self.adb("shell", "input", "touchscreen", "motionevent", "DOWN", start_x, start_y)
+        try:
+            time.sleep(.75)
+            for index in range(1, 7):
+                x = round(start_x + (end_x - start_x) * index / 6)
+                y = round(start_y + (end_y - start_y) * index / 6)
+                self.adb("shell", "input", "touchscreen", "motionevent", "MOVE", x, y)
+                time.sleep(.05)
+        finally:
+            self.adb("shell", "input", "touchscreen", "motionevent", "UP", end_x, end_y, check=False)
+
     def launch(self):
         result = self.adb("shell", "am", "start", "-W", "-n", PACKAGE + "/.MainActivity", timeout=120)
         if "Status: ok" not in result:
             raise AssertionError("Activity launch did not report Status: ok: " + result)
+        for pid in self.adb("shell", "pidof", PACKAGE, check=False).split():
+            if pid.isdigit():
+                self.app_pids.add(pid)
         self.wait_text("首页", seconds=60)
         return result
 
@@ -184,15 +227,21 @@ def main():
         if "Success" not in installed:
             raise AssertionError(installed)
         device.adb("shell", "pm", "clear", PACKAGE)
-        device.adb("shell", "wm", "size", "720x1280")
-        device.adb("shell", "wm", "density", "320")
+        # Keep the AVD's boot-time display configuration. Changing density during the
+        # launcher's first start can cause an unrelated Pixel Launcher ANR on API 35.
+        size = device.adb("shell", "wm", "size")
+        sizes = re.findall(r"(\d+)x(\d+)", size)
+        if not sizes:
+            raise AssertionError("Cannot read actual display dimensions")
+        device.width, device.height = map(int, sizes[-1])
+        density = device.adb("shell", "wm", "density").strip()
         device.adb("shell", "settings", "put", "global", "window_animation_scale", "0")
         device.adb("shell", "settings", "put", "global", "transition_animation_scale", "0")
         device.adb("shell", "settings", "put", "global", "animator_duration_scale", "0")
         device.adb("shell", "pm", "grant", PACKAGE, "android.permission.POST_NOTIFICATIONS")
         device.adb("shell", "input", "keyevent", "KEYCODE_WAKEUP")
         device.adb("shell", "wm", "dismiss-keyguard")
-        return {"install": installed.strip(), "resolution": "720x1280", "density": 320}
+        return {"install": installed.strip(), "resolution": f"{device.width}x{device.height}", "density": density}
 
     def tabs():
         device.launch()
@@ -278,7 +327,7 @@ def main():
         cx, cy = (left + right) // 2, (top + bottom) // 2
         destination_x = int(device.width * (.2 if cx > device.width / 2 else .8))
         destination_y = max(120, min(device.height - 180, cy - 180))
-        device.adb("shell", "input", "swipe", cx, cy, destination_x, destination_y, 1600)
+        device.long_drag(cx, cy, destination_x, destination_y)
         time.sleep(2)
         after, after_window = device.overlay_frame()
         if abs(after[0] - before[0]) + abs(after[1] - before[1]) < 40:
@@ -310,6 +359,7 @@ def main():
             raise AssertionError("Overlay service remains foreground after Stop")
         return {"window_before": before, "window_after": after, "foreground_service": True,
                 "small_non_modal_window": True, "drag_moved": True, "launcher_touch_observed": True,
+                "drag_gesture": "DOWN, hold still 750ms, six MOVE events, UP",
                 "new_launcher_labels_after_touch": sorted(new_labels),
                 "service_stopped_from_ui": True, "screenshots": [first, second, drawer]}
 
@@ -322,17 +372,22 @@ def main():
     finally:
         # This emulator is disposable; never collect any API keys or private chat contents.
         try:
-            pid = device.adb("shell", "pidof", PACKAGE, check=False).strip()
-            if pid.isdigit():
+            for pid in device.adb("shell", "pidof", PACKAGE, check=False).split():
+                if pid.isdigit():
+                    device.app_pids.add(pid)
+            errors = []
+            for pid in sorted(device.app_pids, key=int):
                 crash = device.adb("logcat", "-d", "--pid=" + pid, "AndroidRuntime:E", "*:S", check=False)
-                (args.output / "app-runtime-errors.txt").write_text(crash)
+                errors.append(f"Observed CuteDog process {pid}:\n{crash}")
                 if "FATAL EXCEPTION" in crash:
-                    results.append({"name": "app-process-crash", "status": "failed", "error": "App AndroidRuntime fatal exception captured"})
+                    results.append({"name": "app-process-crash-" + pid, "status": "failed", "error": "App AndroidRuntime fatal exception captured"})
+            (args.output / "app-runtime-errors.txt").write_text("\n".join(errors))
             device.adb("shell", "am", "force-stop", PACKAGE, check=False)
             device.adb("shell", "appops", "set", PACKAGE, "SYSTEM_ALERT_WINDOW", "default", check=False)
         except Exception as error:
             metadata["cleanup_or_log_collection_error"] = str(error)
         metadata["finished_utc"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        metadata["external_environment_dialogs"] = device.external_dialogs
         report = {"metadata": metadata, "assertions": results,
                   "passed": sum(r["status"] == "passed" for r in results),
                   "failed": sum(r["status"] == "failed" for r in results)}

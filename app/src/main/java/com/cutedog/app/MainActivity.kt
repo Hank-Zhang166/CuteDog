@@ -11,7 +11,7 @@ import com.cutedog.app.ui.CuteDogApp
 import com.cutedog.app.ui.CuteDogTheme
 
 class MainActivity : ComponentActivity() {
-    private data class LaunchRequest(val reminderId: Long = 0L, val openDaily: Boolean = false, val sequence: Int = 0)
+    private data class LaunchRequest(val reminderId: Long = 0L, val openDaily: Boolean = false, val sequence: Int = 0, val openChat: Boolean = false, val showMissed: Boolean = false)
     private var request by mutableStateOf(LaunchRequest())
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -19,7 +19,7 @@ class MainActivity : ComponentActivity() {
         if (savedInstanceState == null) consumeIntent(intent)
         setContent {
             CuteDogTheme {
-                CuteDogApp(request.reminderId, request.openDaily, request.sequence)
+                CuteDogApp(request.reminderId, request.openDaily, request.sequence, request.openChat, request.showMissed)
             }
         }
     }
@@ -31,6 +31,6 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun consumeIntent(intent: Intent) {
-        request = LaunchRequest(intent.getLongExtra("reminder_id", 0L), intent.getBooleanExtra("open_daily", false), request.sequence + 1)
+        request = LaunchRequest(intent.getLongExtra("reminder_id", 0L), intent.getBooleanExtra("open_daily", false), request.sequence + 1, intent.getBooleanExtra("open_chat", false), intent.getBooleanExtra("show_missed_reminders", false))
     }
 }

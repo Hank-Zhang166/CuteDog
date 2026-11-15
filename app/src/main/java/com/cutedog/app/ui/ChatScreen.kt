@@ -14,6 +14,10 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
+import java.time.LocalDate
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -38,15 +42,20 @@ internal fun ChatScreen() {
     var busy by remember { mutableStateOf(false) }
     var requestJob by remember { mutableStateOf<Job?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
-    var showSettings by remember { mutableStateOf(false) }
-    var showMemories by remember { mutableStateOf(false) }
+    var showSettings by rememberSaveable { mutableStateOf(false) }
+    var showMemories by rememberSaveable { mutableStateOf(false) }
     var clearConfirm by remember { mutableStateOf(false) }
+    var deleteId by rememberSaveable { mutableLongStateOf(0L) }
+    var failedUserId by rememberSaveable { mutableLongStateOf(0L) }
+    var requestGeneration by remember { mutableIntStateOf(0) }
+    var truncated by rememberSaveable { mutableStateOf(false) }
+    val exportChat = rememberJsonExporter("conversation", "CuteDog-聊天-${LocalDate.now()}.json") { repository.exportConversation() }
     var petView by remember { mutableStateOf<PetView?>(null) }
     var configured by remember { mutableStateOf(runCatching { settings.hasApiKey }.getOrDefault(false)) }
     var consentVisible by remember { mutableStateOf(false) }
     val consent = remember { context.getSharedPreferences("ai_ui_consent", 0) }
     val name = remember { PetSettings(context).name }
-    LaunchedEffect(Unit) { messages = withContext(Dispatchers.IO) { repository.messages() } }
+    LaunchedEffect(Unit) { try { messages = withContext(Dispatchers.IO) { repository.messages() }; if (failedUserId == 0L && messages.lastOrNull()?.role == "user") failedUserId = messages.last().id } catch (e: Exception) { error = "无法读取聊天记录，请重新打开本页。" } }
     LaunchedEffect(messages.size, busy) { if (messages.isNotEmpty()) listState.animateScrollToItem(messages.size - 1) }
     fun send(retry: Boolean = false) {
         if (busy || (!retry && input.isBlank())) return
@@ -54,20 +63,28 @@ internal fun ChatScreen() {
         if (!consent.getBoolean("remote_chat", false)) { consentVisible = true; return }
         val text = input.trim()
         input = ""; busy = true; error = null
+        requestGeneration++
+        val generation = requestGeneration
         requestJob = scope.launch {
             try {
-                if (!retry) withContext(Dispatchers.IO) { repository.add("user", text) }
+                val target = if (!retry) withContext(Dispatchers.IO) { repository.add("user", text) }.id else failedUserId
+                require(target > 0) { "没有可以重试的消息，请重新发送。" }
+                failedUserId = target
                 messages = withContext(Dispatchers.IO) { repository.messages() }
-                val reply = client.reply(messages)
-                withContext(Dispatchers.IO) { repository.add("assistant", reply.text) }
+                val history = messages.takeWhile { it.id <= target }
+                val reply = client.reply(history, target)
+                currentCoroutineContext().ensureActive()
+                if (generation != requestGeneration) return@launch
+                withContext(Dispatchers.IO) { currentCoroutineContext().ensureActive(); repository.add("assistant", reply.text) }
                 messages = withContext(Dispatchers.IO) { repository.messages() }
+                failedUserId = 0L; truncated = reply.contextTruncated
                 reply.intent?.let { petView?.react(it) }
             } catch (cancelled: CancellationException) { error = "这次请求已取消。你可以稍后重试。"; throw cancelled }
             catch (e: Exception) { error = e.message ?: "暂时没有连接上，请稍后重试。" }
             finally { busy = false; requestJob = null }
         }
     }
-    Column(Modifier.fillMaxSize().imePadding()) {
+    Column(Modifier.fillMaxSize().imePadding().testTag("chat_screen")) {
         Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 16.dp, top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             AndroidView(factory = { PetView(it).also { pet -> petView = pet } }, modifier = Modifier.size(70.dp), update = { it.contentDescription = "$name 的表情" })
             Column(Modifier.weight(1f)) {
@@ -77,8 +94,9 @@ internal fun ChatScreen() {
             TextButton(onClick = { showSettings = true }) { Text("设置") }
         }
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.End) {
-            TextButton(onClick = { showMemories = true }) { Text("记忆") }
-            TextButton(onClick = { clearConfirm = true }, enabled = messages.isNotEmpty() && !busy) { Text("清空聊天") }
+            TextButton(onClick = { showMemories = true }, modifier = Modifier.testTag("chat_memories")) { Text("记忆") }
+            TextButton(onClick = exportChat, enabled = messages.isNotEmpty()) { Text("导出") }
+            TextButton(onClick = { clearConfirm = true }, enabled = messages.isNotEmpty()) { Text("清空聊天") }
         }
         LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = listState, contentPadding = PaddingValues(horizontal = 22.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             if (messages.isEmpty()) item {
@@ -99,8 +117,10 @@ internal fun ChatScreen() {
                             Text(item.content, modifier = Modifier.padding(17.dp), style = MaterialTheme.typography.bodyLarge)
                         }
                     }
+                    TextButton(onClick = { deleteId = item.id }, modifier = Modifier.testTag("chat_delete_${item.id}").semantics { contentDescription = "删除这条${if (user) "发送" else "回复"}消息" }) { Text("删除") }
                 }
             }
+            if (truncated) item { Text("本次只使用最近上下文；旧记录仍在本机。", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             if (busy) item {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
@@ -112,23 +132,24 @@ internal fun ChatScreen() {
                 Surface(color = MaterialTheme.colorScheme.errorContainer, shape = RoundedCornerShape(18.dp)) {
                     Column(Modifier.padding(16.dp)) {
                         Text(error!!, style = MaterialTheme.typography.bodyMedium)
-                        TextButton(onClick = { send(true) }, enabled = !busy && messages.lastOrNull()?.role == "user") { Text("重试上一条") }
+                        TextButton(onClick = { send(true) }, enabled = !busy && messages.any { it.id == failedUserId && it.role == "user" }) { Text("重试上一条") }
                     }
                 }
-            } else if (!busy && messages.lastOrNull()?.role == "user") item {
+            } else if (!busy && failedUserId > 0 && messages.any { it.id == failedUserId }) item {
                 TextButton(onClick = { send(true) }) { Text("继续请求上一条回复") }
             }
         }
         Surface(color = MaterialTheme.colorScheme.surface) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Bottom) {
-                OutlinedTextField(input, { input = it.take(8000) }, modifier = Modifier.weight(1f), placeholder = { Text("今天想和我说什么？") }, maxLines = 5, shape = RoundedCornerShape(23.dp), enabled = !busy)
-                Button(onClick = { send() }, enabled = input.isNotBlank() && !busy, modifier = Modifier.heightIn(min = 54.dp), shape = RoundedCornerShape(20.dp), contentPadding = PaddingValues(horizontal = 18.dp)) { Text("发送") }
+                OutlinedTextField(input, { input = it.take(8000) }, modifier = Modifier.weight(1f).testTag("chat_input"), placeholder = { Text("今天想和我说什么？") }, maxLines = 5, shape = RoundedCornerShape(23.dp), enabled = !busy)
+                Button(onClick = { send() }, enabled = input.isNotBlank() && !busy, modifier = Modifier.heightIn(min = 54.dp).testTag("chat_send"), shape = RoundedCornerShape(20.dp), contentPadding = PaddingValues(horizontal = 18.dp)) { Text("发送") }
             }
         }
     }
     if (showSettings) AiSettingsDialog(onDismiss = { showSettings = false; configured = runCatching { settings.hasApiKey }.getOrDefault(false) })
     if (showMemories) MemoryDialog { showMemories = false }
-    if (clearConfirm) AlertDialog(onDismissRequest = { clearConfirm = false }, title = { Text("清空本机聊天记录？") }, text = { Text("此操作无法撤销。长期记忆单独管理；已经发送给服务商的数据不在本机控制范围内。") }, confirmButton = { TextButton(onClick = { scope.launch { withContext(Dispatchers.IO) { repository.clear() }; messages = emptyList(); error = null }; clearConfirm = false }) { Text("清空") } }, dismissButton = { TextButton(onClick = { clearConfirm = false }) { Text("取消") } })
+    if (clearConfirm) AlertDialog(onDismissRequest = { clearConfirm = false }, title = { Text("清空本机聊天记录？") }, text = { Text("此操作无法撤销。长期记忆单独管理；已经发送给服务商的数据不在本机控制范围内。") }, confirmButton = { TextButton(onClick = { scope.launch { try { requestJob?.cancelAndJoin(); requestGeneration++; withContext(Dispatchers.IO) { repository.clear() }; messages = emptyList(); error = null; failedUserId = 0; truncated = false } catch (e: Exception) { error = "清空失败，请重试。" } }; clearConfirm = false }) { Text("清空") } }, dismissButton = { TextButton(onClick = { clearConfirm = false }) { Text("取消") } })
+    if (deleteId > 0) AlertDialog(onDismissRequest = { deleteId = 0 }, title = { Text("删除这条消息？") }, text = { Text("将删除本机记录，并取消正在进行的回复。已经发送给服务商的数据无法从这里撤回。") }, confirmButton = { TextButton(onClick = { val target = deleteId; deleteId = 0; scope.launch { try { requestJob?.cancelAndJoin(); requestGeneration++; withContext(Dispatchers.IO) { repository.deleteMessage(target) }; messages = withContext(Dispatchers.IO) { repository.messages() }; if (failedUserId == target) failedUserId = 0; error = null } catch (e: Exception) { error = "删除失败，请重试。" } } }) { Text("删除消息") } }, dismissButton = { TextButton(onClick = { deleteId = 0 }) { Text("取消") } })
     if (consentVisible) AlertDialog(onDismissRequest = { consentVisible = false }, title = { Text("开始联网对话") }, text = { Text("发送后，你的当前消息与近期对话将交给设置中的模型服务商处理。API Key 仅用于该地址的身份验证。只有你开启长期记忆时，已保存的记忆才会一起发送。请确认该服务的隐私政策和计费方式。") }, confirmButton = { TextButton(onClick = { consent.edit().putBoolean("remote_chat", true).apply(); consentVisible = false; send(messages.lastOrNull()?.role == "user" && input.isBlank()) }) { Text("同意并继续") } }, dismissButton = { TextButton(onClick = { consentVisible = false }) { Text("暂不发送") } })
 }
 
@@ -142,11 +163,11 @@ internal fun AiSettingsDialog(onDismiss: () -> Unit) {
     var hasKey by remember { mutableStateOf(runCatching { settings.hasApiKey }.getOrDefault(false)) }
     var error by remember { mutableStateOf<String?>(null) }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Surface(Modifier.fillMaxWidth().fillMaxHeight(.9f).padding(horizontal = 16.dp), shape = RoundedCornerShape(28.dp)) {
+        Surface(Modifier.widthIn(max = 680.dp).fillMaxWidth().fillMaxHeight(.9f).padding(horizontal = 16.dp), shape = RoundedCornerShape(28.dp)) {
             Column(Modifier.padding(24.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 Text("连接你的模型", style = MaterialTheme.typography.headlineMedium)
-                Text("支持 OpenAI 兼容的 Chat Completions 接口。需要你自己的账号、API Key 和可用额度；应用不内置开发者密钥或离线语言模型。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                OutlinedTextField(endpoint, { endpoint = it }, label = { Text("HTTPS 接口根地址（包含 /v1）") }, modifier = Modifier.fillMaxWidth(), singleLine = true, shape = RoundedCornerShape(16.dp))
+                Text("支持 OpenAI 兼容的对话服务。DeepSeek 地址可填写 https://api.deepseek.com，模型使用你指定的 deepseek-flash。需要你自己的 API Key 和可用额度。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                OutlinedTextField(endpoint, { endpoint = it }, label = { Text("HTTPS 接口根地址（/v1 按服务商要求）") }, modifier = Modifier.fillMaxWidth(), singleLine = true, shape = RoundedCornerShape(16.dp))
                 OutlinedTextField(model, { model = it }, label = { Text("模型名称") }, modifier = Modifier.fillMaxWidth(), singleLine = true, shape = RoundedCornerShape(16.dp))
                 OutlinedTextField(key, { key = it }, label = { Text(if (hasKey) "新 API Key（留空保留已有密钥）" else "API Key") }, modifier = Modifier.fillMaxWidth(), visualTransformation = PasswordVisualTransformation(), singleLine = true, shape = RoundedCornerShape(16.dp))
                 Text(if (hasKey) "设备上已保存加密密钥。" else "还未保存密钥。", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
@@ -179,14 +200,15 @@ internal fun MemoryDialog(onDismiss: () -> Unit) {
     val repository = remember { ChatRepository(context.applicationContext) }
     val settings = remember { AiSettings(context.applicationContext) }
     val scope = rememberCoroutineScope()
+    val exportMemories = rememberJsonExporter("memories", "CuteDog-记忆-${LocalDate.now()}.json") { repository.exportMemories() }
     var memories by remember { mutableStateOf<List<Memory>>(emptyList()) }
     var enabled by remember { mutableStateOf(settings.memoryEnabled) }
     var text by rememberSaveable { mutableStateOf("") }
-    var editingId by remember { mutableLongStateOf(0) }
+    var editingId by rememberSaveable { mutableLongStateOf(0) }
     var confirmEnable by remember { mutableStateOf(false) }
     var confirmClear by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(Unit) { memories = withContext(Dispatchers.IO) { repository.memories() } }
+    LaunchedEffect(Unit) { try { memories = withContext(Dispatchers.IO) { repository.memories() } } catch (e: Exception) { error = "无法读取记忆，请重新打开后重试。" } }
     fun mutate(block: () -> Unit) {
         scope.launch {
             try { withContext(Dispatchers.IO) { block() }; memories = withContext(Dispatchers.IO) { repository.memories() }; error = null }
@@ -194,30 +216,30 @@ internal fun MemoryDialog(onDismiss: () -> Unit) {
         }
     }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Surface(Modifier.fillMaxWidth().fillMaxHeight(.93f).padding(horizontal = 12.dp), shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.background) {
+        Surface(Modifier.widthIn(max = 680.dp).fillMaxWidth().fillMaxHeight(.93f).padding(horizontal = 12.dp), shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.background) {
             Column(Modifier.padding(22.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Text("只记住你愿意的事", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f)); TextButton(onClick = onDismiss) { Text("关闭") } }
                 Text("记忆由你亲自添加和编辑，不会从聊天中自动提取。关闭后保留在本机，但不会用于后续模型请求。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Text("允许对话使用长期记忆", modifier = Modifier.weight(1f)); Switch(enabled, { if (it) confirmEnable = true else { settings.memoryEnabled = false; enabled = false } })
                 }
-                LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                LazyColumn(Modifier.weight(1f).testTag("memory_list"), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     if (memories.isEmpty()) item { EmptyNote("还没有长期记忆", "例如：我正在学习日语。只记录你愿意交给模型服务的信息。") }
                     items(memories, key = { it.id }) { memory ->
                         SoftCard(Modifier.fillMaxWidth()) {
                             Text(memory.text)
-                            Row { TextButton(onClick = { editingId = memory.id; text = memory.text }) { Text("编辑") }; TextButton(onClick = { mutate { repository.deleteMemory(memory.id) } }) { Text("删除") } }
+                            Row { TextButton(onClick = { editingId = memory.id; text = memory.text }, modifier = Modifier.testTag("memory_edit_${memory.id}")) { Text("编辑") }; TextButton(onClick = { mutate { repository.deleteMemory(memory.id) } }, modifier = Modifier.testTag("memory_delete_${memory.id}")) { Text("删除") } }
                         }
                     }
                 }
-                OutlinedTextField(text, { text = it.take(1000) }, label = { Text(if (editingId == 0L) "添加一条记忆" else "修改这条记忆") }, modifier = Modifier.fillMaxWidth(), maxLines = 4, shape = RoundedCornerShape(16.dp))
+                OutlinedTextField(text, { text = it.take(1000) }, label = { Text(if (editingId == 0L) "添加一条记忆" else "修改这条记忆") }, modifier = Modifier.fillMaxWidth().testTag("memory_input"), maxLines = 4, shape = RoundedCornerShape(16.dp))
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = { val value = text.trim(); val id = editingId; mutate { repository.saveMemory(id, value) }; text = ""; editingId = 0 }, enabled = text.isNotBlank(), modifier = Modifier.weight(1f)) { Text("保存记忆") }
+                    Button(onClick = { val value = text.trim(); val id = editingId; mutate { repository.saveMemory(id, value) }; text = ""; editingId = 0 }, enabled = text.isNotBlank(), modifier = Modifier.weight(1f).testTag("memory_save")) { Text("保存记忆") }
                     if (editingId != 0L) TextButton(onClick = { editingId = 0; text = "" }) { Text("取消编辑") }
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    TextButton(onClick = { scope.launch { val content = withContext(Dispatchers.IO) { repository.exportMemories() }; context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply { type = "application/json"; putExtra(Intent.EXTRA_TEXT, content) }, "导出我的记忆")) } }) { Text("导出记忆") }
+                    TextButton(onClick = exportMemories) { Text("导出记忆") }
                     TextButton(onClick = { confirmClear = true }, enabled = memories.isNotEmpty()) { Text("清空全部") }
                 }
             }

@@ -11,7 +11,7 @@ on:
         default: ff0d78720bd4303830badaa70c60d3da669d5fe6c6056ca6750880bb1ec59cdb
         required: true
   push:
-    branches: [main, 'codex/**']
+    branches: [main]
     paths: ['scripts/device-smoke.py', '.github/workflows/ui-validation.yml']
 permissions:
   contents: write

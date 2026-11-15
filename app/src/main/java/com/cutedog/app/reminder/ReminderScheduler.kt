@@ -51,7 +51,15 @@ class ReminderScheduler(context: Context) {
         val now = System.currentTimeMillis()
         repository.list().forEach { stored ->
             var item = stored
-            // Recover if the process died between delivery and writing the next recurrence.
+            if (!item.completed && ReminderTime.alarmAt(item) <= now && !repository.wasDelivered(item.id, normalToken(item.dueAt))) {
+                repository.claimDelivery(item.id, normalToken(item.dueAt), expectedDue = item.dueAt)
+            }
+            if (!item.completed && item.snoozedUntil in 1..now) {
+                repository.claimDelivery(item.id, "snooze:${item.snoozedUntil}", expectedSnooze = item.snoozedUntil)
+                repository.setSnooze(item.id, 0)
+                item = item.copy(snoozedUntil = 0)
+            }
+            // A captured outbox entry survives a process crash even if notification delivery did not.
             if (!item.completed && item.repeat != "none" && repository.wasDelivered(item.id, normalToken(item.dueAt))) {
                 ReminderTime.nextOccurrence(item, now)?.let { next ->
                     if (repository.advance(item.id, item.dueAt, next)) item = item.copy(dueAt = next)
@@ -59,6 +67,32 @@ class ReminderScheduler(context: Context) {
             }
             schedule(item)
         }
+        retryPending()
+    }
+
+    fun retryPending(): Int = ReminderOutbox(context).retryPending()
+
+    fun completeOccurrence(id: Long, occurrenceAt: Long? = null) {
+        val db = repository.database
+        db.beginTransaction()
+        try {
+            val item = repository.get(id)
+            if (item != null) {
+                val occurrence = occurrenceAt ?: item.dueAt
+                if (item.repeat == "none") {
+                    if (item.dueAt == occurrence) repository.setCompleted(id, true)
+                } else if (item.dueAt == occurrence) {
+                    repository.claimDelivery(id, normalToken(occurrence), expectedDue = occurrence)
+                    ReminderTime.nextOccurrence(item, System.currentTimeMillis())?.let { repository.advance(id, occurrence, it) }
+                }
+                // Capture and acknowledge atomically: a concurrent retry cannot see a future occurrence as pending.
+                repository.acknowledgeDelivery(id, normalToken(occurrence))
+                repository.setSnooze(id, 0)
+            }
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
+        repository.get(id)?.let(::schedule)
+        dismissNotification(id)
     }
 
     private fun scheduleAlarm(timestamp: Long, operation: PendingIntent) {
@@ -86,6 +120,7 @@ class ReminderScheduler(context: Context) {
         const val ACTION_DISMISS = "com.cutedog.app.reminder.DISMISS"
         const val EXTRA_ID = "reminder_id"
         const val EXTRA_OCCURRENCE = "occurrence_at"
+        const val EXTRA_TOKEN = "delivery_token"
         const val EVENT_REMINDER = "com.cutedog.app.REMINDER_EVENT"
         internal fun normalToken(due: Long) = "due:$due"
         internal fun intent(context: Context, id: Long, action: String) = Intent(context, ReminderReceiver::class.java)

@@ -16,6 +16,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -45,6 +47,8 @@ internal fun SettingsScreen(onNotificationPermission: () -> Unit, onRefresh: () 
     var boot by remember { mutableStateOf(prefs.boot) }
     var reduced by remember { mutableStateOf(prefs.reducedMotion) }
     var haptics by remember { mutableStateOf(prefs.haptics) }
+    var sound by remember { mutableStateOf(prefs.soundEnabled) }
+    var volume by remember { mutableFloatStateOf(prefs.soundVolume) }
     var dailyEnabled by remember { mutableStateOf(daily.enabled) }
     var hour by remember { mutableStateOf(daily.hour.toString()) }
     var quietStart by remember { mutableStateOf(daily.quietStart.toString()) }
@@ -53,6 +57,9 @@ internal fun SettingsScreen(onNotificationPermission: () -> Unit, onRefresh: () 
     var aiSettings by remember { mutableStateOf(false) }
     var helpVisible by remember { mutableStateOf(false) }
     var policyVisible by remember { mutableStateOf(false) }
+    var regionsVisible by rememberSaveable { mutableStateOf(false) }
+    var gesturesVisible by rememberSaveable { mutableStateOf(false) }
+    var introductionVisible by rememberSaveable { mutableStateOf(false) }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     var permissionRevision by remember { mutableIntStateOf(0) }
     DisposableEffect(lifecycle) {
@@ -60,6 +67,7 @@ internal fun SettingsScreen(onNotificationPermission: () -> Unit, onRefresh: () 
         lifecycle.addObserver(observer)
         onDispose { lifecycle.removeObserver(observer) }
     }
+    if (introductionVisible) { OnboardingScreen { introductionVisible = false }; return }
     val overlay = remember(permissionRevision) { Settings.canDrawOverlays(context) }
     val notifications = remember(permissionRevision) { context.getSystemService(NotificationManager::class.java).areNotificationsEnabled() }
     val precise = remember(permissionRevision) { Build.VERSION.SDK_INT < 31 || context.getSystemService(AlarmManager::class.java).canScheduleExactAlarms() }
@@ -72,7 +80,7 @@ internal fun SettingsScreen(onNotificationPermission: () -> Unit, onRefresh: () 
             catch (e: Exception) { context.message("系统暂时未允许启动桌宠，请保持应用在前台后重试。") }
         }
     }
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp).testTag("pet_settings_screen"), verticalArrangement = Arrangement.spacedBy(20.dp)) {
         Spacer(Modifier.height(4.dp))
         Text("你的小狗，你的节奏", style = MaterialTheme.typography.headlineMedium)
         Text("安静陪伴，也认真照顾每一件小事。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -91,7 +99,7 @@ internal fun SettingsScreen(onNotificationPermission: () -> Unit, onRefresh: () 
                 TextButton(onClick = { OverlayService.stop(context); context.message("桌宠已停止。备忘提醒仍会保留。") }) { Text("停止桌宠") }
             }
             HorizontalDivider()
-            Text("显示大小 · ${size.toInt()} dp", style = MaterialTheme.typography.labelLarge)
+            Text("显示大小", style = MaterialTheme.typography.labelLarge)
             Slider(size, { size = it }, valueRange = 96f..220f, onValueChangeFinished = { prefs.size = size.toInt() })
             Text("不透明度 · ${(opacity * 100).toInt()}%", style = MaterialTheme.typography.labelLarge)
             Slider(opacity, { opacity = it }, valueRange = .3f..1f, onValueChangeFinished = { prefs.opacity = opacity })
@@ -103,6 +111,13 @@ internal fun SettingsScreen(onNotificationPermission: () -> Unit, onRefresh: () 
             SettingSwitch("开机后恢复陪伴", "受系统后台启动限制；必要时从通知或应用内恢复。", boot) { boot = it; prefs.boot = it }
             SettingSwitch("减少动态效果", "降低自主动作强度，减少视觉干扰。", reduced) { reduced = it; prefs.reducedMotion = it }
             SettingSwitch("轻触振动", "仅用于你主动与小狗互动时。", haptics) { haptics = it; prefs.haptics = it }
+            SettingSwitch("互动音效", "默认关闭；静音、勿扰与休息时不主动发声。", sound) { sound = it; prefs.soundEnabled = it }
+            if (sound) {
+                Text("音效音量", style = MaterialTheme.typography.labelLarge)
+                Slider(volume, { volume = it }, valueRange = 0f.. .7f, onValueChangeFinished = { prefs.soundVolume = volume })
+            }
+            OutlinedButton(onClick = { regionsVisible = true }, modifier = Modifier.fillMaxWidth().testTag("pet_regions")) { Text("活动范围与避让区域") }
+            OutlinedButton(onClick = { gesturesVisible = true }, modifier = Modifier.fillMaxWidth().testTag("pet_gestures")) { Text("手势与默认位置") }
             TextButton(onClick = { helpVisible = true }) { Text("查看互动方式") }
         }
         SoftCard(Modifier.fillMaxWidth()) {
@@ -140,10 +155,13 @@ internal fun SettingsScreen(onNotificationPermission: () -> Unit, onRefresh: () 
             Text("事项、聊天与记忆默认保存在本机；联网聊天需使用你自己的模型服务。没有扣分、饥饿惩罚或强制互动。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             OutlinedButton(onClick = { aiSettings = true }, modifier = Modifier.fillMaxWidth()) { Text("模型服务设置") }
             TextButton(onClick = { policyVisible = true }) { Text("隐私与使用说明") }
+            TextButton(onClick = { introductionVisible = true }) { Text("重新看看新手引导") }
         }
         Text("CuteDog · 用温柔陪伴日常\nAndroid 原生 · 本地优先", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.align(Alignment.CenterHorizontally))
         Spacer(Modifier.height(12.dp))
     }
+    if (regionsVisible) PetRegionEditor { regionsVisible = false }
+    if (gesturesVisible) GestureSettingsDialog { gesturesVisible = false }
     if (historyVisible) QuoteHistoryDialog { historyVisible = false; onRefresh() }
     if (aiSettings) AiSettingsDialog { aiSettings = false }
     if (helpVisible) AlertDialog(onDismissRequest = { helpVisible = false }, title = { Text("和小狗相处的小方法") }, text = { Text("轻触：引起注意或打开应用。\n\n短距离轻抚：给小狗一点温柔的回应。\n\n长按后拖动：移动桌宠，松手后靠近边缘。\n\n临时隐藏：在本页或常驻通知中操作；需要时再恢复。\n\n锁定位置与减少动态效果可在此页调整。桌宠不会识别其他应用中的图标或文字。") }, confirmButton = { TextButton(onClick = { helpVisible = false }) { Text("知道啦") } })
@@ -176,7 +194,7 @@ private fun QuoteHistoryDialog(onDismiss: () -> Unit) {
     var revision by remember { mutableIntStateOf(0) }
     LaunchedEffect(favoritesOnly, revision) { quotes = withContext(Dispatchers.IO) { if (favoritesOnly) repository.favorites() else repository.history() } }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Surface(Modifier.fillMaxWidth().fillMaxHeight(.9f).padding(horizontal = 14.dp), shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.background) {
+        Surface(Modifier.widthIn(max = 680.dp).fillMaxWidth().fillMaxHeight(.9f).padding(horizontal = 14.dp), shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.background) {
             Column(Modifier.padding(22.dp)) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Text("把温柔收藏起来", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f)); TextButton(onClick = onDismiss) { Text("关闭") } }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { FilterChip(!favoritesOnly, { favoritesOnly = false }, label = { Text("历史") }); FilterChip(favoritesOnly, { favoritesOnly = true }, label = { Text("珍藏") }) }

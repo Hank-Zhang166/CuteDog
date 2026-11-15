@@ -36,4 +36,14 @@ class ChatPolicyTest {
         assertEquals(24, bounded.size)
         assertEquals(200L, bounded.last().id)
     }
+
+    @Test fun messageBoundaryNeverSplitsEmojiOrSilentlyCutsLatestQuestion() {
+        val history = listOf(ChatMessage(1, "user", "旧的问题🐾", 1), ChatMessage(2, "user", "新的问题🐾", 2))
+        assertEquals(listOf(history.last()), ChatPolicy.boundedHistory(history, 8))
+        assertThrows(IllegalArgumentException::class.java) { ChatPolicy.boundedHistory(history, 2) }
+    }
+
+    @Test fun oversizedModelReplyIsAnExplicitFailure() {
+        assertThrows(IllegalArgumentException::class.java) { ChatPolicy.parseReply("x".repeat(20_001)) }
+    }
 }

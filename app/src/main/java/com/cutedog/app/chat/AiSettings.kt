@@ -11,17 +11,19 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
 /** Only encrypted API-key ciphertext is persisted; the AES key never leaves Android Keystore. */
-class AiSettings(context: Context) {
-    private val prefs = context.applicationContext.getSharedPreferences("ai_settings", Context.MODE_PRIVATE)
+class AiSettings private constructor(context: Context, preferenceName: String, private val keyAlias: String) {
+    constructor(context: Context) : this(context, "ai_settings", KEY_ALIAS)
+    internal constructor(context: Context, testNamespace: String) : this(context, "ai_settings_$testNamespace", "cutedog.ai.$testNamespace")
+    private val prefs = context.applicationContext.getSharedPreferences(preferenceName, Context.MODE_PRIVATE)
 
     var endpoint: String
-        get() = prefs.getString("endpoint", "https://api.openai.com/v1")!!
+        get() = prefs.getString("endpoint", "https://api.deepseek.com")!!
         set(value) {
             ChatPolicy.completionUrl(value)
             prefs.edit().putString("endpoint", value.trim().trimEnd('/')).apply()
         }
     var model: String
-        get() = prefs.getString("model", "gpt-4.1-mini")!!
+        get() = prefs.getString("model", "deepseek-flash")!!
         set(value) {
             val clean = value.trim()
             require(clean.isNotEmpty() && clean.length <= 128 && clean.none { it.isISOControl() }) {
@@ -64,10 +66,10 @@ class AiSettings(context: Context) {
 
     private fun secretKey(): SecretKey = synchronized(KEY_LOCK) {
         val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-        (store.getKey(KEY_ALIAS, null) as? SecretKey) ?: KeyGenerator.getInstance(
+        (store.getKey(keyAlias, null) as? SecretKey) ?: KeyGenerator.getInstance(
             KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore",
         ).apply {
-            init(KeyGenParameterSpec.Builder(KEY_ALIAS, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
+            init(KeyGenParameterSpec.Builder(keyAlias, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
                 .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
                 .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
                 .setKeySize(256)

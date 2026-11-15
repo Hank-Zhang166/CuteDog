@@ -16,6 +16,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -28,45 +31,66 @@ import java.time.LocalDateTime
 import java.time.ZoneId
 
 @Composable
-internal fun RemindersScreen(reminders: List<Reminder>, onAdd: () -> Unit, onEdit: (Reminder) -> Unit, onComplete: (Reminder) -> Unit) {
+internal fun RemindersScreen(reminders: List<Reminder>, onAdd: () -> Unit, onEdit: (Reminder) -> Unit, onComplete: (Reminder) -> Unit, onChanged: () -> Unit = {}) {
+    val context = LocalContext.current
     var search by rememberSaveable { mutableStateOf("") }
     var filter by rememberSaveable { mutableIntStateOf(0) }
     var prioritySort by rememberSaveable { mutableStateOf(false) }
+    var category by rememberSaveable { mutableStateOf<String?>(null) }
+    var selectedDate by rememberSaveable { mutableStateOf<String?>(null) }
+    var backups by rememberSaveable { mutableStateOf(false) }
+    var missed by rememberSaveable { mutableStateOf(false) }
     val now = System.currentTimeMillis()
     val today = LocalDate.now()
     val selected = reminders.filter { item ->
         val date = Instant.ofEpochMilli(item.dueAt).atZone(ZoneId.systemDefault()).toLocalDate()
         val matches = when (filter) { 1 -> !item.completed && date == today; 2 -> !item.completed && item.dueAt > now; 3 -> !item.completed && item.dueAt < now; 4 -> item.completed; else -> !item.completed }
-        matches && (item.title + item.details + item.category).contains(search, ignoreCase = true)
+        matches && (item.title + item.details).contains(search, ignoreCase = true) && (category == null || item.category == category) && (selectedDate == null || date.toString() == selectedDate)
     }.let { if (prioritySort) it.sortedWith(compareByDescending<Reminder> { r -> r.priority }.thenBy { r -> r.dueAt }) else it.sortedBy { r -> r.dueAt } }
-    Column(Modifier.fillMaxSize().padding(horizontal = 24.dp)) {
-        Spacer(Modifier.height(24.dp))
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) { Text("把小事记好", style = MaterialTheme.typography.headlineLarge); Text("腾一点空间，给生活。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-            FilledTonalButton(onClick = onAdd, contentPadding = PaddingValues(horizontal = 16.dp)) { Text("＋ 新建") }
+    Column(Modifier.fillMaxSize().padding(horizontal = 24.dp).testTag("reminders_screen")) {
+        Spacer(Modifier.height(18.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("把小事记好", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.weight(1f))
+            FilledTonalButton(onClick = onAdd, contentPadding = PaddingValues(horizontal = 16.dp), modifier = Modifier.testTag("reminder_new")) { Text("＋ 新建") }
         }
-        Spacer(Modifier.height(20.dp))
-        OutlinedTextField(search, { search = it }, modifier = Modifier.fillMaxWidth(), singleLine = true, label = { Text("搜索标题、内容或分类") }, shape = RoundedCornerShape(18.dp))
-        Spacer(Modifier.height(10.dp))
-        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf("待办", "今天", "即将", "逾期", "完成").forEachIndexed { index, label -> FilterChip(filter == index, { filter = index }, label = { Text(label) }) }
-        }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Text("${selected.size} 件事项", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelLarge)
-            TextButton(onClick = { prioritySort = !prioritySort }) { Text(if (prioritySort) "优先级排序 ↓" else "时间排序 ↓") }
-        }
-        LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            if (selected.isEmpty()) item { EmptyNote(if (search.isNotEmpty()) "暂时没有找到" else "这里还很清爽", if (search.isNotEmpty()) "换一个词，或者试试其他分类。" else "点右上角新建，添加一件你在意的小事。") }
+        LazyColumn(Modifier.weight(1f).testTag("reminders_list"), contentPadding = PaddingValues(top = 14.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            item {
+                OutlinedTextField(search, { search = it }, modifier = Modifier.fillMaxWidth().testTag("reminder_search"), singleLine = true, label = { Text("搜索标题或内容") }, shape = RoundedCornerShape(18.dp))
+            }
+            item {
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("待办", "今天", "即将", "逾期", "完成").forEachIndexed { index, label -> FilterChip(filter == index, { filter = index }, label = { Text(label) }, modifier = Modifier.testTag("reminder_filter_$index")) }
+                }
+            }
+            if (reminders.isNotEmpty()) item {
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(category == null, { category = null }, label = { Text("所有分类") })
+                    reminders.map { it.category }.distinct().sorted().forEach { value -> FilterChip(category == value, { category = value }, label = { Text(value) }) }
+                }
+            }
+            item {
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TextButton(onClick = { val date = selectedDate?.let(LocalDate::parse) ?: today; DatePickerDialog(context, { _, y, m, d -> selectedDate = LocalDate.of(y, m + 1, d).toString() }, date.year, date.monthValue - 1, date.dayOfMonth).show() }) { Text(selectedDate ?: "选个日期") }
+                    if (selectedDate != null) TextButton(onClick = { selectedDate = null }) { Text("清除日期") }
+                    TextButton(onClick = { prioritySort = !prioritySort }) { Text(if (prioritySort) "优先级 ↓" else "时间 ↓") }
+                    TextButton(onClick = { backups = true }, modifier = Modifier.testTag("reminder_backup")) { Text("备份") }
+                    TextButton(onClick = { missed = true }, modifier = Modifier.testTag("reminder_delivery")) { Text("提醒记录") }
+                }
+            }
+            item { Text("${selected.size} 件事项", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelLarge) }
+            if (selected.isEmpty()) item { EmptyNote(if (search.isNotEmpty() || category != null || selectedDate != null) "暂时没有找到" else "这里还很清爽", if (search.isNotEmpty() || category != null || selectedDate != null) "换一个词，或者试试其他日期和分类。" else "点右上角新建，添加一件你在意的小事。") }
             items(selected, key = { it.id }) { item -> ReminderRow(item, { onEdit(item) }, { onComplete(item) }) }
         }
     }
+    if (backups) ReminderBackupDialog({ backups = false }, onChanged)
+    if (missed) ReminderDeliveryDialog(onDismiss = { missed = false }, onEdit = { missed = false; onEdit(it) }, onChanged = onChanged)
 }
 
 @Composable
 internal fun ReminderRow(item: Reminder, onClick: () -> Unit, onComplete: () -> Unit) {
-    Surface(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable(onClick = onClick), shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surface) {
+    Surface(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).testTag("reminder_${item.id}").clickable(onClick = onClick), shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surface) {
         Row(Modifier.padding(start = 8.dp, end = 16.dp, top = 14.dp, bottom = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-            Checkbox(item.completed, { onComplete() })
+            Checkbox(item.completed, { onComplete() }, modifier = Modifier.testTag("reminder_complete_${item.id}").semantics { contentDescription = (if (item.completed) "撤销完成：" else "完成：") + item.title })
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                 Text(item.title, style = MaterialTheme.typography.titleMedium, textDecoration = if (item.completed) TextDecoration.LineThrough else null)
                 val overdue = !item.completed && item.dueAt < System.currentTimeMillis()
@@ -104,7 +128,7 @@ internal fun ReminderEditor(original: Reminder?, saving: Boolean = false, onDism
         }, date.year, date.monthValue - 1, date.dayOfMonth).show()
     }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Surface(Modifier.fillMaxWidth().fillMaxHeight(.94f).padding(horizontal = 12.dp), shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.background) {
+        Surface(Modifier.widthIn(max = 680.dp).fillMaxWidth().fillMaxHeight(.94f).padding(horizontal = 12.dp), shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.background) {
             Column(Modifier.padding(22.dp)) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Text(if (original == null) "记一件小事" else "编辑事项", style = MaterialTheme.typography.titleLarge)
@@ -112,13 +136,13 @@ internal fun ReminderEditor(original: Reminder?, saving: Boolean = false, onDism
                 }
                 Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text("重要的事情，我陪你一起记得。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    OutlinedTextField(title, { title = it.take(200) }, modifier = Modifier.fillMaxWidth(), label = { Text("标题（必填）") }, singleLine = true, shape = RoundedCornerShape(16.dp))
+                    OutlinedTextField(title, { title = it.take(200) }, modifier = Modifier.fillMaxWidth().testTag("reminder_title"), label = { Text("标题（必填）") }, singleLine = true, shape = RoundedCornerShape(16.dp))
                     TextButton(onClick = {
                         val draft = ReminderDraftParser.parse(title)
                         if (draft == null) error = "未识别到明确的未来时间。可试试「明天下午三点记得给老师发邮件」。"
                         else { title = draft.title; dueAt = draft.dueAt; error = null; context.message(draft.explanation) }
                     }, enabled = title.isNotBlank()) { Text("从标题识别时间 · 保存前请确认") }
-                    OutlinedTextField(details, { details = it.take(10000) }, modifier = Modifier.fillMaxWidth(), label = { Text("详细内容") }, minLines = 3, maxLines = 6, shape = RoundedCornerShape(16.dp))
+                    OutlinedTextField(details, { details = it.take(10000) }, modifier = Modifier.fillMaxWidth().testTag("reminder_details"), label = { Text("详细内容") }, minLines = 3, maxLines = 6, shape = RoundedCornerShape(16.dp))
                     OutlinedButton(onClick = { pickTime() }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) { Text("时间  ${formatTime(dueAt)}", modifier = Modifier.padding(vertical = 8.dp)) }
                     Text("重复方式", style = MaterialTheme.typography.labelLarge)
                     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -142,7 +166,7 @@ internal fun ReminderEditor(original: Reminder?, saving: Boolean = false, onDism
                             ?: Reminder(title = title.trim(), details = details.trim(), dueAt = dueAt, leadMinutes = minutes!!, repeat = repeat, priority = priority, category = category.trim())
                         onSave(item)
                     }
-                }, enabled = !saving, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp), shape = RoundedCornerShape(16.dp)) { Text(if (saving) "正在保存…" else "保存事项") }
+                }, enabled = !saving, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp).testTag("reminder_save"), shape = RoundedCornerShape(16.dp)) { Text(if (saving) "正在保存…" else "保存事项") }
             }
         }
     }

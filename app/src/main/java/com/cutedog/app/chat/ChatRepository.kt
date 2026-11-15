@@ -8,8 +8,10 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /** Local-only history and explicitly curated memory. No automatic extraction or upload. */
-class ChatRepository(context: Context) {
-    private val helper = Store.get(context.applicationContext)
+class ChatRepository private constructor(context: Context, databaseName: String, @Suppress("UNUSED_PARAMETER") isolated: Boolean) {
+    constructor(context: Context) : this(context, "companion.db", false)
+    internal constructor(context: Context, databaseName: String) : this(context, databaseName, true)
+    private val helper = Store.get(context.applicationContext, databaseName)
 
     fun messages(): List<ChatMessage> = buildList {
         helper.readableDatabase.query("messages", null, null, null, null, null, "id ASC").use { c ->
@@ -34,6 +36,20 @@ class ChatRepository(context: Context) {
     }
 
     fun clear() { helper.writableDatabase.delete("messages", null, null) }
+
+    fun deleteMessage(id: Long) {
+        helper.writableDatabase.delete("messages", "id = ?", arrayOf(id.toString()))
+    }
+
+    fun exportConversation(): String = JSONObject().apply {
+        put("format", "CuteDog conversation"); put("version", 1)
+        put("exportedAt", System.currentTimeMillis())
+        put("messages", JSONArray().apply {
+            messages().forEach { message -> put(JSONObject()
+                .put("id", message.id).put("role", message.role)
+                .put("content", message.content).put("createdAt", message.createdAt)) }
+        })
+    }.toString(2)
 
     fun memories(): List<Memory> = buildList {
         helper.readableDatabase.query("memories", null, null, null, null, null, "id ASC").use { c ->
@@ -67,7 +83,7 @@ class ChatRepository(context: Context) {
         })
     }.toString(2)
 
-    private class Store(context: Context) : SQLiteOpenHelper(context, "companion.db", null, 1) {
+    private class Store(context: Context, databaseName: String) : SQLiteOpenHelper(context, databaseName, null, 1) {
         init { setWriteAheadLoggingEnabled(true) }
         override fun onCreate(db: SQLiteDatabase) {
             db.execSQL("CREATE TABLE messages (id INTEGER PRIMARY KEY AUTOINCREMENT, role TEXT NOT NULL CHECK(role IN ('user','assistant')), content TEXT NOT NULL, created_at INTEGER NOT NULL)")
@@ -77,9 +93,9 @@ class ChatRepository(context: Context) {
             error("Missing non-destructive migration from $oldVersion to $newVersion")
         }
         companion object {
-            @Volatile private var instance: Store? = null
-            fun get(context: Context): Store = instance ?: synchronized(this) {
-                instance ?: Store(context).also { instance = it }
+            private val instances = mutableMapOf<String, Store>()
+            fun get(context: Context, databaseName: String): Store = synchronized(this) {
+                instances.getOrPut(databaseName) { Store(context, databaseName) }
             }
         }
     }
