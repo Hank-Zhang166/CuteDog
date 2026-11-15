@@ -64,41 +64,124 @@ class OverlayService : Service() {
                 val now = SystemClock.uptimeMillis()
                 val dt = if (lastMotion == 0L) .05f else ((now - lastMotion) / 1000f).coerceAtMost(.1f)
                 lastMotion = now
-                val speed = pet.locomotionSpeed * screenWidth
-                if (route.isEmpty() && speed > 2 && spaceAvailable) {
-                    repeat(16) {
-                        if (route.isEmpty()) {
-                            val candidate = PetSpace.Point(kotlin.random.Random.nextFloat() * (spaceArea.right - spaceArea.left) + spaceArea.left,
-                                kotlin.random.Random.nextFloat() * (spaceArea.bottom - spaceArea.top) + spaceArea.top)
-                            if (PetSpace.valid(candidate, spaceArea, obstacles) && candidate.distance(position) > params.width * .6f)
-                                route = PetSpace.route(position, candidate, spaceArea, obstacles).toMutableList()
-                        }
-                    }
-                }
-                route.firstOrNull()?.let { target ->
-                    val distance = target.distance(position)
-                    if (distance < 1f) route.removeAt(0)
-                    else {
-                        val travel = min(distance, speed * dt)
-                        val next = PetSpace.Point(position.x + (target.x - position.x) / distance * travel, position.y + (target.y - position.y) / distance * travel)
-                        if (PetSpace.valid(next, spaceArea, obstacles) && PetSpace.clearSegment(position, next, obstacles)) {
-                            pet.movementDirection = if (next.x >= position.x) 1f else -1f
-                            position = next; params.x = (position.x - params.width / 2f).toInt(); params.y = (position.y - params.height / 2f).toInt()
-                            pet.spatialDepth = .88f + .2f * (position.y / screenHeight)
-                            safelyUpdate()
-                        } else route.clear()
-                    }
-                }
+                if (pet.usesAuthoredFrames) moveAuthoredFrames() else moveLegacyPreview(dt)
+            } else {
+                pet.setAuthoredTravelAllowed(false)
+                lastMotion = 0
             }
             seenPosition = pet.behavior.position
             if (attached && !hidden && pet.isShown && getSystemService(PowerManager::class.java).isInteractive)
-                main.postDelayed(this, if (prefs.locked || prefs.reducedMotion) 1000 else if (pet.locomotionSpeed > .001f) 50 else 250)
+                main.postDelayed(this, if (prefs.locked || prefs.reducedMotion) 1000
+                    else if ((pet.usesAuthoredFrames && (pet.authoredTravelRequested || pet.authoredTravelInProgress)) || pet.locomotionSpeed > .001f) 50 else 250)
+        }
+    }
+
+    /** The current authored contract measures horizontal motion only, never a guessed 2-D speed. */
+    private fun moveAuthoredFrames() {
+        if (!spaceAvailable) {
+            route.clear(); pet.setAuthoredTravelAllowed(false); return
+        }
+        if (!pet.authoredTravelRequested) {
+            // An interaction/stop request must not erase the old heading's measured deceleration.
+            pet.setAuthoredTravelAllowed(pet.authoredTravelInProgress)
+            if (!pet.authoredTravelInProgress) route.clear()
+            return
+        }
+        if (route.isEmpty()) {
+            // Independent horizontal candidates preserve the measured projected foot displacement.
+            // A future authored projectedTravelVector contract is required for sloped/vertical paths.
+            repeat(16) {
+                if (route.isEmpty()) {
+                    val candidate = PetSpace.Point(kotlin.random.Random.nextFloat() * (spaceArea.right - spaceArea.left) + spaceArea.left, position.y)
+                    val continuingHeading = if (pet.authoredTravelInProgress) pet.authoredActualHeading else 0
+                    if ((continuingHeading == 0 || (candidate.x - position.x) * continuingHeading > 0f) &&
+                        abs(candidate.x - position.x) > params.width * .6f && PetSpace.valid(candidate, spaceArea, obstacles) &&
+                        PetSpace.clearSegment(position, candidate, obstacles)) route.add(candidate)
+                }
+            }
+        }
+        val target = route.firstOrNull()
+        if (target == null || abs(target.y - position.y) > .01f) {
+            route.clear(); pet.stopAuthoredTravel(); pet.setAuthoredTravelAllowed(pet.authoredTravelInProgress); return
+        }
+        val remaining = target.x - position.x
+        if (abs(remaining) < .5f) {
+            route.clear(); pet.stopAuthoredTravel(); pet.setAuthoredTravelAllowed(pet.authoredTravelInProgress); return
+        }
+        val heading = if (remaining > 0) 1 else -1
+        val actualHeading = pet.authoredActualHeading
+        val stopping = pet.authoredStoppingDistancePixels
+        if (pet.authoredTravelInProgress && stopping != null &&
+            ((actualHeading == heading && abs(remaining) <= stopping + pet.authoredPlanningMarginPixels) ||
+                (pet.authoredDesiredHeading == actualHeading && remaining * actualHeading < 0f))) {
+            pet.stopAuthoredTravel()
+            pet.setAuthoredTravelAllowed(true)
+            return
+        }
+        if (!pet.requestAuthoredHeading(heading)) { pet.setAuthoredTravelAllowed(false); return }
+        pet.setAuthoredTravelAllowed(true)
+    }
+
+    /** Runs in PetView's successful-frame callback, before its bitmap is invalidated for this vsync. */
+    private fun authoredMovementHostReady(): Boolean = attached && !hidden && bubble == null && snapTask == null && pet.isShown &&
+        !dragging && !prefs.locked && !prefs.reducedMotion && spaceAvailable
+
+    private fun allowAuthoredStep(pixels: Float): Boolean {
+        if (!authoredMovementHostReady() || !pixels.isFinite()) return false
+        val next = PetSpace.Point(position.x + pixels, position.y)
+        return PetSpace.valid(next, spaceArea, obstacles) && PetSpace.clearSegment(position, next, obstacles)
+    }
+
+    private fun consumeAuthoredMovement(heading: Int) {
+        if (!attached || hidden || bubble != null || snapTask != null || !pet.isShown || dragging || prefs.locked ||
+            prefs.reducedMotion || !spaceAvailable) {
+            pet.setAuthoredTravelAllowed(false); return
+        }
+        // The slower route planner never consumes this queue. Each committed-frame callback does.
+        val submittedPixels = pet.consumeAuthoredTravelPixels(heading)
+        if (submittedPixels == 0f || submittedPixels * heading < 0f) return
+        if (!allowAuthoredStep(submittedPixels)) {
+            route.clear(); pet.setAuthoredTravelAllowed(false); return
+        }
+        position = PetSpace.Point(position.x + submittedPixels, position.y)
+        params.x = (position.x - params.width / 2f).toInt()
+        pet.movementDirection = heading.toFloat()
+        safelyUpdate()
+    }
+
+    private fun moveLegacyPreview(dt: Float) {
+        val speed = pet.locomotionSpeed * screenWidth
+        if (route.isEmpty() && speed > 2 && spaceAvailable) {
+            repeat(16) {
+                if (route.isEmpty()) {
+                    val candidate = PetSpace.Point(kotlin.random.Random.nextFloat() * (spaceArea.right - spaceArea.left) + spaceArea.left,
+                        kotlin.random.Random.nextFloat() * (spaceArea.bottom - spaceArea.top) + spaceArea.top)
+                    if (PetSpace.valid(candidate, spaceArea, obstacles) && candidate.distance(position) > params.width * .6f)
+                        route = PetSpace.route(position, candidate, spaceArea, obstacles).toMutableList()
+                }
+            }
+        }
+        route.firstOrNull()?.let { target ->
+            val distance = target.distance(position)
+            if (distance < 1f) route.removeAt(0)
+            else {
+                val travel = min(distance, speed * dt)
+                val next = PetSpace.Point(position.x + (target.x - position.x) / distance * travel, position.y + (target.y - position.y) / distance * travel)
+                if (PetSpace.valid(next, spaceArea, obstacles) && PetSpace.clearSegment(position, next, obstacles)) {
+                    pet.movementDirection = if (next.x >= position.x) 1f else -1f
+                    position = next; params.x = (position.x - params.width / 2f).toInt(); params.y = (position.y - params.height / 2f).toInt()
+                    pet.spatialDepth = .88f + .2f * (position.y / screenHeight)
+                    safelyUpdate()
+                } else route.clear()
+            }
         }
     }
     override fun onCreate() {
         super.onCreate()
         prefs = PetSettings(this); wm = getSystemService(WindowManager::class.java)
         pet = PetView(this)
+        pet.onAuthoredFrameCommitted = ::consumeAuthoredMovement
+        pet.onAuthoredStepAllowed = ::allowAuthoredStep
         pet.setOnApplyWindowInsetsListener { _, insets ->
             if (Build.VERSION.SDK_INT < 30) {
                 val cutout = if (Build.VERSION.SDK_INT >= 28) insets.displayCutout?.let {
@@ -126,6 +209,7 @@ class OverlayService : Service() {
         }
         pet.onDrag = { dx, dy, finished ->
             cancelSnap()
+            pet.setAuthoredTravelAllowed(false)
             dragging = !finished
             route.clear()
             val candidate = spaceArea.clamp(PetSpace.Point(position.x + dx, position.y + dy))
@@ -133,6 +217,7 @@ class OverlayService : Service() {
             params.x = (position.x - params.width / 2f).toInt()
             params.y = (position.y - params.height / 2f).toInt()
             floatingX = params.x.toFloat()
+            if (pet.usesAuthoredFrames) pet.spatialDepth = .88f + .2f * (position.y / max(1, screenHeight))
             dismissBubble()
             if (finished) snapToEdge() else safelyUpdate()
         }
@@ -146,6 +231,7 @@ class OverlayService : Service() {
         getSystemService(AppOpsManager::class.java).startWatchingMode(AppOpsManager.OPSTR_SYSTEM_ALERT_WINDOW, packageName, overlayPermissionListener)
     }
     private fun configure(resetPosition: Boolean = false) {
+        pet.setAuthoredTravelAllowed(false)
         cancelSnap()
         dismissBubble()
         val xFraction = if (attached && !resetPosition) params.x.toFloat() / max(1, screenWidth - params.width) else prefs.xFraction
@@ -181,6 +267,7 @@ class OverlayService : Service() {
             PetSpace.nearestFree(PetSpace.Point(params.x + half, params.y + half), spaceArea, obstacles) else null
         spaceAvailable = free != null
         free?.let { position = it; params.x = (it.x - half).toInt(); params.y = (it.y - half).toInt() }
+        if (pet.usesAuthoredFrames) pet.spatialDepth = .88f + .2f * (position.y / max(1, screenHeight))
         route.clear()
         if (!spaceAvailable) {
             android.widget.Toast.makeText(this, "活动区没有足够空间，请扩大活动区、缩小桌宠或调整禁区。", android.widget.Toast.LENGTH_LONG).show()
@@ -226,6 +313,7 @@ class OverlayService : Service() {
         try { wm.updateViewLayout(pet, params) } catch (_: SecurityException) { stopSelf() } catch (_: IllegalArgumentException) { attached = false; stopSelf() }
     }
     private fun snapToEdge() {
+        pet.setAuthoredTravelAllowed(false)
         cancelSnap()
         val start = params.x
         val edge = if (position.x < (spaceArea.left + spaceArea.right) / 2) spaceArea.left else spaceArea.right
@@ -282,6 +370,7 @@ class OverlayService : Service() {
     private fun attachBubble(view: PetBubbleView) {
         if (hidden || !spaceAvailable || !getSystemService(PowerManager::class.java).isInteractive || getSystemService(KeyguardManager::class.java).isKeyguardLocked) return
         cancelSnap()
+        pet.setAuthoredTravelAllowed(false)
         dismissBubble()
         val dp = resources.displayMetrics.density
         val margin = (8 * dp).toInt()

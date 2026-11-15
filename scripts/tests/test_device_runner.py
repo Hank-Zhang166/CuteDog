@@ -57,6 +57,7 @@ elif args==['logcat','-c'] and os.environ.get('FIXTURE_LOGCAT_CLEAR_FAIL')=='1':
 elif args[:3]==['shell','am','force-stop']: pass
 elif args[:2]==['logcat','-d']: print('fixture diagnostics only')
 elif args[:3]==['shell','dumpsys','meminfo']: print('fixture memory unavailable')
+elif args[:3]==['shell','test','-d']: raise SystemExit(1)  # No UI failure files in this host fixture.
 else: raise SystemExit('Unexpected fixture adb call: '+repr(args))
 '''
 

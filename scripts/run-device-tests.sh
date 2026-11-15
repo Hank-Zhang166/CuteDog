@@ -202,6 +202,7 @@ run_phase() {
   # Gradle 8.11.1 --rerun targets this test task only. Rebuilding all dependencies
   # between phases could silently replace the APK bytes recorded before installation.
   local args=(:app:connectedDebugAndroidTest --rerun --no-daemon --console=plain --stacktrace -Pandroid.injected.androidTest.leaveApksInstalledAfterRun=true)
+  args+=("-Pandroid.testInstrumentationRunnerArguments.cuteDogEvidencePhase=$phase")
   if [[ "$phase" == denied ]]; then args+=("-Pandroid.testInstrumentationRunnerArguments.class=$denied_methods"); fi
   set +e
   stage "${phase}_instrumentation"
@@ -209,8 +210,14 @@ run_phase() {
   result_code=$?
   set -e
   stage "${phase}_collect"
-  adb_cmd logcat -d -v brief -s CuteDogPerformance:I CuteDogFrameCache:I AndroidRuntime:E '*:S' >"$output_phase/selected-logcat.txt" 2>&1 || true
+  adb_cmd logcat -d -v brief -s CuteDogPerformance:I CuteDogFrameCache:I CuteDogUiEvidence:I AndroidRuntime:E '*:S' >"$output_phase/selected-logcat.txt" 2>&1 || true
   adb_cmd shell dumpsys meminfo "$package" >"$output_phase/process-memory.txt" 2>&1 || true
+  # Failure capture runs inside the test body before UI/fixture teardown. Pull only this phase's
+  # test-specific directory; no unrelated app files, settings, chats or credentials are collected.
+  local failure_remote="/sdcard/Android/data/$package/files/ui-test-evidence/$phase"
+  if adb_cmd shell test -d "$failure_remote" >"$output_phase/ui-evidence-pull.log" 2>&1; then
+    adb_cmd pull "$failure_remote" "$output_phase/ui-failures" >>"$output_phase/ui-evidence-pull.log" 2>&1 || true
+  fi
   python3 - "$output" "$phase" "$result_code" "$api" "$denied_methods" <<'PY'
 import datetime,hashlib,json,re,shutil,sys,xml.etree.ElementTree as ET
 from pathlib import Path
@@ -248,7 +255,8 @@ missing_required_skips=sorted(expected_skip-{case['id'] for case in cases if cas
 counts={status:sum(case['status']==status for case in cases) for status in ('passed','failed','error','skipped')};counts['total']=len(cases)
 apks_unchanged=all(value['unchanged'] for value in apk_provenance)
 passed=rc==0 and bool(files) and apks_unchanged and not any([missing,unexpected,duplicates,parse_errors,unexpected_skips,missing_required_skips]) and counts['failed']==0 and counts['error']==0
-summary={'phase':phase,'api':api,'status':'passed' if passed else 'failed','gradleExitCode':rc,'apksUnchanged':apks_unchanged,'counts':counts,'expectedTests':len(expected),'expectedSkipped':sorted(expected_skip),'unexpectedSkipped':unexpected_skips,'expectedSkipNotObserved':missing_required_skips,'missingTests':missing,'unexpectedTests':unexpected,'duplicateTests':duplicates,'xmlParseErrors':parse_errors,'junitFiles':files,'testCases':cases,'capturedAt':datetime.datetime.now(datetime.timezone.utc).isoformat()}
+ui_files=sorted(str(p.relative_to(out)) for p in (out/'ui-failures').rglob('*') if p.is_file()) if (out/'ui-failures').exists() else []
+summary={'phase':phase,'api':api,'status':'passed' if passed else 'failed','gradleExitCode':rc,'apksUnchanged':apks_unchanged,'counts':counts,'expectedTests':len(expected),'expectedSkipped':sorted(expected_skip),'unexpectedSkipped':unexpected_skips,'expectedSkipNotObserved':missing_required_skips,'missingTests':missing,'unexpectedTests':unexpected,'duplicateTests':duplicates,'xmlParseErrors':parse_errors,'junitFiles':files,'testCases':cases,'uiFailureEvidenceFiles':ui_files,'capturedAt':datetime.datetime.now(datetime.timezone.utc).isoformat()}
 (out/'summary.json').write_text(json.dumps(summary,ensure_ascii=False,indent=2)+'\n')
 metadata=json.loads((root/'summary.json').read_text());metadata['phases'][phase]=summary;(root/'summary.json').write_text(json.dumps(metadata,ensure_ascii=False,indent=2)+'\n')
 log=out/'selected-logcat.txt'

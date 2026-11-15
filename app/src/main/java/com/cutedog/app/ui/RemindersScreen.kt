@@ -10,16 +10,21 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -33,6 +38,8 @@ import java.time.ZoneId
 @Composable
 internal fun RemindersScreen(reminders: List<Reminder>, onAdd: () -> Unit, onEdit: (Reminder) -> Unit, onComplete: (Reminder) -> Unit, onChanged: () -> Unit = {}) {
     val context = LocalContext.current
+    val focusManager = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
     var search by rememberSaveable { mutableStateOf("") }
     var filter by rememberSaveable { mutableIntStateOf(0) }
     var prioritySort by rememberSaveable { mutableStateOf(false) }
@@ -55,7 +62,10 @@ internal fun RemindersScreen(reminders: List<Reminder>, onAdd: () -> Unit, onEdi
         }
         LazyColumn(Modifier.weight(1f).testTag("reminders_list"), contentPadding = PaddingValues(top = 14.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             item {
-                OutlinedTextField(search, { search = it }, modifier = Modifier.fillMaxWidth().testTag("reminder_search"), singleLine = true, label = { Text("搜索标题或内容") }, shape = RoundedCornerShape(18.dp))
+                OutlinedTextField(search, { search = it }, modifier = Modifier.fillMaxWidth().testTag("reminder_search"), singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(onSearch = { keyboard?.hide(); focusManager.clearFocus() }),
+                    label = { Text("搜索标题或内容") }, shape = RoundedCornerShape(18.dp))
             }
             item {
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {

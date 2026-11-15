@@ -14,6 +14,9 @@ data class ClipPlaybackFrame(
     val loading: Boolean,
     val error: String?,
     val timingWarning: String? = null,
+    val travelBlocked: Boolean = false,
+    val travelBlockedReason: String? = null,
+    val rejectedTravelTarget: String? = null,
 )
 
 /**
@@ -29,6 +32,8 @@ class FrameClipPlayer(context: Context) : Closeable {
     @Volatile private var closed = false
     private var director: ClipDirector? = null
     private var pendingRequest: String? = null
+    private var pendingHeading: Int? = null
+    private var headingAfterRequest = false
     @Volatile private var active = true
     @Volatile private var memoryPressure = false
     private var restoreAfterActiveSeconds: Double? = null
@@ -38,8 +43,25 @@ class FrameClipPlayer(context: Context) : Closeable {
     private var snapshot = ClipPlaybackFrame(null, null, 0, true, null)
     val manifest: ClipManifest? get() = loaded.get()?.manifest
     val currentClip: String? get() = director?.clipId
+    val requestedClip: String? get() = director?.requestedClip ?: pendingRequest
+    val canonicalClipId: String? get() = director?.canonicalClipId
     val canInterrupt: Boolean get() = director?.canInterrupt ?: false
+    val canTravel: Boolean get() = !closed && active && snapshot.bitmap != null &&
+        !snapshot.loading && !snapshot.travelBlocked && snapshot.error == null && snapshot.clipId == director?.clipId && director?.canTravel == true
+    val travelHeading: Int get() = if (canTravel) director?.travelHeading ?: 0 else 0
+    /** Signed canvas-width fraction for the last tick's successfully displayed frame advance. */
+    var authoredTravelDeltaFraction: Double = 0.0; private set
+    val stoppingTravelFraction: Double? get() = director?.stoppingTravelFraction
+    val maximumStepFraction: Double get() = director?.maximumStepFraction ?: 0.0
     val requiredTickRate: Int get() = currentClip?.let { manifest?.clips?.get(it)?.fps } ?: 24
+    fun nextFrameDelayMillis(elapsedSinceVsyncNanos: Long = 0L): Long {
+        val retry = when {
+            loaded.get() == null || snapshot.error != null || snapshot.travelBlocked -> 250L
+            snapshot.loading -> 16L // A lightweight cache check at the next vsync; decoding remains off-thread.
+            else -> return cadence.delayUntilNextFrameMillis(requiredTickRate, elapsedSinceVsyncNanos)
+        }
+        return (retry - elapsedSinceVsyncNanos.coerceAtLeast(0L) / 1_000_000L).coerceAtLeast(0L)
+    }
 
     init {
         val assets = context.applicationContext.assets
@@ -69,14 +91,43 @@ class FrameClipPlayer(context: Context) : Closeable {
     fun request(clipId: String): Boolean {
         if (closed) return false
         val control = director
-        if (control == null) { pendingRequest = clipId; return loaded.get()?.manifest?.clips?.containsKey(clipId) ?: true }
+        if (control == null) {
+            if (loaded.get()?.manifest?.clips?.containsKey(clipId) == false) return false
+            pendingRequest = clipId; headingAfterRequest = false
+            return true
+        }
         val accepted = control.request(clipId)
-        if (accepted) { startupError.set(null); if (active) loaded.get()?.loader?.prefetch(control.prefetchPaths()) }
+        if (accepted) { authoredTravelDeltaFraction = 0.0; startupError.set(null); if (active) loaded.get()?.loader?.prefetch(control.prefetchPaths()) }
+        return accepted
+    }
+
+    fun requestHeading(sign: Int): Boolean {
+        if (closed || ClipHeading.fromSign(sign) == null) return false
+        val control = director
+        if (control == null) {
+            if (pendingHeading == sign) return true
+            val manifest = loaded.get()?.manifest
+            if (manifest != null && manifest.headingIdle(ClipHeading.fromSign(sign)!!) == null) return false
+            pendingHeading = sign; headingAfterRequest = true
+            return true
+        }
+        val accepted = control.requestHeading(sign)
+        if (accepted) {
+            authoredTravelDeltaFraction = 0.0
+            if (active) loaded.get()?.loader?.prefetch(control.prefetchPaths())
+        }
+        return accepted
+    }
+    fun requestStop(): Boolean {
+        if (closed) return false
+        val accepted = director?.requestStop() == true
+        if (accepted && active) director?.let { loaded.get()?.loader?.prefetch(it.prefetchPaths()) }
         return accepted
     }
     fun setActive(value: Boolean) {
         if (active == value) return
         active = value; cadence.reset()
+        authoredTravelDeltaFraction = 0.0
         if (!value) {
             restoreAfterActiveSeconds = null
             loaded.get()?.loader?.cancelPrefetch()
@@ -85,6 +136,7 @@ class FrameClipPlayer(context: Context) : Closeable {
 
     fun trimMemory() {
         memoryPressure = true; restoreAfterActiveSeconds = null
+        authoredTravelDeltaFraction = 0.0
         loaded.get()?.loader?.trimMemory()
         cadence.reset()
     }
@@ -98,14 +150,19 @@ class FrameClipPlayer(context: Context) : Closeable {
         }
     }
 
-    fun tick(deltaSeconds: Double): ClipPlaybackFrame {
+    fun tick(deltaSeconds: Double, approveTravel: (Double) -> Boolean = { true },
+        approveEntry: (Int, Double) -> Boolean = { _, _ -> true }): ClipPlaybackFrame {
+        authoredTravelDeltaFraction = 0.0
         if (closed) return snapshot
         val resources = loaded.get()
         if (resources == null) return ClipPlaybackFrame(null, null, 0, startupError.get() == null, startupError.get()).also { snapshot = it }
         val control = director ?: ClipDirector(resources.manifest).also { created ->
             director = created
-            pendingRequest?.let { target -> if (!created.request(target)) startupError.set("动作不存在：$target") }
-            pendingRequest = null
+            fun applyHeading() { pendingHeading?.let { if (!created.requestHeading(it)) startupError.set("角色资源缺少所需真实朝向") } }
+            if (!headingAfterRequest) applyHeading()
+            pendingRequest?.let { target -> if (!created.request(target)) startupError.set("动作不存在或缺少所需朝向：$target") }
+            if (headingAfterRequest) applyHeading()
+            pendingRequest = null; pendingHeading = null
         }
         val loader = resources.loader
         val current = control.current
@@ -125,17 +182,31 @@ class FrameClipPlayer(context: Context) : Closeable {
         }
         // No frame skipping after a stalled decoder or a long background pause.
         val fps = resources.manifest.clips.getValue(control.clipId).fps
-        cadence.add(deltaSeconds, fps)
+        if (snapshot.travelBlocked) {
+            // A deliberate spatial pause is not a slow display callback and earns no catch-up time.
+            cadence.reset(); cadence.add(1.0 / fps, fps)
+        } else cadence.add(deltaSeconds, fps)
         var waiting = false
+        var travelBlocked = false
+        var rejectedTravelTarget: String? = null
         var error: String? = startupError.get()
         if (cadence.due(fps)) {
             val next = control.peekNext()
             val pins = (recent.filter { it != next.path } + next.path).takeLast(3).toSet()
             val pixels = loader.readyAndPin(next.path, pins)
             if (pixels != null) {
-                recent.remove(next.path); recent.add(next.path)
-                while (recent.size > 3) recent.removeFirst()
-                control.commit(next); currentBitmap = pixels; cadence.consumed(fps)
+                val travel = control.commitIfTravelAllowed(next, { error == null && approveTravel(it) }, approveEntry)
+                rejectedTravelTarget = control.rejectedTravelTarget
+                if (travel == null) {
+                    // Keep both pose and position. Never truncate a measured step while showing
+                    // the advanced feet, and never accumulate catch-up time behind a boundary.
+                    travelBlocked = true; cadence.blocked(fps)
+                } else {
+                    recent.remove(next.path); recent.add(next.path)
+                    while (recent.size > 3) recent.removeFirst()
+                    currentBitmap = pixels; cadence.consumed(fps)
+                    authoredTravelDeltaFraction = travel
+                }
             } else {
                 cadence.blocked(fps)
                 waiting = true; error = loader.error(next.path) ?: error
@@ -143,11 +214,15 @@ class FrameClipPlayer(context: Context) : Closeable {
         }
         loader.prefetch(control.prefetchPaths())
         return ClipPlaybackFrame(currentBitmap, control.clipId, control.frameIndex, waiting && error == null, error,
-            if (cadence.hostTooSlow) "当前渲染回调不足 ${fps}fps，请保持足够刷新频率或选择实际低帧率资源" else null).also { snapshot = it }
+            if (cadence.hostTooSlow) "当前渲染回调不足 ${fps}fps，请保持足够刷新频率或选择实际低帧率资源" else null,
+            travelBlocked, if (rejectedTravelTarget != null) "水平空间不足以完成实测启动及停步；行走目标已拒绝并保留安全回程"
+                else if (travelBlocked) "当前空间或交互状态不允许完整实测步幅；画面和位置同时暂停" else null,
+            rejectedTravelTarget).also { snapshot = it }
     }
     fun cacheStats(): FrameCacheStats? = loaded.get()?.loader?.stats()
     override fun close() {
         closed = true; active = false
+        authoredTravelDeltaFraction = 0.0
         loaded.getAndSet(null)?.loader?.close()
         initWorker.shutdownNow()
         currentBitmap = null; recent.clear(); director = null

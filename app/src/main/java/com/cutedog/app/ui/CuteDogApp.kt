@@ -27,6 +27,7 @@ import com.cutedog.app.daily.DailyScheduler
 import com.cutedog.app.daily.DailyRepository
 import com.cutedog.app.daily.DailyQuote
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -88,6 +89,7 @@ fun CuteDogApp(initialReminderId: Long = 0L, openDaily: Boolean = false, launchS
     }
     LaunchedEffect(restoreRevision) {
         try { withContext(Dispatchers.IO) { scheduler.restoreAll(); DailyScheduler(context).schedule() } }
+        catch (e: CancellationException) { throw e }
         catch (e: Exception) { context.message("提醒调度暂时未恢复，请检查系统权限后重新打开应用。") }
     }
     LaunchedEffect(revision) {
@@ -95,7 +97,8 @@ fun CuteDogApp(initialReminderId: Long = 0L, openDaily: Boolean = false, launchS
             items = withContext(Dispatchers.IO) { repository.list() }
             quote = withContext(Dispatchers.IO) { daily.today() }
             loadError = null
-        } catch (e: Exception) { loadError = "读取本地数据失败，请重试。" }
+        } catch (e: CancellationException) { throw e }
+        catch (e: Exception) { loadError = "读取本地数据失败，请重试。" }
         loading = false
     }
     LaunchedEffect(initialReminderId, openDaily, launchSequence, openChat, showMissed) {
@@ -123,7 +126,8 @@ fun CuteDogApp(initialReminderId: Long = 0L, openDaily: Boolean = false, launchS
                     repository.get(item.id)?.let { scheduler.schedule(it) }
                 }
                 revision++
-            } catch (e: Exception) { context.message("更新失败，请重试。") }
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { context.message("更新失败，请重试。") }
         }
     }
     fun complete(item: Reminder) {
@@ -177,7 +181,7 @@ fun CuteDogApp(initialReminderId: Long = 0L, openDaily: Boolean = false, launchS
     if (occurrence != null) AlertDialog(onDismissRequest = { occurrenceId = 0 }, title = { Text("完成这次，还是结束重复？") }, text = {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("${occurrence.title} · ${repeatLabel(occurrence.repeat)}。完成本次后会显示下一期事项；结束整组后可以在已完成中重新开启。")
-            Button(onClick = { scope.launch { try { withContext(Dispatchers.IO) { scheduler.completeOccurrence(occurrence.id, occurrence.dueAt) }; revision++; occurrenceId = 0; context.message("本次已完成，下一次仍会提醒。") } catch (e: Exception) { context.message("操作失败，请重试。") } } }, modifier = Modifier.fillMaxWidth()) { Text("完成本次") }
+            Button(onClick = { scope.launch { try { withContext(Dispatchers.IO) { scheduler.completeOccurrence(occurrence.id, occurrence.dueAt) }; revision++; occurrenceId = 0; context.message("本次已完成，下一次仍会提醒。") } catch (e: CancellationException) { throw e } catch (e: Exception) { context.message("操作失败，请重试。") } } }, modifier = Modifier.fillMaxWidth()) { Text("完成本次") }
             OutlinedButton(onClick = { occurrenceId = 0; completeGroup(occurrence) }, modifier = Modifier.fillMaxWidth()) { Text("结束整组重复") }
         }
     }, confirmButton = { TextButton(onClick = { occurrenceId = 0 }) { Text("取消") } })
@@ -186,6 +190,7 @@ fun CuteDogApp(initialReminderId: Long = 0L, openDaily: Boolean = false, launchS
     }, onDelete = { item ->
         scope.launch {
             try { withContext(Dispatchers.IO) { repository.delete(item.id); scheduler.cancel(item.id) }; editorVisible = false; revision++ }
+            catch (e: CancellationException) { throw e }
             catch (e: Exception) { context.message("删除失败，请重试。") }
         }
     })

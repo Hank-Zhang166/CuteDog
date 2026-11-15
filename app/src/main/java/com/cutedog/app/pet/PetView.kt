@@ -12,6 +12,8 @@ import java.time.LocalTime
 import kotlin.math.*
 import com.cutedog.app.pet.animation.FrameClipPlayer
 import com.cutedog.app.pet.animation.ClipPlaybackFrame
+import com.cutedog.app.pet.animation.AuthoredTravelAccumulator
+import com.cutedog.app.pet.animation.FrameScheduleGate
 import com.cutedog.app.pet.behavior.PetBrain
 import com.cutedog.app.pet.behavior.PetContext
 import com.cutedog.app.pet.behavior.GrowthStore
@@ -26,7 +28,11 @@ class PetView(context: Context) : View(context) {
     private var rigPlayer: FrameClipPlayer? = null
     private var rigFrame: ClipPlaybackFrame? = null
     private var interactionAge = 0f
-    private var rigSpeed = 0f
+    private val authoredTravel = AuthoredTravelAccumulator()
+    private var authoredTravelAllowed = false
+    private var desiredHeading = 0
+    private var touchActive = false
+    private var stoppingForSpace = false
     private var tickCount = 0L
     private var drawCount = 0L
     private var actualFrameChanges = 0L
@@ -39,13 +45,29 @@ class PetView(context: Context) : View(context) {
             if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) rigPlayer?.trimMemory()
         }
     }
-    val locomotionSpeed: Float get() = if (hasRigAssets) {
-        if (rigFrame?.bitmap == null || rigFrame?.loading != false || rigFrame?.error != null) 0f else rigSpeed
-    } else abs(behavior.velocity)
+    val usesAuthoredFrames: Boolean get() = hasRigAssets
+    /** Legacy preview only. Authored animation never derives a speed from an action name. */
+    val locomotionSpeed: Float get() = if (hasRigAssets) 0f else abs(behavior.velocity)
+    val authoredTravelRequested: Boolean get() = rigPlayer?.let { player ->
+        val target = player.requestedClip ?: return@let false
+        val canonical = player.manifest?.canonicalClipId(target)
+        canonical !in STATIONARY_PROP_ACTIONS && player.manifest?.travelReady(target) == true
+    } ?: false
+    val authoredTravelInProgress: Boolean get() = rigPlayer?.let { it.manifest?.travelReady(it.currentClip) == true && it.canonicalClipId !in STATIONARY_PROP_ACTIONS } ?: false
+    val authoredStoppingDistancePixels: Float? get() = rigPlayer?.stoppingTravelFraction?.let { (it * min(width, height) * spatialDepth).toFloat() }
+    val authoredPlanningMarginPixels: Float get() = ((rigPlayer?.maximumStepFraction ?: 0.0) * min(width, height) * spatialDepth * 3).toFloat()
+    val authoredActualHeading: Int get() = rigPlayer?.let { player ->
+        player.manifest?.clips?.get(player.currentClip)?.let { if (it.heading == it.exitHeading) it.heading?.sign ?: 0 else 0 }
+    } ?: 0
+    val authoredDesiredHeading: Int get() = desiredHeading
+    private val hostAllowsTravel: Boolean get() = authoredTravelAllowed && !touchActive && running && isShown && power.isInteractive && !settings.reducedMotion
+    private val canAuthoredTravel: Boolean get() = hostAllowsTravel && authoredTravelInProgress && rigPlayer?.canTravel == true
     val behavior = PetBehavior()
     var onDrag: ((Float, Float, Boolean) -> Unit)? = null
     var onTap: (() -> Unit)? = null
     var onAction: ((String) -> Unit)? = null
+    var onAuthoredFrameCommitted: ((Int) -> Unit)? = null
+    var onAuthoredStepAllowed: ((Float) -> Boolean)? = null
     var movementDirection = 0f
     var spatialDepth = 1f
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
@@ -57,7 +79,10 @@ class PetView(context: Context) : View(context) {
     } }
     private val walk by lazy { runCatching { context.assets.open("pet/walk.png").use { BitmapFactory.decodeStream(it) } }.getOrNull() }
     private var lastFrame = 0L
-    private var running = false
+    private var lastAuthoredFrameNanos = 0L
+    private var deferredBrainSeconds = 0f
+    private val frameLifecycle = FrameScheduleGate()
+    private val running: Boolean get() = frameLifecycle.running
     private var downX = 0f; private var downY = 0f
     private var lastX = 0f; private var lastY = 0f
     private var downAt = 0L
@@ -67,50 +92,85 @@ class PetView(context: Context) : View(context) {
     private val singleTap = Runnable { performClick() }
     private val slop = ViewConfiguration.get(context).scaledTouchSlop
     private val power = context.getSystemService(PowerManager::class.java)
-    private val tick = object : Runnable {
-        override fun run() {
-            if (!running || !isShown || !power.isInteractive) { lastFrame = 0; return }
-            tickCount++
-            val now = SystemClock.uptimeMillis()
-            behavior.quiet = settings.activity == "quiet" || LocalTime.now().hour in 0..7 || LocalTime.now().hour >= 22
-            behavior.active = settings.activity == "lively"
-            behavior.reducedMotion = settings.reducedMotion
-            val delta = if (lastFrame == 0L) 0f else ((now - lastFrame) / 1000f).coerceAtMost(.25f)
-            if (hasRigAssets) {
-                val player = rigPlayer
-                if (player != null) {
-                    val frame = player.tick(delta.toDouble()); rigFrame = frame
-                    val frameKey = frame.clipId to frame.frameIndex
-                    if (frame.bitmap != null && frameKey != observedFrame) {
-                        actualFrameChanges++; observedFrame = frameKey
-                    }
-                    interactionAge += delta
+    private val frameClock = Choreographer.getInstance()
+    private var authoredTick: Choreographer.FrameCallback? = null
+    private val tick = Runnable { advanceFrame(SystemClock.uptimeMillis(), null) }
+    private val approveAuthoredTravel: (Double) -> Boolean = { fraction ->
+        // The app's in-place animation preview has no moving system window. Overlay playback
+        // requires permission for the complete measured step before either frame or window advances.
+        onDrag == null || (hostAllowsTravel && authoredTravelInProgress && onAuthoredStepAllowed?.invoke((fraction * min(width, height) * spatialDepth).toFloat()) == true)
+    }
+    private val approveAuthoredEntry: (Int, Double) -> Boolean = { heading, fraction ->
+        onDrag == null || (hostAllowsTravel && onAuthoredStepAllowed?.invoke(
+            (heading * fraction * min(width, height) * spatialDepth).toFloat()) == true)
+    }
+    private fun advanceFrame(now: Long, frameTimeNanos: Long?) {
+        if (!running || !isShown || !power.isInteractive) { pause(); return }
+        val scheduleToken = frameLifecycle.token()
+        tickCount++
+        var needsInvalidate = !hasRigAssets
+        behavior.quiet = settings.activity == "quiet" || LocalTime.now().hour in 0..7 || LocalTime.now().hour >= 22
+        behavior.active = settings.activity == "lively"
+        behavior.reducedMotion = settings.reducedMotion
+        val seconds = if (frameTimeNanos != null) {
+            if (lastAuthoredFrameNanos == 0L) 0.0 else ((frameTimeNanos - lastAuthoredFrameNanos) / 1_000_000_000.0).coerceIn(0.0, .25)
+        } else if (lastFrame == 0L) 0.0 else ((now - lastFrame) / 1000.0).coerceIn(0.0, .25)
+        val delta = seconds.toFloat()
+        if (hasRigAssets) {
+            val player = rigPlayer
+            if (player != null) {
+                val frame = player.tick(seconds, approveAuthoredTravel, approveAuthoredEntry)
+                frame.rejectedTravelTarget?.let(brain::requestRejected)
+                if (frame.error != rigFrame?.error) needsInvalidate = true
+                rigFrame = frame
+                val frameKey = frame.clipId to frame.frameIndex
+                if (frame.bitmap != null && frameKey != observedFrame) {
+                    actualFrameChanges++; observedFrame = frameKey; needsInvalidate = true
+                }
+                interactionAge += delta
+                deferredBrainSeconds += delta
+                val travel = player.authoredTravelDeltaFraction
+                val stepHeading = if (travel > 0.0) 1 else if (travel < 0.0) -1 else player.travelHeading
+                authoredTravel.record(travel, min(width, height).toDouble() * spatialDepth,
+                    stepHeading, onDrag != null && hostAllowsTravel && (travel != 0.0 || canAuthoredTravel), now)
+                if (travel != 0.0 && onDrag != null && hostAllowsTravel) onAuthoredFrameCommitted?.invoke(stepHeading)
+                if (!frameLifecycle.isCurrent(scheduleToken)) { if (needsInvalidate) invalidate(); return }
+                if (stoppingForSpace && player.canonicalClipId == "stand") stoppingForSpace = false
+                // Waiting checks only touch the ready-frame cache; no battery query/behavior
+                // selection and no redundant drawing at every vsync while a decoder is busy.
+                if (!frame.loading && !frame.travelBlocked && frame.bitmap != null && frame.error == null && !stoppingForSpace) {
                     val battery = context.getSystemService(android.os.BatteryManager::class.java)
                     val quiet = settings.activity == "quiet" || LocalTime.now().hour in 0..7 || LocalTime.now().hour >= 22
                     val situation = PetContext(LocalTime.now().hour, quiet || settings.reducedMotion, settings.activity,
                         battery.isCharging, power.isPowerSaveMode || settings.lowPower, !settings.soundEnabled, interactionAge)
                     val available = player.manifest?.clips?.keys ?: emptySet()
-                    brain.update(delta, frame.clipId ?: "stand", available, situation)?.let { if (!player.request(it)) brain.requestRejected(it) }
-                    val targetSpeed = when (frame.clipId) {
-                        "walk", "walk_start", "walk_to_trot", "walk_stop", "backstep", "follow", "seek" -> .035f
-                        "trot", "trot_to_walk", "trot_to_run", "run_to_trot" -> .07f
-                        "run", "play_ball" -> .12f
-                        else -> 0f
+                    brain.update(deferredBrainSeconds, player.canonicalClipId ?: "stand", available, situation)?.let {
+                        if (!player.request(it)) brain.requestRejected(it)
                     }
-                    rigSpeed += (targetSpeed - rigSpeed).coerceIn(-.12f * delta, .12f * delta)
+                    deferredBrainSeconds = 0f
                 }
-            } else if (lastFrame != 0L) {
-                var elapsed = delta
-                while (elapsed > 0f) {
-                    val step = min(elapsed, .05f)
-                    behavior.update(step)
-                    elapsed -= step
-                }
+                if (stoppingForSpace) deferredBrainSeconds = 0f
             }
+        } else if (lastFrame != 0L) {
+            var elapsed = delta
+            while (elapsed > 0f) {
+                val step = min(elapsed, .05f)
+                behavior.update(step)
+                elapsed -= step
+            }
+        }
+        // Window translation above and bitmap invalidation share this main-thread animation phase.
+        if (needsInvalidate) invalidate()
+        if (frameLifecycle.isCurrent(scheduleToken)) {
             lastFrame = now
-            invalidate()
-            postDelayed(this, if (hasRigAssets) { if ((rigPlayer?.requiredTickRate ?: 24) >= 24) 31L else 70L }
-                else if (settings.reducedMotion || power.isPowerSaveMode || settings.lowPower) 100L
+            if (frameTimeNanos != null) lastAuthoredFrameNanos = frameTimeNanos
+            if (hasRigAssets) {
+                // Choreographer's timestamp and System.nanoTime share the monotonic timebase.
+                // Account for work already spent in this callback instead of drifting each deadline.
+                val elapsedSinceVsync = frameTimeNanos?.let { (System.nanoTime() - it).coerceAtLeast(0L) } ?: 0L
+                authoredTick?.let { frameClock.postFrameCallbackDelayed(it, rigPlayer?.nextFrameDelayMillis(elapsedSinceVsync) ?: 250L) }
+            }
+            else postDelayed(tick, if (settings.reducedMotion || power.isPowerSaveMode || settings.lowPower) 100L
                 else if (behavior.state == PetBehavior.State.SLEEP) 83L else 33L)
         }
     }
@@ -125,6 +185,7 @@ class PetView(context: Context) : View(context) {
         react(intent)
     }
     fun react(intent: String) {
+        stoppingForSpace = false
         interactionAge = 0f
         if (hasRigAssets) {
             brain.interact(when (intent) { "pet" -> "head"; "toy" -> "ball"; else -> intent })?.let { if (rigPlayer?.request(it) == false) brain.requestRejected(it) }
@@ -132,18 +193,64 @@ class PetView(context: Context) : View(context) {
         audio.play(if (intent == "jump" || intent == "toy" || intent == "ball") "ball" else if (intent == "pet" || intent == "cuddle") "breath" else "paw")
         resume()
     }
-    fun pause() { running = false; removeCallbacks(tick); removeCallbacks(singleTap); rigPlayer?.setActive(false); lastFrame = 0 }
-    fun resume() { if (isAttachedToWindow && visibility == VISIBLE && power.isInteractive) { running = true; rigPlayer?.setActive(true); removeCallbacks(tick); post(tick) } }
+    fun setAuthoredTravelAllowed(allowed: Boolean) {
+        authoredTravelAllowed = allowed
+        if (!allowed) authoredTravel.clear()
+    }
+    fun requestAuthoredHeading(sign: Int): Boolean {
+        if (!hasRigAssets || sign !in -1..1 || sign == 0) return false
+        val accepted = rigPlayer?.requestHeading(sign) == true
+        if (accepted) desiredHeading = sign
+        return accepted
+    }
+    fun stopAuthoredTravel(): Boolean {
+        val accepted = rigPlayer?.requestStop() == true
+        if (accepted) {
+            brain.pendingTarget?.let(brain::requestRejected)
+            stoppingForSpace = true
+        }
+        return accepted
+    }
+    /** Called once by the successful-frame callback, before this frame is invalidated. */
+    fun consumeAuthoredTravelPixels(sign: Int): Float = authoredTravel.consume(sign,
+        hostAllowsTravel, SystemClock.uptimeMillis())
+    fun pause() {
+        frameLifecycle.pause(); touchActive = false; authoredTravel.clear(); authoredTravelAllowed = false
+        removeCallbacks(tick); authoredTick?.let(frameClock::removeFrameCallback); authoredTick = null; removeCallbacks(singleTap)
+        rigPlayer?.setActive(false); lastFrame = 0; lastAuthoredFrameNanos = 0; deferredBrainSeconds = 0f
+    }
+    fun resume() {
+        if (isAttachedToWindow && visibility == VISIBLE && power.isInteractive) {
+            if (!frameLifecycle.resume()) {
+                // Preserve legacy immediate feedback; authored callbacks keep their single deadline.
+                if (!hasRigAssets) { removeCallbacks(tick); post(tick) }
+                return
+            }
+            rigPlayer?.setActive(true); removeCallbacks(tick); authoredTick?.let(frameClock::removeFrameCallback)
+            if (hasRigAssets) {
+                val registeredEpoch = frameLifecycle.token()
+                // One object per real resume, not per frame. A stale callback already extracted
+                // by Choreographer still carries its old epoch and cannot enter the restarted loop.
+                val callback = Choreographer.FrameCallback { frameTimeNanos ->
+                    if (frameLifecycle.isCurrent(registeredEpoch)) advanceFrame(SystemClock.uptimeMillis(), frameTimeNanos)
+                }
+                authoredTick = callback; frameClock.postFrameCallback(callback)
+            } else post(tick)
+        }
+    }
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         context.applicationContext.registerComponentCallbacks(memoryCallbacks)
         attachedViews.removeAll { it.get() == null || it.get() === this }
         attachedViews.add(WeakReference(this))
-        if (hasRigAssets && rigPlayer == null) rigPlayer = FrameClipPlayer(context)
+        if (hasRigAssets && rigPlayer == null) rigPlayer = FrameClipPlayer(context).also { player ->
+            if (desiredHeading != 0) player.requestHeading(desiredHeading)
+            brain.pendingTarget?.let(player::request)
+        }
         resume()
     }
     override fun onDetachedFromWindow() {
-        pause(); audio.release(); rigPlayer?.close(); rigPlayer = null; rigFrame = null
+        pause(); audio.release(); rigPlayer?.close(); rigPlayer = null; rigFrame = null; observedFrame = null
         context.applicationContext.unregisterComponentCallbacks(memoryCallbacks)
         attachedViews.removeAll { it.get() == null || it.get() === this }
         super.onDetachedFromWindow()
@@ -210,6 +317,7 @@ class PetView(context: Context) : View(context) {
     override fun onTouchEvent(event: MotionEvent): Boolean {
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                touchActive = true; authoredTravel.clear()
                 downX = event.rawX; downY = event.rawY; lastX = downX; lastY = downY
                 downAt = SystemClock.uptimeMillis(); dragged = false; stroked = false
                 growth.recordInteraction()
@@ -231,6 +339,7 @@ class PetView(context: Context) : View(context) {
                 return true
             }
             MotionEvent.ACTION_UP -> {
+                touchActive = false; authoredTravel.clear()
                 if (dragged) onDrag?.invoke(0f, 0f, true) else if (!stroked) {
                     val now = SystemClock.uptimeMillis()
                     if (settings.doubleTapAction == "none") performClick()
@@ -241,7 +350,7 @@ class PetView(context: Context) : View(context) {
                 parent?.requestDisallowInterceptTouchEvent(false)
                 return true
             }
-            MotionEvent.ACTION_CANCEL -> { if (dragged) onDrag?.invoke(0f, 0f, true); parent?.requestDisallowInterceptTouchEvent(false); return true }
+            MotionEvent.ACTION_CANCEL -> { touchActive = false; authoredTravel.clear(); if (dragged) onDrag?.invoke(0f, 0f, true); parent?.requestDisallowInterceptTouchEvent(false); return true }
         }
         return super.onTouchEvent(event)
     }
@@ -251,13 +360,17 @@ class PetView(context: Context) : View(context) {
         val cache = rigPlayer?.cacheStats()
         return org.json.JSONObject().apply {
             put("viewId", diagnosticId); put("scope", if (onDrag != null) "overlay" else "activity")
-            put("renderMode", if (hasRigAssets) "skeletal_frames" else "legacy")
+            put("renderMode", if (hasRigAssets) "authored_frames" else "legacy")
             put("running", running && isShown && power.isInteractive); put("visible", isShown)
             put("tickCount", tickCount); put("drawCount", drawCount)
             put("actualFrameChanges", if (hasRigAssets) actualFrameChanges else org.json.JSONObject.NULL)
             put("clipId", rigFrame?.clipId ?: org.json.JSONObject.NULL)
+            put("canonicalClipId", rigPlayer?.canonicalClipId ?: org.json.JSONObject.NULL)
+            put("canTravel", canAuthoredTravel); put("travelHeading", if (canAuthoredTravel) rigPlayer?.travelHeading ?: 0 else 0)
             put("clipFps", if (hasRigAssets) rigPlayer?.requiredTickRate ?: 0 else 0)
             put("loading", rigFrame?.loading ?: false)
+            put("travelBlocked", rigFrame?.travelBlocked ?: false)
+            put("travelBlockedReason", rigFrame?.travelBlockedReason ?: org.json.JSONObject.NULL)
             put("cacheBytes", cache?.allocatedBytes ?: 0L); put("cacheEntries", cache?.cachedFrames ?: 0)
             put("decodedFrames", cache?.decodedFrames ?: 0L); put("reusedBuffers", cache?.reusedBuffers ?: 0L)
             put("pendingFrames", cache?.pendingFrames ?: 0); put("activeDecoder", cache?.activeDecoder ?: false)
@@ -265,6 +378,7 @@ class PetView(context: Context) : View(context) {
         }
     }
     companion object {
+        private val STATIONARY_PROP_ACTIONS = setOf("play_ball", "treat")
         private var cachedAtlas = WeakReference<Bitmap>(null)
         private val attachedViews = mutableListOf<WeakReference<PetView>>()
         fun diagnosticSnapshots() = org.json.JSONArray().apply {

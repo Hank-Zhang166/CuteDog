@@ -137,6 +137,37 @@ def exact_appop(text):
     raise Blocked("Cannot parse actual SCHEDULE_EXACT_ALARM app-op state")
 
 
+def application_uid_from_outputs(package_dump, run_as_uid):
+    """Cross-check a real user-0 run-as UID against only the requested package's block."""
+    numeric = run_as_uid.strip()
+    if not re.fullmatch(r"[0-9]+", numeric):
+        raise Blocked("run-as id -u did not return one strictly numeric application UID")
+    uid = int(numeric)
+    if not 10000 <= uid < 100000:
+        raise Blocked("run-as UID is not a user-0 application UID")
+    header = list(re.finditer(r"^([ \t]*)Package \[" + re.escape(PACKAGE)
+                             + r"\] \([^\n]+\):[ \t]*$", package_dump, re.MULTILINE))
+    if len(header) != 1:
+        raise Blocked("Cannot identify exactly one target Package block for UID verification")
+    match = header[0]
+    indent = match[1]
+    lines = []
+    for line in package_dump[match.end():].splitlines():
+        if line.strip() and len(line) - len(line.lstrip(" \t")) <= len(indent):
+            break
+        lines.append(line)
+    block = "\n".join(lines)
+    if not re.search(r"^\s*User 0:[^\n]*\binstalled=true\b", block, re.MULTILINE):
+        raise Blocked("Target package is not confirmed installed for user 0")
+    fields = re.findall(r"^" + re.escape(indent + "  ") + r"(userId|appId)=(\d+)[ \t]*$",
+                        block, re.MULTILINE)
+    if not fields or {int(value) for _, value in fields} != {uid}:
+        raise Blocked("Target package userId/appId is missing, conflicting, or differs from run-as UID")
+    return {"uid": uid, "user": 0, "package": PACKAGE, "runAsCommand": "run-as com.cutedog.app id -u",
+            "packageFields": [{"field": name, "value": int(value)} for name, value in fields],
+            "crossChecked": True}
+
+
 def owner_user_unlocked(text):
     if re.search(r"(?:\{|,|\s)0=RUNNING_UNLOCKED(?:,|\}|\s)", text):
         return True
@@ -433,12 +464,14 @@ class Host:
         registered = self.shell("pm", "list", "instrumentation", label="installed-runners").stdout
         if RUNNER not in registered:
             raise Blocked("Installed test APK does not register the standalone SystemRecoveryProbeRunner")
-        if self.shell("run-as", PACKAGE, "id", label="probe-run-as-capability", check=False).returncode:
+        run_as = self.shell("run-as", PACKAGE, "id", "-u", label="probe-run-as-uid", check=False)
+        if run_as.returncode:
             raise Blocked("The application must be debuggable so same-UID probe files and SIGKILL are available")
         package = self.shell("dumpsys", "package", PACKAGE, label="initial-package").stdout
-        uid = re.search(r"\buserId=(\d+)", package)
-        if not uid: raise Blocked("Cannot determine installed application UID")
-        self.metadata["applicationUid"] = int(uid[1])
+        uid = application_uid_from_outputs(package, run_as.stdout)
+        self.metadata["applicationUid"] = uid["uid"]
+        self.metadata["applicationUidVerification"] = uid
+        write_json(self.raw / "application-uid-verification.json", uid)
         self.restore["notificationGranted"] = bool(re.search(r"android\.permission\.POST_NOTIFICATIONS: granted=true", package))
         exact = self.shell("cmd", "appops", "get", PACKAGE, "SCHEDULE_EXACT_ALARM", label="initial-exact-appop", check=False).stdout
         self.restore["exactAlarmAppOp"] = exact_appop(exact) if self.metadata["api"] >= 31 else "not_applicable"
@@ -638,6 +671,49 @@ def run(args):
 
 
 class HostBoundaryTests(unittest.TestCase):
+    def uid_fixture(self, api):
+        root = REPO / "scripts/tests/fixtures/system-recovery-uid"
+        provenance = json.loads((root / "provenance.json").read_text())
+        values = []
+        for name in (f"api{api}-package.stdout.txt", f"api{api}-run-as-id.stdout.txt"):
+            file = root / name
+            self.assertEqual(file.stat().st_size, provenance["files"][name]["bytes"])
+            self.assertEqual(digest(file), provenance["files"][name]["sha256"])
+            values.append(file.read_text())
+        # The original CI ran verbose `id`. This derives unit-test numeric input from
+        # that real stdout; it does not pretend `id -u` was already run on a device.
+        verbose_uid = re.match(r"uid=(\d+)\(", values[1])
+        self.assertIsNotNone(verbose_uid)
+        return values[0], verbose_uid[1]
+
+    def test_uid_matches_real_api26_and_api35_package_stdout(self):
+        for api, expected, field in ((26, 10077, "userId"), (35, 10209, "appId")):
+            with self.subTest(api=api):
+                package, numeric = self.uid_fixture(api)
+                observed = application_uid_from_outputs(package, numeric + "\n")
+                self.assertEqual(observed["uid"], expected)
+                self.assertEqual(observed["packageFields"], [{"field": field, "value": expected}])
+
+    def test_uid_ignores_other_package_and_global_uid_fields(self):
+        package, numeric = self.uid_fixture(35)
+        unrelated = "userId=10001\n  Package [com.unrelated.app] (123):\n    userId=10002\n    User 0: installed=true\n"
+        self.assertEqual(application_uid_from_outputs(unrelated + package, numeric)["uid"], 10209)
+
+    def test_uid_rejects_conflicting_missing_or_duplicate_target_identity(self):
+        package, numeric = self.uid_fixture(35)
+        variants = [package.replace("    appId=10209", "    appId=10209\n    userId=10210"),
+                    package.replace("    appId=10209", "    appId=10210"),
+                    package.replace("    appId=10209", ""),
+                    package.replace("installed=true", "installed=false"), package + package]
+        for value in variants:
+            with self.assertRaises(Blocked): application_uid_from_outputs(value, numeric)
+
+    def test_uid_requires_numeric_owner_application_uid(self):
+        package, numeric = self.uid_fixture(35)
+        for value in ("", "0", "1010209", "10209\n10209", "uid=10209(u0_a209)", "10209 warning"):
+            with self.subTest(value=value), self.assertRaises(Blocked):
+                application_uid_from_outputs(package, value)
+
     def seed(self):
         return {"reminderId": 42, "title": "Recovery doze unique-token", "dueAt": 1234, "timeZoneId": "Etc/UTC"}
     def notification(self, title=None, tag="42"):

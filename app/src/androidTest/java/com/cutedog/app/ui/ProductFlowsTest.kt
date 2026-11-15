@@ -22,6 +22,10 @@ import org.junit.Test
 import org.junit.rules.ExternalResource
 import org.junit.rules.RuleChain
 import java.util.UUID
+import java.io.File
+import java.io.FileOutputStream
+import org.json.JSONArray
+import org.json.JSONObject
 
 /**
  * Drives real Compose controls and SQLite persistence without clearing existing user data.
@@ -37,6 +41,7 @@ class ProductFlowsTest {
     private val compose = createAndroidComposeRule<MainActivity>()
     private var hadIntroduction = false
     private var introductionValue = false
+    private var evidenceReminderId: Long? = null
     private val isolate = object : ExternalResource() {
         override fun before() {
             assumeTrue("Provision POST_NOTIFICATIONS on the disposable test emulator; tests do not alter device permissions.", Build.VERSION.SDK_INT < 33 || context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED)
@@ -68,19 +73,22 @@ class ProductFlowsTest {
         compose.onNodeWithTag("pet_regions").performScrollTo().assertIsDisplayed()
     }
 
-    @Test fun createSearchCompleteUndoAndDeleteReminder() {
+    @Test fun createSearchCompleteUndoAndDeleteReminder() = captureReminderFailure {
         createReminder("给老师发邮件")
         val repository = ReminderRepository(context)
         val id = reminders().single().id
+        evidenceReminderId = id
         compose.onNodeWithTag("reminder_search").performTextInput(prefix)
-        compose.onNodeWithTag("reminders_list").performScrollToNode(hasTestTag("reminder_$id"))
+        compose.onNodeWithTag("reminder_search").performImeAction()
+        compose.onNodeWithTag("reminder_search").assertIsNotFocused()
+        compose.onNodeWithTag("reminders_list").performScrollToNode(hasTestTag("reminder_complete_$id"))
         compose.onNodeWithTag("reminder_$id").assertExists()
-        compose.onNodeWithTag("reminder_complete_$id").performClick()
+        compose.onNodeWithTag("reminder_complete_$id").assertIsDisplayed().performClick()
         compose.waitUntil(5000) { repository.get(id)?.completed == true }
         compose.onNodeWithTag("reminders_list").performScrollToNode(hasTestTag("reminder_filter_4"))
         compose.onNodeWithTag("reminder_filter_4").performClick()
-        compose.onNodeWithTag("reminders_list").performScrollToNode(hasTestTag("reminder_$id"))
-        compose.onNodeWithTag("reminder_complete_$id").performClick()
+        compose.onNodeWithTag("reminders_list").performScrollToNode(hasTestTag("reminder_complete_$id"))
+        compose.onNodeWithTag("reminder_complete_$id").assertIsDisplayed().performClick()
         compose.waitUntil(5000) { repository.get(id)?.completed == false }
         compose.onNodeWithTag("reminders_list").performScrollToNode(hasTestTag("reminder_filter_0"))
         compose.onNodeWithTag("reminder_filter_0").performClick()
@@ -184,5 +192,70 @@ class ProductFlowsTest {
         compose.onNodeWithTag("reminder_save").performClick()
         compose.waitUntil(5000) { reminders().any { it.title == title } }
         compose.waitForIdle()
+    }
+
+    /** Capture inside the test body, before Compose teardown and the outer fixture cleanup rule. */
+    private fun captureReminderFailure(block: () -> Unit) {
+        try { block() } catch (failure: Throwable) {
+            val instrumentation = InstrumentationRegistry.getInstrumentation()
+            val phase = InstrumentationRegistry.getArguments().getString("cuteDogEvidencePhase")
+                ?.takeIf { it.matches(Regex("[a-zA-Z0-9_-]{1,24}")) } ?: "manual"
+            val errors = JSONArray()
+            val metadata = JSONObject().put("test", "createSearchCompleteUndoAndDeleteReminder")
+                .put("api", Build.VERSION.SDK_INT).put("phase", phase).put("fixturePrefix", prefix)
+                .put("capturedAtMillis", System.currentTimeMillis()).put("failureType", failure.javaClass.name)
+                .put("note", "Failure-only observations before cleanup; successive semantics queries are not one atomic tree snapshot.")
+            fun attempt(label: String, capture: () -> Unit) {
+                try { capture() } catch (error: Throwable) { errors.put("$label: ${error.javaClass.simpleName}") }
+            }
+            try {
+                val base = requireNotNull(context.getExternalFilesDir(null)) { "External test evidence directory unavailable" }
+                val directory = File(base, "ui-test-evidence/$phase/$prefix").apply { check(mkdirs() || isDirectory) }
+                // Screenshot first: later tree queries must not cause fixture cleanup before capture.
+                attempt("screenshot") {
+                    val bitmap = requireNotNull(instrumentation.uiAutomation.takeScreenshot())
+                    try { FileOutputStream(File(directory, "screen.png")).use { check(bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)) } }
+                    finally { bitmap.recycle() }
+                }
+                for (unmerged in listOf(false, true)) attempt("semantics-$unmerged") {
+                    File(directory, if (unmerged) "semantics-unmerged.txt" else "semantics-merged.txt")
+                        .writeText(compose.onRoot(useUnmergedTree = unmerged).printToString(maxDepth = 30))
+                    val tags = listOf("reminder_search", "reminders_list") + evidenceReminderId?.let { listOf("reminder_$it", "reminder_complete_$it") }.orEmpty()
+                    val observations = JSONArray()
+                    for (tag in tags) {
+                        val nodes = compose.onAllNodesWithTag(tag, useUnmergedTree = unmerged).fetchSemanticsNodes()
+                        observations.put(JSONObject().put("tag", tag).put("count", nodes.size)
+                            .put("boundsInRoot", JSONArray(nodes.map { it.boundsInRoot.toString() })))
+                    }
+                    metadata.put(if (unmerged) "unmergedNodes" else "mergedNodes", observations)
+                }
+                attempt("activity-window") {
+                    compose.runOnUiThread {
+                        val activity = compose.activity
+                        val decor = activity.window.decorView
+                        val visible = android.graphics.Rect().also(decor::getWindowVisibleDisplayFrame)
+                        val insets = androidx.core.view.ViewCompat.getRootWindowInsets(decor)
+                        metadata.put("activityWindow", JSONObject().put("width", decor.width).put("height", decor.height)
+                            .put("visibleFrame", visible.toString()).put("focused", decor.hasWindowFocus())
+                            .put("imeVisibleCompat", insets?.isVisible(androidx.core.view.WindowInsetsCompat.Type.ime()) ?: JSONObject.NULL)
+                            .put("softInputMode", activity.window.attributes.softInputMode)
+                            .put("fontScale", activity.resources.configuration.fontScale)
+                            .put("orientation", activity.resources.configuration.orientation))
+                    }
+                }
+                for ((file, command) in listOf("input-method.txt" to "dumpsys -t 5 input_method", "windows.txt" to "dumpsys -t 5 window windows")) attempt(file) {
+                    ParcelFileDescriptor.AutoCloseInputStream(instrumentation.uiAutomation.executeShellCommand(command)).bufferedReader().use {
+                        File(directory, file).writeText(it.readText())
+                    }
+                }
+                metadata.put("captureErrors", errors)
+                File(directory, "failure.json").writeText(metadata.toString(2))
+                android.util.Log.i("CuteDogUiEvidence", "Failure evidence saved: ui-test-evidence/$phase/$prefix")
+            } catch (captureFailure: Throwable) {
+                // The original business assertion stays the failure, never a diagnostics exception.
+                failure.addSuppressed(IllegalStateException("UI failure evidence capture failed: ${captureFailure.javaClass.simpleName}"))
+            }
+            throw failure
+        }
     }
 }

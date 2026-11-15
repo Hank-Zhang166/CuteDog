@@ -13,6 +13,12 @@ class FrameCadence {
         seconds = (seconds + delta).coerceAtMost(step * 2)
     }
     fun due(fps: Int): Boolean = seconds + 1e-9 >= 1.0 / fps
+    /** Earliest callback boundary; Choreographer rounds this to the next physical display vsync. */
+    fun delayUntilNextFrameMillis(fps: Int, elapsedSinceVsyncNanos: Long = 0L): Long {
+        require(fps > 0)
+        val remainingMs = (1.0 / fps - seconds) * 1000.0 - elapsedSinceVsyncNanos.coerceAtLeast(0L) / 1_000_000.0
+        return kotlin.math.floor(remainingMs.coerceAtLeast(0.0)).toLong()
+    }
     fun consumed(fps: Int) { seconds = (seconds - 1.0 / fps).coerceAtLeast(0.0) }
     fun blocked(fps: Int) { seconds = (1.0 / fps).coerceAtMost(seconds) }
     fun reset() { seconds = 0.0; consecutiveLateTicks = 0 }

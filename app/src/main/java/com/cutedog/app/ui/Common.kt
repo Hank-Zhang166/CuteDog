@@ -1,6 +1,8 @@
 package com.cutedog.app.ui
 
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import android.widget.Toast
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -20,7 +22,12 @@ import java.util.Locale
 
 internal fun formatTime(millis: Long): String = Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault())
     .format(DateTimeFormatter.ofPattern("M月d日 E HH:mm", Locale.CHINESE))
-internal fun Context.message(text: String) { Toast.makeText(this, text, Toast.LENGTH_LONG).show() }
+private val messageHandler = Handler(Looper.getMainLooper())
+internal fun Context.message(text: String) {
+    val app = applicationContext
+    if (Looper.myLooper() == Looper.getMainLooper()) Toast.makeText(app, text, Toast.LENGTH_LONG).show()
+    else messageHandler.post { Toast.makeText(app, text, Toast.LENGTH_LONG).show() }
+}
 
 @Composable
 internal fun SectionTitle(title: String, action: String? = null, onAction: () -> Unit = {}) {
