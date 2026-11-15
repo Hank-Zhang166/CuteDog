@@ -322,6 +322,8 @@ def main():
             raise AssertionError("Overlay is not a small bounded window: " + str(before))
         if "NOT_FOCUSABLE" not in window or "NOT_TOUCH_MODAL" not in window:
             raise AssertionError("Overlay flags do not allow interaction outside its bounds")
+        metadata["overlay_observed"] = {"window_before": before, "foreground_service": True,
+                                        "small_non_modal_window": True}
         (args.output / "overlay-window-before.txt").write_text(window)
         first = device.screenshot("overlay-on-launcher")
         cx, cy = (left + right) // 2, (top + bottom) // 2
@@ -332,24 +334,51 @@ def main():
         after, after_window = device.overlay_frame()
         if abs(after[0] - before[0]) + abs(after[1] - before[1]) < 40:
             raise AssertionError("Long drag did not change overlay position: " + str(after))
+        metadata["overlay_observed"].update(window_after=after, drag_moved=True)
         (args.output / "overlay-window-after.txt").write_text(after_window)
         second = device.screenshot("overlay-after-drag")
-        # Touch the launcher away from the pet: opening the app drawer is a real external interaction.
-        def launcher_labels(tree):
-            labels = set()
-            for node in tree.iter("node"):
-                if "launcher" in node.get("package", "").lower():
-                    labels.update(value for value in [node.get("text", ""), node.get("content-desc", "")] if value)
-            return labels
-        labels_before = launcher_labels(device.tree())
-        swipe_x = 80 if after[0] > device.width / 2 else device.width - 80
-        device.adb("shell", "input", "swipe", swipe_x, device.height - 80, swipe_x, device.height // 3, 500)
-        time.sleep(2)
+        # Use the launcher's actual icon bounds, away from Android's navigation gesture
+        # region. Tapping Phone only opens its UI; it does not enter a number or call.
         launcher = device.tree()
-        new_labels = launcher_labels(launcher) - labels_before
-        if len(new_labels) < 3:
-            raise AssertionError("Outside-window swipe did not expose at least three new launcher app-drawer labels")
-        drawer = device.screenshot("overlay-launcher-touch")
+        phone = next((node for node in launcher.iter("node")
+                      if "launcher" in node.get("package", "").lower()
+                      and "Phone" in [node.get("text", ""), node.get("content-desc", "")]), None)
+        if phone is None:
+            raise AssertionError("Launcher has no visible Phone icon for the outside-window touch")
+        icon_bounds = tuple(map(int, re.findall(r"\d+", phone.get("bounds", ""))))
+        if len(icon_bounds) != 4:
+            raise AssertionError("Phone icon has invalid bounds")
+        il, it, ir, ib = icon_bounds
+        if not (ir <= after[0] or il >= after[2] or ib <= after[1] or it >= after[3]):
+            raise AssertionError("Phone icon intersects the overlay; cannot prove an outside-window touch")
+        metadata["overlay_observed"].update(outside_touch_icon_bounds=icon_bounds,
+                                            outside_touch_point=[(il + ir) // 2, (it + ib) // 2])
+        device.tap_node(phone)
+        dialer_package = None
+        resumed_lines = []
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            activity = device.adb("shell", "dumpsys", "activity", "activities")
+            resumed_lines = [line.strip() for line in activity.splitlines()
+                             if "mResumedActivity" in line or "topResumedActivity" in line]
+            tree = device.tree()
+            for package in ["com.google.android.dialer", "com.android.dialer"]:
+                if (any(package + "/" in line for line in resumed_lines)
+                        and any(node.get("package") == package for node in tree.iter("node"))):
+                    dialer_package = package
+                    break
+            if dialer_package:
+                break
+            time.sleep(1)
+        (args.output / "outside-touch-resumed-activity.txt").write_text("\n".join(resumed_lines) + "\n")
+        if dialer_package is None:
+            raise AssertionError("Outside-window Phone tap did not produce both a resumed Dialer Activity and its visible UI")
+        external_touch = device.screenshot("overlay-launcher-touch")
+        metadata["overlay_observed"].update(launcher_touch_observed=True, external_package=dialer_package)
+        device.adb("shell", "input", "keyevent", "KEYCODE_HOME")
+        device.wait_text("Phone")
+        returned_frame, _ = device.overlay_frame()
+        metadata["overlay_observed"]["window_after_return_home"] = returned_frame
         device.launch()
         device.tap("小狗")
         device.scroll_to("停止桌宠")
@@ -360,8 +389,10 @@ def main():
         return {"window_before": before, "window_after": after, "foreground_service": True,
                 "small_non_modal_window": True, "drag_moved": True, "launcher_touch_observed": True,
                 "drag_gesture": "DOWN, hold still 750ms, six MOVE events, UP",
-                "new_launcher_labels_after_touch": sorted(new_labels),
-                "service_stopped_from_ui": True, "screenshots": [first, second, drawer]}
+                "outside_touch_icon_bounds": icon_bounds,
+                "outside_touch_point": [(il + ir) // 2, (it + ib) // 2],
+                "external_package": dialer_package, "window_after_return_home": returned_frame,
+                "service_stopped_from_ui": True, "screenshots": [first, second, external_touch]}
 
     try:
         if step("install-pinned-apk", prepare):

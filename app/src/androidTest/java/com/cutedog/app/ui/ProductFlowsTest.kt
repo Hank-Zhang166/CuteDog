@@ -132,6 +132,7 @@ class ProductFlowsTest {
         compose.onNodeWithTag("memory_input").performTextReplacement(fixture("我正在准备日语考试"))
         compose.onNodeWithTag("memory_save").performClick()
         compose.waitUntil(5000) { memories().single().text == fixture("我正在准备日语考试") }
+        compose.onNodeWithTag("memory_list").performScrollToNode(hasTestTag("memory_delete_$id"))
         compose.onNodeWithTag("memory_delete_$id").performClick()
         compose.waitUntil(5000) { memories().isEmpty() }
         assertTrue(memories().isEmpty())
@@ -155,6 +156,20 @@ class ProductFlowsTest {
             compose.waitUntil(5000) { reminders().any { it.title == fixture("大字与横屏可编辑") } }
             compose.onNodeWithTag("nav_3").performClick()
             compose.onNodeWithTag("pet_gestures").performScrollTo().assertIsDisplayed()
+            compose.onNodeWithTag("nav_2").performClick()
+            compose.onNodeWithTag("chat_memories").performClick()
+            compose.onNodeWithTag("memory_list").performScrollToNode(hasTestTag("memory_input"))
+            compose.onNodeWithTag("memory_input").assertIsDisplayed().performTextInput(fixture("大字横屏记忆"))
+            compose.onNodeWithTag("memory_list").performScrollToNode(hasTestTag("memory_save"))
+            compose.onNodeWithTag("memory_save").assertIsDisplayed().performClick()
+            compose.waitUntil(5000) { memories().any { it.text == fixture("大字横屏记忆") } }
+            compose.onNodeWithText("关闭").performClick()
+            compose.onNodeWithTag("nav_1").performClick()
+            compose.onNodeWithTag("reminders_list").performScrollToNode(hasTestTag("reminder_delivery"))
+            compose.onNodeWithTag("reminder_delivery").performScrollTo().performClick()
+            compose.onNodeWithTag("delivery_list").performScrollToNode(hasTestTag("delivery_retry"))
+            compose.onNodeWithTag("delivery_retry").assertIsDisplayed()
+
         } finally {
             if (oldScale.toFloatOrNull() != null) shell("settings put system font_scale $oldScale") else shell("settings delete system font_scale")
             compose.activityRule.scenario.onActivity { it.requestedOrientation = oldOrientation }

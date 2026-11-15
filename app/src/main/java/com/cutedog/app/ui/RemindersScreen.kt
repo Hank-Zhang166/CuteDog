@@ -145,6 +145,7 @@ internal fun ReminderEditor(original: Reminder?, saving: Boolean = false, onDism
                     OutlinedTextField(details, { details = it.take(10000) }, modifier = Modifier.fillMaxWidth().testTag("reminder_details"), label = { Text("详细内容") }, minLines = 3, maxLines = 6, shape = RoundedCornerShape(16.dp))
                     OutlinedButton(onClick = { pickTime() }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) { Text("时间  ${formatTime(dueAt)}", modifier = Modifier.padding(vertical = 8.dp)) }
                     Text("重复方式", style = MaterialTheme.typography.labelLarge)
+                    if (original != null && original.repeat != "none") Text("这里修改的是整组后续提醒。只想完成当前一次，请回到事项列表点完成并选择「完成本次」。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         listOf("none", "daily", "weekly", "monthly").forEach { value -> FilterChip(repeat == value, { repeat = value }, label = { Text(repeatLabel(value)) }) }
                     }

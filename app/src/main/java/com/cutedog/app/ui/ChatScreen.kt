@@ -78,7 +78,7 @@ internal fun ChatScreen() {
                 withContext(Dispatchers.IO) { currentCoroutineContext().ensureActive(); repository.add("assistant", reply.text) }
                 messages = withContext(Dispatchers.IO) { repository.messages() }
                 failedUserId = 0L; truncated = reply.contextTruncated
-                reply.intent?.let { petView?.react(it) }
+                reply.intent?.let { petView?.react(it); com.cutedog.app.pet.PetEvents.modelAction(context, it) }
             } catch (cancelled: CancellationException) { error = "这次请求已取消。你可以稍后重试。"; throw cancelled }
             catch (e: Exception) { error = e.message ?: "暂时没有连接上，请稍后重试。" }
             finally { busy = false; requestJob = null }
@@ -200,6 +200,7 @@ internal fun MemoryDialog(onDismiss: () -> Unit) {
     val repository = remember { ChatRepository(context.applicationContext) }
     val settings = remember { AiSettings(context.applicationContext) }
     val scope = rememberCoroutineScope()
+    val listState = rememberLazyListState()
     val exportMemories = rememberJsonExporter("memories", "CuteDog-记忆-${LocalDate.now()}.json") { repository.exportMemories() }
     var memories by remember { mutableStateOf<List<Memory>>(emptyList()) }
     var enabled by remember { mutableStateOf(settings.memoryEnabled) }
@@ -208,43 +209,67 @@ internal fun MemoryDialog(onDismiss: () -> Unit) {
     var confirmEnable by remember { mutableStateOf(false) }
     var confirmClear by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    var busy by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { try { memories = withContext(Dispatchers.IO) { repository.memories() } } catch (e: Exception) { error = "无法读取记忆，请重新打开后重试。" } }
-    fun mutate(block: () -> Unit) {
+    fun mutate(onSuccess: () -> Unit = {}, block: () -> Unit) {
+        if (busy) return
+        busy = true
         scope.launch {
-            try { withContext(Dispatchers.IO) { block() }; memories = withContext(Dispatchers.IO) { repository.memories() }; error = null }
+            try { withContext(Dispatchers.IO) { block() }; memories = withContext(Dispatchers.IO) { repository.memories() }; error = null; onSuccess() }
             catch (e: Exception) { error = "记忆保存失败，请重试。" }
+            finally { busy = false }
         }
     }
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+    Dialog(onDismissRequest = { if (!busy) onDismiss() }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(Modifier.widthIn(max = 680.dp).fillMaxWidth().fillMaxHeight(.93f).padding(horizontal = 12.dp), shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.background) {
-            Column(Modifier.padding(22.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Text("只记住你愿意的事", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f)); TextButton(onClick = onDismiss) { Text("关闭") } }
-                Text("记忆由你亲自添加和编辑，不会从聊天中自动提取。关闭后保留在本机，但不会用于后续模型请求。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Column(Modifier.padding(22.dp)) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text("允许对话使用长期记忆", modifier = Modifier.weight(1f)); Switch(enabled, { if (it) confirmEnable = true else { settings.memoryEnabled = false; enabled = false } })
+                    Text("只记住你愿意的事", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                    TextButton(onClick = onDismiss, enabled = !busy) { Text("关闭") }
                 }
-                LazyColumn(Modifier.weight(1f).testTag("memory_list"), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                // The description, editor, memories and footer share one scroll area.
+                // Large text and landscape cannot pin the input/actions below the window.
+                LazyColumn(Modifier.weight(1f).testTag("memory_list"), state = listState, verticalArrangement = Arrangement.spacedBy(14.dp), contentPadding = PaddingValues(top = 10.dp, bottom = 12.dp)) {
+                    item {
+                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Text("记忆由你亲自添加和编辑，不会从聊天中自动提取。关闭后保留在本机，但不会用于后续模型请求。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                Text("允许对话使用长期记忆", modifier = Modifier.weight(1f))
+                                Switch(enabled, { if (it) confirmEnable = true else { settings.memoryEnabled = false; enabled = false } })
+                            }
+                        }
+                    }
+                    item {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            OutlinedTextField(text, { text = it.take(2000) }, label = { Text(if (editingId == 0L) "添加一条记忆" else "修改这条记忆") }, modifier = Modifier.fillMaxWidth().testTag("memory_input"), maxLines = 5, enabled = !busy, shape = RoundedCornerShape(16.dp))
+                            error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Button(onClick = { val value = text.trim(); val id = editingId; mutate(onSuccess = { text = ""; editingId = 0 }) { repository.saveMemory(id, value) } }, enabled = text.isNotBlank() && !busy, modifier = Modifier.weight(1f).testTag("memory_save")) { Text(if (busy) "正在保存…" else "保存记忆") }
+                                if (editingId != 0L) TextButton(onClick = { editingId = 0; text = "" }, enabled = !busy) { Text("取消编辑") }
+                            }
+                        }
+                    }
+                    item { Text("已记住的事 · ${memories.size}", style = MaterialTheme.typography.titleMedium) }
                     if (memories.isEmpty()) item { EmptyNote("还没有长期记忆", "例如：我正在学习日语。只记录你愿意交给模型服务的信息。") }
                     items(memories, key = { it.id }) { memory ->
                         SoftCard(Modifier.fillMaxWidth()) {
                             Text(memory.text)
-                            Row { TextButton(onClick = { editingId = memory.id; text = memory.text }, modifier = Modifier.testTag("memory_edit_${memory.id}")) { Text("编辑") }; TextButton(onClick = { mutate { repository.deleteMemory(memory.id) } }, modifier = Modifier.testTag("memory_delete_${memory.id}")) { Text("删除") } }
+                            Row {
+                                TextButton(onClick = { editingId = memory.id; text = memory.text; scope.launch { listState.animateScrollToItem(1) } }, enabled = !busy, modifier = Modifier.testTag("memory_edit_${memory.id}")) { Text("编辑") }
+                                TextButton(onClick = { mutate(onSuccess = { if (editingId == memory.id) { editingId = 0; text = "" } }) { repository.deleteMemory(memory.id) } }, enabled = !busy, modifier = Modifier.testTag("memory_delete_${memory.id}")) { Text("删除") }
+                            }
                         }
                     }
-                }
-                OutlinedTextField(text, { text = it.take(1000) }, label = { Text(if (editingId == 0L) "添加一条记忆" else "修改这条记忆") }, modifier = Modifier.fillMaxWidth().testTag("memory_input"), maxLines = 4, shape = RoundedCornerShape(16.dp))
-                error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = { val value = text.trim(); val id = editingId; mutate { repository.saveMemory(id, value) }; text = ""; editingId = 0 }, enabled = text.isNotBlank(), modifier = Modifier.weight(1f).testTag("memory_save")) { Text("保存记忆") }
-                    if (editingId != 0L) TextButton(onClick = { editingId = 0; text = "" }) { Text("取消编辑") }
-                }
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    TextButton(onClick = exportMemories) { Text("导出记忆") }
-                    TextButton(onClick = { confirmClear = true }, enabled = memories.isNotEmpty()) { Text("清空全部") }
+                    item {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            TextButton(onClick = exportMemories, enabled = !busy) { Text("导出记忆") }
+                            TextButton(onClick = { confirmClear = true }, enabled = memories.isNotEmpty() && !busy) { Text("清空全部") }
+                        }
+                    }
                 }
             }
         }
     }
     if (confirmEnable) AlertDialog(onDismissRequest = { confirmEnable = false }, title = { Text("允许发送记忆给模型？") }, text = { Text("开启后，这里保存的记忆会随聊天请求发送给你配置的服务商。请避免保存身份证、支付信息等敏感内容。你可以随时关闭、修改和删除。") }, confirmButton = { TextButton(onClick = { settings.memoryEnabled = true; enabled = true; confirmEnable = false }) { Text("允许") } }, dismissButton = { TextButton(onClick = { confirmEnable = false }) { Text("取消") } })
-    if (confirmClear) AlertDialog(onDismissRequest = { confirmClear = false }, title = { Text("清空所有长期记忆？") }, text = { Text("这会删除本机的记忆，无法撤销。") }, confirmButton = { TextButton(onClick = { mutate { repository.clearMemories() }; confirmClear = false; text = ""; editingId = 0 }) { Text("清空") } }, dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("取消") } })
+    if (confirmClear) AlertDialog(onDismissRequest = { confirmClear = false }, title = { Text("清空所有长期记忆？") }, text = { Text("这会删除本机的记忆，无法撤销。") }, confirmButton = { TextButton(onClick = { mutate(onSuccess = { text = ""; editingId = 0 }) { repository.clearMemories() }; confirmClear = false }) { Text("清空") } }, dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("取消") } })
 }

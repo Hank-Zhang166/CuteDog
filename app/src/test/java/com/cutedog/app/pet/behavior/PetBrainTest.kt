@@ -72,6 +72,18 @@ class PetBrainTest {
         }
     }
 
+    @Test fun explicitRestRequestsRealSleepWhileCalmStillMeansComfort() {
+        val brain = ready(current = "walk")
+        assertEquals("sleep", brain.interact("sleep"))
+        listOf("walk_stop", "stand", "sit", "sit_idle", "lie", "lie_idle", "fall_asleep").forEach {
+            assertNull(brain.update(2f, it, all, day))
+            assertEquals("sleep", brain.pendingTarget)
+        }
+        assertNull(brain.update(0f, "sleep", all, day))
+        assertNull(brain.pendingTarget)
+        assertEquals("soothe", ready().interact("calm"))
+    }
+
     @Test fun elapsedTimeIsIndependentOfCallbackRate() {
         val slow = ready(); val fast = ready()
         repeat(60) { slow.update(1f, "stand", emptySet(), day) }

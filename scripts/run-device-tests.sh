@@ -72,15 +72,43 @@ notification_before=not_applicable
 exact_before=not_applicable
 restore_needed=false
 permission_restore=not_needed
+staged_apks=""
+current_stage=setup
+stage() {
+  current_stage="$1"
+  printf '%s stage=%s\n' "$(date -u +%FT%TZ)" "$current_stage" >>"$output/host-lifecycle.log"
+}
+record_failure() {
+  printf '%s stage=%s line=%s exit=%s\n' "$(date -u +%FT%TZ)" "$current_stage" "$2" "$1" >>"$output/host-errors.log"
+}
+ensure_packages() {
+  local target apk installed
+  for target in "$package" "$package.test"; do
+    installed="$(adb_cmd shell pm path "$target" 2>>"$output/host-lifecycle.log" | tr -d '\r')" || installed=""
+    if [[ "$installed" == package:* ]]; then
+      printf 'package_present %s\n' "$target" >>"$output/host-lifecycle.log"
+      continue
+    fi
+    if [[ "$target" == "$package" ]]; then apk="$staged_apks/application.apk"; else apk="$staged_apks/instrumentation.apk"; fi
+    # Only this disposable instance and the exact APK bytes recorded in tested-apks.json.
+    printf 'package_missing reinstall_original_apk %s\n' "$target" >>"$output/host-lifecycle.log"
+    if [[ -z "$staged_apks" || ! -f "$apk" ]]; then return 1; fi
+    if ! adb_cmd install -r -t "$apk" >>"$output/host-lifecycle.log" 2>&1; then return 1; fi
+    installed="$(adb_cmd shell pm path "$target" 2>>"$output/host-lifecycle.log" | tr -d '\r')" || installed=""
+    if [[ "$installed" != package:* ]]; then return 1; fi
+  done
+}
 finish() {
   original_exit=$?
-  trap - EXIT
+  trap - EXIT ERR
   set +e
+  stage restore_permissions
   if "$restore_needed"; then
     # A cancelled host run may leave instrumentation alive; stop only the selected disposable target.
     adb_cmd shell am force-stop "$package" >>"$output/permission-restore.log" 2>&1
     adb_cmd shell am force-stop "$package.test" >>"$output/permission-restore.log" 2>&1
     permission_restore=restored
+    ensure_packages || permission_restore=failed
     if ((api >= 33)); then
       if [[ "$notification_before" == granted ]]; then
         adb_cmd shell pm grant "$package" android.permission.POST_NOTIFICATIONS >>"$output/permission-restore.log" 2>&1 || permission_restore=failed
@@ -92,6 +120,7 @@ finish() {
       adb_cmd shell cmd appops set "$package" SCHEDULE_EXACT_ALARM "$exact_before" >>"$output/permission-restore.log" 2>&1 || permission_restore=failed
     fi
   fi
+  if [[ -n "$staged_apks" && -d "$staged_apks" ]]; then rm -rf -- "$staged_apks"; fi
   python3 - "$output" "$original_exit" "$permission_restore" <<'PY'
 import datetime,json,sys
 from pathlib import Path
@@ -107,6 +136,7 @@ PY
   exit "$original_exit"
 }
 trap finish EXIT
+trap 'record_failure "$?" "$LINENO"' ERR
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
@@ -116,10 +146,14 @@ from pathlib import Path
 p=Path(sys.argv[1])/'summary.json';x=json.loads(p.read_text());x.update({'device':sys.argv[2],'api':int(sys.argv[3]),'disposableEmulator':True,'overallStatus':'running'});p.write_text(json.dumps(x,ensure_ascii=False,indent=2)+'\n')
 PY
 # Build/install before the permission snapshot. This CI emulator starts without user data.
+stage build_install
 if ! ./gradlew --no-daemon :app:installDebug :app:installDebugAndroidTest --console=plain >"$output/install.log" 2>&1; then
   tail -80 "$output/install.log"
   exit 1
 fi
+staged_apks="$(mktemp -d "${TMPDIR:-/tmp}/cutedog-tested-apks.XXXXXX")"
+cp app/build/outputs/apk/debug/app-debug.apk "$staged_apks/application.apk"
+cp app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk "$staged_apks/instrumentation.apk"
 python3 - "$output" <<'PY'
 import hashlib,json,sys
 from pathlib import Path
@@ -130,6 +164,8 @@ for label,path in [('application','app/build/outputs/apk/debug/app-debug.apk'),(
     values[label]={'path':path,'bytes':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest()}
 (root/'tested-apks.json').write_text(json.dumps(values,indent=2)+'\n')
 PY
+stage snapshot_permissions
+ensure_packages
 if ((api >= 33)); then
   notification_before="$(adb_cmd shell dumpsys package "$package" | python3 -c 'import re,sys; text=sys.stdin.read(); print("granted" if re.search(r"android\.permission\.POST_NOTIFICATIONS: granted=true",text) else "denied")')"
 fi
@@ -149,24 +185,41 @@ run_phase() {
   local result_code=0
   local output_phase="$output/$phase"
   mkdir -p "$output_phase/junit"
+  stage "${phase}_prepare"
+  ensure_packages
   # Move old generated results out of the lookup tree; an interrupted run must not reuse them.
   local retired
   retired="$(mktemp -d "${TMPDIR:-/tmp}/cutedog-prior-results.XXXXXX")"
   if [[ -d app/build/outputs/androidTest-results/connected ]]; then mv app/build/outputs/androidTest-results/connected "$retired/results"; fi
   if [[ -d app/build/reports/androidTests/connected ]]; then mv app/build/reports/androidTests/connected "$retired/reports"; fi
-  adb_cmd logcat -c
-  local args=(:app:connectedDebugAndroidTest --no-daemon --rerun-tasks --console=plain)
+  # Some Android images refuse clearing one log buffer. This optional diagnostic must
+  # not prevent instrumentation from running; retain its stderr and exit separately.
+  local clear_code=0
+  adb_cmd logcat -c >"$output_phase/logcat-clear.txt" 2>&1 || clear_code=$?
+  printf '%s\n' "$clear_code" >"$output_phase/logcat-clear-exit-code.txt"
+  # AGP 8.9.2 defaults this option to false. Its UTP cleanup otherwise removes both
+  # packages after a phase, making subsequent permission changes fail with No UID.
+  # Gradle 8.11.1 --rerun targets this test task only. Rebuilding all dependencies
+  # between phases could silently replace the APK bytes recorded before installation.
+  local args=(:app:connectedDebugAndroidTest --rerun --no-daemon --console=plain --stacktrace -Pandroid.injected.androidTest.leaveApksInstalledAfterRun=true)
   if [[ "$phase" == denied ]]; then args+=("-Pandroid.testInstrumentationRunnerArguments.class=$denied_methods"); fi
   set +e
+  stage "${phase}_instrumentation"
   ./gradlew "${args[@]}" >"$output_phase/gradle.log" 2>&1
   result_code=$?
   set -e
+  stage "${phase}_collect"
   adb_cmd logcat -d -v brief -s CuteDogPerformance:I CuteDogFrameCache:I AndroidRuntime:E '*:S' >"$output_phase/selected-logcat.txt" 2>&1 || true
   adb_cmd shell dumpsys meminfo "$package" >"$output_phase/process-memory.txt" 2>&1 || true
   python3 - "$output" "$phase" "$result_code" "$api" "$denied_methods" <<'PY'
-import datetime,json,re,shutil,sys,xml.etree.ElementTree as ET
+import datetime,hashlib,json,re,shutil,sys,xml.etree.ElementTree as ET
 from pathlib import Path
 root=Path(sys.argv[1]);phase=sys.argv[2];rc=int(sys.argv[3]);api=int(sys.argv[4]);out=root/phase
+apk_provenance=[]
+for label,original in json.loads((root/'tested-apks.json').read_text()).items():
+    apk=Path(original['path']);actual=hashlib.sha256(apk.read_bytes()).hexdigest() if apk.is_file() else None
+    apk_provenance.append({'label':label,'path':str(apk),'expectedSha256':original['sha256'],'actualSha256':actual,'unchanged':actual==original['sha256']})
+(out/'tested-apks.json').write_text(json.dumps(apk_provenance,indent=2)+'\n')
 expected_denied=set(sys.argv[5].split(',')); discovered=set()
 for source in Path('app/src/androidTest/java').rglob('*.kt'):
     text=source.read_text(); package=re.search(r'^package\s+([\w.]+)',text,re.M); cls=re.search(r'\bclass\s+(\w+)',text)
@@ -193,8 +246,9 @@ missing=sorted(expected-seen);unexpected=sorted(seen-expected);duplicates=sorted
 unexpected_skips=[case['id'] for case in cases if case['status']=='skipped' and case['id'] not in expected_skip]
 missing_required_skips=sorted(expected_skip-{case['id'] for case in cases if case['status']=='skipped'})
 counts={status:sum(case['status']==status for case in cases) for status in ('passed','failed','error','skipped')};counts['total']=len(cases)
-passed=rc==0 and bool(files) and not any([missing,unexpected,duplicates,parse_errors,unexpected_skips,missing_required_skips]) and counts['failed']==0 and counts['error']==0
-summary={'phase':phase,'api':api,'status':'passed' if passed else 'failed','gradleExitCode':rc,'counts':counts,'expectedTests':len(expected),'expectedSkipped':sorted(expected_skip),'unexpectedSkipped':unexpected_skips,'expectedSkipNotObserved':missing_required_skips,'missingTests':missing,'unexpectedTests':unexpected,'duplicateTests':duplicates,'xmlParseErrors':parse_errors,'junitFiles':files,'testCases':cases,'capturedAt':datetime.datetime.now(datetime.timezone.utc).isoformat()}
+apks_unchanged=all(value['unchanged'] for value in apk_provenance)
+passed=rc==0 and bool(files) and apks_unchanged and not any([missing,unexpected,duplicates,parse_errors,unexpected_skips,missing_required_skips]) and counts['failed']==0 and counts['error']==0
+summary={'phase':phase,'api':api,'status':'passed' if passed else 'failed','gradleExitCode':rc,'apksUnchanged':apks_unchanged,'counts':counts,'expectedTests':len(expected),'expectedSkipped':sorted(expected_skip),'unexpectedSkipped':unexpected_skips,'expectedSkipNotObserved':missing_required_skips,'missingTests':missing,'unexpectedTests':unexpected,'duplicateTests':duplicates,'xmlParseErrors':parse_errors,'junitFiles':files,'testCases':cases,'capturedAt':datetime.datetime.now(datetime.timezone.utc).isoformat()}
 (out/'summary.json').write_text(json.dumps(summary,ensure_ascii=False,indent=2)+'\n')
 metadata=json.loads((root/'summary.json').read_text());metadata['phases'][phase]=summary;(root/'summary.json').write_text(json.dumps(metadata,ensure_ascii=False,indent=2)+'\n')
 log=out/'selected-logcat.txt'
@@ -203,12 +257,16 @@ if log.exists():
 print(json.dumps({'phase':phase,'status':summary['status'],'counts':counts,'missing':missing,'unexpectedSkipped':unexpected_skips},ensure_ascii=False))
 PY
   tail -60 "$output_phase/gradle.log"
+  stage "${phase}_packages_after_instrumentation"
+  ensure_packages
 }
 
 # Phase 1 runs every current test. Denied-only tests must explicitly skip, not silently pass.
+stage grant_permissions
 if ((api >= 33)); then adb_cmd shell pm grant "$package" android.permission.POST_NOTIFICATIONS; fi
 if ((api >= 31)); then adb_cmd shell cmd appops set "$package" SCHEDULE_EXACT_ALARM allow; fi
 run_phase granted
+stage revoke_permissions
 # The first instrumentation process has exited before revocation can kill the package.
 # Also terminate any leftover app/runner process after a failed Gradle run, on this disposable device only.
 adb_cmd shell am force-stop "$package"
@@ -216,6 +274,7 @@ adb_cmd shell am force-stop "$package.test"
 if ((api >= 33)); then adb_cmd shell pm revoke "$package" android.permission.POST_NOTIFICATIONS; fi
 if ((api >= 31)); then adb_cmd shell cmd appops set "$package" SCHEDULE_EXACT_ALARM deny; fi
 run_phase denied
+stage evaluate_phases
 python3 - "$output" <<'PY'
 import json,sys
 from pathlib import Path

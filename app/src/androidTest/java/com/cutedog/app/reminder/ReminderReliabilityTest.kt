@@ -1,6 +1,7 @@
 package com.cutedog.app.reminder
 
 import android.Manifest
+import android.app.Notification
 import android.app.NotificationManager
 import android.content.Context
 import android.content.pm.PackageManager
@@ -32,11 +33,18 @@ class ReminderReliabilityTest {
     @Before fun setup() { context = ApplicationProvider.getApplicationContext(); repository = ReminderRepository(context) }
     @After fun cleanup() {
         val scheduler = ReminderScheduler(context)
-        (created + repository.list().filter { it.title.startsWith(prefix) }.map { it.id }).distinct().forEach {
-            scheduler.cancel(it); repository.delete(it)
+        val ids = (created + repository.list().filter { it.title.startsWith(prefix) }.map { it.id }).distinct()
+        ids.forEach {
+            // A receiver already in flight must observe deletion before cancellation finishes.
+            repository.delete(it); scheduler.cancel(it)
         }
         snapshots.forEach { repository.database.delete("reminder_backups", "id=?", arrayOf(it)) }
-        context.getSystemService(NotificationManager::class.java).cancel("missed-summary", ReminderReceiver.NOTIFICATION_ID)
+        val manager = context.getSystemService(NotificationManager::class.java)
+        manager.cancel("missed-summary", ReminderReceiver.NOTIFICATION_ID)
+        val tags = ids.map(Long::toString).toSet() + "missed-summary"
+        assertTrue("Fixture notifications were not removed after cancellation", awaitSystemNotification {
+            manager.activeNotifications.none { it.id == ReminderReceiver.NOTIFICATION_ID && it.tag in tags }
+        })
     }
     private fun note(offset: Long = 3_600_000) = Reminder(title = "$prefix 事项", dueAt = System.currentTimeMillis() + offset)
     private fun save(item: Reminder = note()) = repository.save(item).also { created += it }
@@ -70,11 +78,18 @@ class ReminderReliabilityTest {
         val scheduler = ReminderScheduler(context)
         assertEquals(1, scheduler.retryPending())
         val manager = context.getSystemService(NotificationManager::class.java)
-        assertTrue(manager.activeNotifications.any { it.tag == id.toString() })
         assertEquals("sent", repository.deliveryHistory().single { it.reminderId == id }.status)
         assertEquals(1, repository.deliveryHistory().single { it.reminderId == id }.attempts)
+        val appeared = awaitSystemNotification {
+            manager.activeNotifications.any {
+                it.id == ReminderReceiver.NOTIFICATION_ID && it.tag == id.toString() &&
+                    it.notification.extras.getCharSequence(Notification.EXTRA_TEXT)?.contains(prefix) == true
+            }
+        }
+        assertTrue("The persisted occurrence was not visibly delivered: ${deliveryDiagnostics(listOf(id))}", appeared)
         assertEquals(0, scheduler.retryPending())
-        assertEquals(1, manager.activeNotifications.count { it.tag == id.toString() })
+        assertEquals(1, manager.activeNotifications.count { it.id == ReminderReceiver.NOTIFICATION_ID && it.tag == id.toString() })
+        assertEquals(1, repository.deliveryHistory().single { it.reminderId == id }.attempts)
     }
 
     @Test fun multipleOverdueRemindersBecomeOneSummary() {
@@ -82,12 +97,23 @@ class ReminderReliabilityTest {
         val ids = (1..6).map { save(note(-it * 60_000L).copy(title = "$prefix 事项 $it")) }
         ReminderScheduler(context).restoreAll()
         val manager = context.getSystemService(NotificationManager::class.java)
-        assertTrue(manager.activeNotifications.any { it.tag == "missed-summary" })
-        assertTrue(manager.activeNotifications.none { it.tag in ids.map(Long::toString) })
         val rows = repository.pendingDeliveries().filter { it.reminderId in ids }
         assertEquals(6, rows.size)
-        assertTrue(rows.all { it.status == "summarized" })
+        assertTrue("All six occurrences must be durably summarized: ${deliveryDiagnostics(ids)}", rows.all { it.status == "summarized" && it.attempts == 1 })
+        // notify() enqueues work in system_server; returning does not mean activeNotifications
+        // already contains the card. Wait for this fixture's actual content, not a stale summary.
+        val appeared = awaitSystemNotification {
+            manager.activeNotifications.any {
+                it.id == ReminderReceiver.NOTIFICATION_ID && it.tag == "missed-summary" &&
+                    it.notification.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString() == "6 条提醒等待查看" &&
+                    it.notification.extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.contains(prefix) == true
+            }
+        }
+        assertTrue("The six-item summary did not appear: ${deliveryDiagnostics(ids)}", appeared)
+        assertEquals(1, manager.activeNotifications.count { it.id == ReminderReceiver.NOTIFICATION_ID && it.tag == "missed-summary" })
+        assertTrue(manager.activeNotifications.none { it.tag in ids.map(Long::toString) })
         assertEquals(0, ReminderScheduler(context).retryPending())
+        assertTrue(repository.pendingDeliveries().filter { it.reminderId in ids }.all { it.attempts == 1 })
     }
 
     @Test fun importIsValidatedBeforeAnyDataChangeAndMergeRemapsIds() {
@@ -181,5 +207,23 @@ class ReminderReliabilityTest {
             assertTrue(details.contains("reminders_due"))
         }
         Log.i("CuteDogPerformance", "nativeSQLite count=1000 insertMs=$insertMs readMs=$readMs")
+    }
+
+    private fun awaitSystemNotification(condition: () -> Boolean): Boolean {
+        val deadline = SystemClock.elapsedRealtime() + 10_000
+        while (SystemClock.elapsedRealtime() < deadline) {
+            if (condition()) return true
+            SystemClock.sleep(50)
+        }
+        return condition()
+    }
+
+    private fun deliveryDiagnostics(ids: List<Long>): String {
+        val manager = context.getSystemService(NotificationManager::class.java)
+        val records = repository.deliveryHistory(5000).filter { it.reminderId in ids }
+            .joinToString { "${it.reminderId}:${it.status}/${it.attempts}(${it.reason})" }
+        val active = manager.activeNotifications.joinToString { "${it.tag}:${it.id}" }
+        return "outbox=[$records], active=[$active], enabled=${manager.areNotificationsEnabled()}, " +
+            "channelImportance=${manager.getNotificationChannel(ReminderReceiver.CHANNEL_ID)?.importance}"
     }
 }

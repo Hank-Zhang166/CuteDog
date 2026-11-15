@@ -7,9 +7,6 @@ import android.graphics.PixelFormat
 import android.os.*
 import android.provider.Settings
 import android.view.*
-import android.widget.TextView
-import android.graphics.Color
-import android.graphics.drawable.GradientDrawable
 import com.cutedog.app.MainActivity
 import kotlin.math.*
 
@@ -22,13 +19,16 @@ class OverlayService : Service() {
     private val main = Handler(Looper.getMainLooper())
     private var attached = false
     private var hidden = false
-    private var bubble: TextView? = null
+    private var bubble: PetBubbleView? = null
+    private var bubbleTimeout: Runnable? = null
+    private var snapTask: Runnable? = null
     private var screenWidth = 0
     private var screenHeight = 0
     private var insetTop = 0
     private var insetBottom = 0
     private var insetLeft = 0
     private var insetRight = 0
+    private var legacyInsets: List<Int>? = null
     private var floatingX = 0f
     private var seenPosition = .5f
     private var dragging = false
@@ -38,24 +38,29 @@ class OverlayService : Service() {
     private var position = PetSpace.Point(0f, 0f)
     private var spaceAvailable = true
     private var lastMotion = 0L
+    private val overlayPermissionListener = AppOpsManager.OnOpChangedListener { op, packageName ->
+        if (op == AppOpsManager.OPSTR_SYSTEM_ALERT_WINDOW && packageName == this.packageName)
+            main.post { if (!Settings.canDrawOverlays(this)) stopSelf() }
+    }
     private val settingsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key != "x" && key != "y") main.post { configure(); if (attached) safelyUpdate() }
     }
     private val events = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             when (intent.action) {
-                Intent.ACTION_SCREEN_OFF -> { pet.pause(); pet.visibility = View.GONE; dismissBubble(); main.removeCallbacks(motion) }
-                Intent.ACTION_USER_PRESENT -> if (!hidden && spaceAvailable) { pet.visibility = View.VISIBLE; pet.resume(); main.removeCallbacks(motion); main.post(motion) }
-                Intent.ACTION_SCREEN_ON -> if (!getSystemService(KeyguardManager::class.java).isKeyguardLocked && !hidden && spaceAvailable) { pet.visibility = View.VISIBLE; pet.resume(); main.removeCallbacks(motion); main.post(motion) }
+                Intent.ACTION_SCREEN_OFF, Intent.ACTION_USER_PRESENT, Intent.ACTION_SCREEN_ON -> reconcileVisibleState()
                 "com.cutedog.app.REMINDER_EVENT" -> if (!hidden && getSystemService(PowerManager::class.java).isInteractive && !getSystemService(KeyguardManager::class.java).isKeyguardLocked) {
                     pet.react("wave"); showBubble(intent.getStringExtra("message") ?: "有一件事等着你", intent.getLongExtra("reminder_id", 0))
+                }
+                PetEvents.MODEL_ACTION -> if (!hidden && spaceAvailable && getSystemService(PowerManager::class.java).isInteractive && !getSystemService(KeyguardManager::class.java).isKeyguardLocked) {
+                    PetEvents.action(intent)?.let(pet::react)
                 }
             }
         }
     }
     private val motion = object : Runnable {
         override fun run() {
-            if (attached && !hidden && pet.isShown && !dragging && !prefs.locked && !prefs.reducedMotion) {
+            if (attached && !hidden && bubble == null && snapTask == null && pet.isShown && !dragging && !prefs.locked && !prefs.reducedMotion) {
                 val now = SystemClock.uptimeMillis()
                 val dt = if (lastMotion == 0L) .05f else ((now - lastMotion) / 1000f).coerceAtMost(.1f)
                 lastMotion = now
@@ -86,23 +91,41 @@ class OverlayService : Service() {
                 }
             }
             seenPosition = pet.behavior.position
-            if (!hidden && getSystemService(PowerManager::class.java).isInteractive) main.postDelayed(this, if (prefs.locked || prefs.reducedMotion) 1000 else 50)
+            if (attached && !hidden && pet.isShown && getSystemService(PowerManager::class.java).isInteractive)
+                main.postDelayed(this, if (prefs.locked || prefs.reducedMotion) 1000 else if (pet.locomotionSpeed > .001f) 50 else 250)
         }
     }
     override fun onCreate() {
         super.onCreate()
         prefs = PetSettings(this); wm = getSystemService(WindowManager::class.java)
         pet = PetView(this)
+        pet.setOnApplyWindowInsetsListener { _, insets ->
+            if (Build.VERSION.SDK_INT < 30) {
+                val cutout = if (Build.VERSION.SDK_INT >= 28) insets.displayCutout?.let {
+                    listOf(it.safeInsetLeft, it.safeInsetTop, it.safeInsetRight, it.safeInsetBottom)
+                } else null
+                @Suppress("DEPRECATION") val measured = listOf(
+                    max(max(insets.stableInsetLeft, insets.systemWindowInsetLeft), cutout?.get(0) ?: 0),
+                    max(max(insets.stableInsetTop, insets.systemWindowInsetTop), cutout?.get(1) ?: 0),
+                    max(max(insets.stableInsetRight, insets.systemWindowInsetRight), cutout?.get(2) ?: 0),
+                    max(max(insets.stableInsetBottom, insets.systemWindowInsetBottom), cutout?.get(3) ?: 0),
+                )
+                if (measured != legacyInsets) { legacyInsets = measured; main.post { if (attached) { configure(); safelyUpdate() } } }
+            }
+            insets
+        }
         params = WindowManager.LayoutParams(1, 1, WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
-            PixelFormat.TRANSLUCENT).apply { gravity = Gravity.TOP or Gravity.START }
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            PixelFormat.TRANSLUCENT).apply { gravity = Gravity.TOP or Gravity.LEFT }
         configure()
         pet.onAction = { action ->
-            if (action == "menu" || action == "chat") startActivity(Intent(this, MainActivity::class.java).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK); if (action == "chat") putExtra("open_chat", true)
-            })
+            when (action) {
+                "menu" -> showQuickMenu()
+                "chat" -> openApp(chat = true)
+            }
         }
         pet.onDrag = { dx, dy, finished ->
+            cancelSnap()
             dragging = !finished
             route.clear()
             val candidate = spaceArea.clamp(PetSpace.Point(position.x + dx, position.y + dy))
@@ -116,12 +139,17 @@ class OverlayService : Service() {
         val filter = IntentFilter().apply {
             addAction(Intent.ACTION_SCREEN_OFF); addAction(Intent.ACTION_SCREEN_ON); addAction(Intent.ACTION_USER_PRESENT)
             addAction("com.cutedog.app.REMINDER_EVENT")
+            addAction(PetEvents.MODEL_ACTION)
         }
         androidx.core.content.ContextCompat.registerReceiver(this, events, filter, androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED)
         getSharedPreferences("pet", MODE_PRIVATE).registerOnSharedPreferenceChangeListener(settingsListener)
-        main.post(motion)
+        getSystemService(AppOpsManager::class.java).startWatchingMode(AppOpsManager.OPSTR_SYSTEM_ALERT_WINDOW, packageName, overlayPermissionListener)
     }
-    private fun configure() {
+    private fun configure(resetPosition: Boolean = false) {
+        cancelSnap()
+        dismissBubble()
+        val xFraction = if (attached && !resetPosition) params.x.toFloat() / max(1, screenWidth - params.width) else prefs.xFraction
+        val yFraction = if (attached && !resetPosition) (params.y - insetTop).toFloat() / max(1, screenHeight - insetTop - insetBottom - params.height) else prefs.yFraction
         val density = resources.displayMetrics.density
         if (Build.VERSION.SDK_INT >= 30) {
             val metrics = wm.maximumWindowMetrics
@@ -132,13 +160,15 @@ class OverlayService : Service() {
             @Suppress("DEPRECATION") val display = wm.defaultDisplay
             val m = android.util.DisplayMetrics(); @Suppress("DEPRECATION") display.getRealMetrics(m)
             screenWidth = m.widthPixels; screenHeight = m.heightPixels
-            insetTop = (32 * density).toInt(); insetBottom = (48 * density).toInt()
+            val measured = legacyInsets
+            insetLeft = measured?.get(0) ?: 0; insetTop = measured?.get(1) ?: (32 * density).toInt()
+            insetRight = measured?.get(2) ?: 0; insetBottom = measured?.get(3) ?: (48 * density).toInt()
         }
         params.width = (prefs.size * density).toInt().coerceAtMost(screenWidth)
         params.height = params.width
         params.alpha = prefs.opacity
-        params.x = ((screenWidth - params.width).coerceAtLeast(0) * prefs.xFraction).toInt()
-        params.y = insetTop + ((screenHeight - insetTop - insetBottom - params.height).coerceAtLeast(0) * prefs.yFraction).toInt()
+        params.x = ((screenWidth - params.width).coerceAtLeast(0) * xFraction.coerceIn(0f, 1f)).toInt()
+        params.y = insetTop + ((screenHeight - insetTop - insetBottom - params.height).coerceAtLeast(0) * yFraction.coerceIn(0f, 1f)).toInt()
         floatingX = params.x.toFloat()
         val bounds = if (prefs.confinement == "region") prefs.activityRect else android.graphics.RectF(0f, 0f, 1f, 1f)
         val half = params.width / 2f
@@ -153,14 +183,21 @@ class OverlayService : Service() {
         free?.let { position = it; params.x = (it.x - half).toInt(); params.y = (it.y - half).toInt() }
         route.clear()
         if (!spaceAvailable) {
-            pet.visibility = View.GONE
             android.widget.Toast.makeText(this, "活动区没有足够空间，请扩大活动区、缩小桌宠或调整禁区。", android.widget.Toast.LENGTH_LONG).show()
-        } else if (!hidden && !getSystemService(KeyguardManager::class.java).isKeyguardLocked) pet.visibility = View.VISIBLE
+        }
+        reconcileVisibleState()
     }
-    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) { super.onConfigurationChanged(newConfig); dismissBubble(); configure(); safelyUpdate() }
+    private fun reconcileVisibleState() {
+        val visible = attached && !hidden && spaceAvailable && getSystemService(PowerManager::class.java).isInteractive && !getSystemService(KeyguardManager::class.java).isKeyguardLocked
+        pet.visibility = if (visible) View.VISIBLE else View.GONE
+        main.removeCallbacks(motion)
+        if (visible) { pet.resume(); lastMotion = 0; main.post(motion) }
+        else { pet.pause(); cancelSnap(); dismissBubble(); lastMotion = 0 }
+    }
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) { super.onConfigurationChanged(newConfig); legacyInsets = null; dismissBubble(); configure(); safelyUpdate(); pet.requestApplyInsets() }
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == STOP) { stopSelf(); return START_NOT_STICKY }
-        if (intent?.action == RESET) { prefs.xFraction = prefs.defaultX; prefs.yFraction = prefs.defaultY; configure() }
+        if (intent?.action == RESET) { prefs.xFraction = prefs.defaultX; prefs.yFraction = prefs.defaultY; configure(resetPosition = true) }
         if (!Settings.canDrawOverlays(this)) { stopSelf(); return START_NOT_STICKY }
         val manager = getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(NotificationChannel(CHANNEL, "桌宠运行状态", NotificationManager.IMPORTANCE_LOW).apply { setSound(null, null) })
@@ -180,9 +217,8 @@ class OverlayService : Service() {
             catch (_: WindowManager.BadTokenException) { stopSelf(); return START_NOT_STICKY }
             catch (_: WindowManager.InvalidDisplayException) { stopSelf(); return START_NOT_STICKY }
         }
-        pet.visibility = if (hidden || !spaceAvailable || getSystemService(KeyguardManager::class.java).isKeyguardLocked) View.GONE else View.VISIBLE
-        main.removeCallbacks(motion)
-        if (hidden) { pet.pause(); dismissBubble() } else { pet.resume(); main.post(motion) }
+        reconcileVisibleState()
+        pet.requestApplyInsets()
         return START_NOT_STICKY // The user starts again; no endless restart after revoking permission.
     }
     private fun safelyUpdate() {
@@ -190,6 +226,7 @@ class OverlayService : Service() {
         try { wm.updateViewLayout(pet, params) } catch (_: SecurityException) { stopSelf() } catch (_: IllegalArgumentException) { attached = false; stopSelf() }
     }
     private fun snapToEdge() {
+        cancelSnap()
         val start = params.x
         val edge = if (position.x < (spaceArea.left + spaceArea.right) / 2) spaceArea.left else spaceArea.right
         val target = PetSpace.Point(edge, position.y)
@@ -198,44 +235,112 @@ class OverlayService : Service() {
         val began = SystemClock.uptimeMillis()
         val task = object : Runnable {
             override fun run() {
-                if (!attached || dragging) return
+                if (!attached || dragging || hidden || !pet.isShown || !getSystemService(PowerManager::class.java).isInteractive) { snapTask = null; return }
                 val t = ((SystemClock.uptimeMillis() - began) / 260f).coerceIn(0f, 1f)
                 params.x = (start + (end - start) * (1 - (1 - t).pow(3))).toInt(); floatingX = params.x.toFloat(); position = position.copy(x = params.x + params.width / 2f); safelyUpdate()
-                if (t < 1) main.postDelayed(this, 16) else savePosition()
+                if (t < 1) main.postDelayed(this, 16) else { snapTask = null; savePosition() }
             }
         }
+        snapTask = task
         main.post(task)
     }
+    private fun cancelSnap() { snapTask?.let(main::removeCallbacks); snapTask = null }
     private fun savePosition() {
         prefs.xFraction = params.x.toFloat() / max(1, screenWidth - params.width)
         prefs.yFraction = (params.y - insetTop).toFloat() / max(1, screenHeight - insetTop - insetBottom - params.height)
     }
+    private fun openApp(chat: Boolean = false, reminderId: Long? = null) {
+        startActivity(Intent(this, MainActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            if (chat) putExtra("open_chat", true)
+            if (reminderId != null) { putExtra("reminder_id", reminderId); putExtra("show_missed_reminders", reminderId == 0L) }
+        })
+        dismissBubble()
+    }
+    private fun showQuickMenu() {
+        val view = PetBubbleView(this).apply { showMenu(prefs.name) }
+        view.onAction = { action ->
+            when (action) {
+                PetBubbleView.ACTION_CHAT -> openApp(chat = true)
+                PetBubbleView.ACTION_OPEN -> openApp()
+                PetBubbleView.ACTION_PET -> { pet.interact("pet"); dismissBubble() }
+                PetBubbleView.ACTION_HIDE -> { hidden = true; reconcileVisibleState() }
+            }
+        }
+        attachBubble(view)
+    }
     private fun showBubble(message: String, reminderId: Long) {
+        val view = PetBubbleView(this).apply { showReminder(if (reminderId == 0L) "有几件事项需要查看" else "到提醒时间了", message) }
+        view.onAction = { action ->
+            when (action) {
+                PetBubbleView.ACTION_DETAILS -> openApp(reminderId = reminderId)
+                PetBubbleView.ACTION_OPEN -> openApp()
+            }
+        }
+        attachBubble(view)
+    }
+    private fun attachBubble(view: PetBubbleView) {
+        if (hidden || !spaceAvailable || !getSystemService(PowerManager::class.java).isInteractive || getSystemService(KeyguardManager::class.java).isKeyguardLocked) return
+        cancelSnap()
         dismissBubble()
         val dp = resources.displayMetrics.density
-        val text = TextView(this).apply {
-            this.text = message; textSize = 14f; setTextColor(Color.rgb(41, 57, 47)); maxLines = 5
-            setPadding((16 * dp).toInt(), (12 * dp).toInt(), (16 * dp).toInt(), (12 * dp).toInt())
-            background = GradientDrawable().apply { setColor(Color.argb(248, 255, 251, 242)); cornerRadius = 20 * dp; setStroke((1 * dp).toInt(), Color.rgb(221, 228, 214)) }
-            elevation = 4 * dp
-            setOnClickListener { startActivity(Intent(this@OverlayService, MainActivity::class.java).putExtra("reminder_id", reminderId).putExtra("show_missed_reminders", reminderId == 0L).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); dismissBubble() }
-            contentDescription = "提醒：$message，点击查看"
+        val margin = (8 * dp).toInt()
+        val safe = android.graphics.Rect(insetLeft + margin, insetTop + margin, screenWidth - insetRight - margin, screenHeight - insetBottom - margin)
+        if (safe.width() <= 0 || safe.height() <= 0) return
+        val petRect = android.graphics.Rect(params.x, params.y, params.x + params.width, params.y + params.height)
+        val areas = listOf(
+            PetBubbleView.TailEdge.BOTTOM to android.graphics.Rect(safe.left, safe.top, safe.right, min(safe.bottom, petRect.top)),
+            PetBubbleView.TailEdge.TOP to android.graphics.Rect(safe.left, max(safe.top, petRect.bottom), safe.right, safe.bottom),
+            PetBubbleView.TailEdge.RIGHT to android.graphics.Rect(safe.left, safe.top, min(safe.right, petRect.left), safe.bottom),
+            PetBubbleView.TailEdge.LEFT to android.graphics.Rect(max(safe.left, petRect.right), safe.top, safe.right, safe.bottom),
+        )
+        val chosen = areas.filter { it.second.width() >= 120 * dp && it.second.height() >= 100 * dp }
+            .maxByOrNull { min(it.second.width().toFloat(), 304 * dp) * min(it.second.height().toFloat(), 400 * dp) }
+            ?: (PetBubbleView.TailEdge.BOTTOM to safe)
+        val edge = chosen.first; val area = chosen.second
+        view.setTail(edge)
+        val size = view.measureForBounds(area.width(), area.height())
+        val centeredX = (petRect.centerX() - size.width / 2).coerceIn(area.left, max(area.left, area.right - size.width))
+        val centeredY = (petRect.centerY() - size.height / 2).coerceIn(area.top, max(area.top, area.bottom - size.height))
+        val x = when (edge) { PetBubbleView.TailEdge.RIGHT -> area.right - size.width; PetBubbleView.TailEdge.LEFT -> area.left; else -> centeredX }
+        val y = when (edge) { PetBubbleView.TailEdge.BOTTOM -> area.bottom - size.height; PetBubbleView.TailEdge.TOP -> area.top; else -> centeredY }
+        view.setTail(edge, if (edge == PetBubbleView.TailEdge.BOTTOM || edge == PetBubbleView.TailEdge.TOP) (petRect.centerX() - x).toFloat() else (petRect.centerY() - y).toFloat())
+        val window = WindowManager.LayoutParams(size.width, size.height, WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN, PixelFormat.TRANSLUCENT).apply {
+            gravity = Gravity.TOP or Gravity.LEFT; this.x = x; this.y = y
         }
-        val p = WindowManager.LayoutParams(min((260 * dp).toInt(), screenWidth - (16 * dp).toInt()), WindowManager.LayoutParams.WRAP_CONTENT,
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL, PixelFormat.TRANSLUCENT).apply {
-            gravity = Gravity.TOP or Gravity.START
-            x = params.x.coerceIn(0, max(0, screenWidth - width))
-            y = max(insetTop, params.y - (130 * dp).toInt())
-        }
-        try { wm.addView(text, p); bubble = text; main.postDelayed({ dismissBubble() }, 12_000) } catch (_: SecurityException) { stopSelf() }
+        try {
+            wm.addView(view, window); bubble = view
+            if (!prefs.reducedMotion) { view.alpha = 0f; view.animate().alpha(1f).setDuration(180).start() }
+            val timeout = Runnable { if (bubble === view) dismissBubble(animated = true) }
+            bubbleTimeout = timeout
+            val accessibility = getSystemService(android.view.accessibility.AccessibilityManager::class.java)
+            val duration = if (Build.VERSION.SDK_INT >= 29) accessibility.getRecommendedTimeoutMillis(15_000,
+                android.view.accessibility.AccessibilityManager.FLAG_CONTENT_TEXT or android.view.accessibility.AccessibilityManager.FLAG_CONTENT_CONTROLS) else 15_000
+            main.postDelayed(timeout, duration.toLong())
+        } catch (_: SecurityException) { stopSelf() }
+          catch (_: WindowManager.BadTokenException) { stopSelf() }
+          catch (_: WindowManager.InvalidDisplayException) { stopSelf() }
     }
-    private fun dismissBubble() { bubble?.let { runCatching { wm.removeView(it) } }; bubble = null }
+    private fun dismissBubble(animated: Boolean = false) {
+        bubbleTimeout?.let(main::removeCallbacks); bubbleTimeout = null
+        val view = bubble ?: return
+        view.animate().cancel()
+        if (animated && !prefs.reducedMotion && view.isAttachedToWindow)
+            view.animate().alpha(0f).setDuration(130).withEndAction { if (bubble === view) bubble = null; runCatching { wm.removeView(view) } }.start()
+        else { bubble = null; runCatching { wm.removeView(view) } }
+    }
     override fun onDestroy() {
-        main.removeCallbacksAndMessages(null); dismissBubble(); pet.pause()
+        main.removeCallbacksAndMessages(null); cancelSnap(); dismissBubble(); pet.pause()
         if (attached) { savePosition(); runCatching { wm.removeView(pet) }; attached = false }
         unregisterReceiver(events)
         getSharedPreferences("pet", MODE_PRIVATE).unregisterOnSharedPreferenceChangeListener(settingsListener)
+        getSystemService(AppOpsManager::class.java).stopWatchingMode(overlayPermissionListener)
         super.onDestroy()
+    }
+    override fun dump(fd: java.io.FileDescriptor?, writer: java.io.PrintWriter, args: Array<out String>?) {
+        super.dump(fd, writer, args)
+        if (::pet.isInitialized) writer.println("CUTEDOG_METRICS_JSON:${pet.diagnosticSnapshot()}")
     }
     override fun onBind(intent: Intent?): IBinder? = null
     companion object {

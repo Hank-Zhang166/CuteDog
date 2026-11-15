@@ -29,7 +29,9 @@ class FrameClipPlayer(context: Context) : Closeable {
     @Volatile private var closed = false
     private var director: ClipDirector? = null
     private var pendingRequest: String? = null
-    private var active = true
+    @Volatile private var active = true
+    @Volatile private var memoryPressure = false
+    private var restoreAfterActiveSeconds: Double? = null
     private val cadence = FrameCadence()
     private val recent = java.util.ArrayDeque<String>()
     private var currentBitmap: Bitmap? = null
@@ -51,10 +53,11 @@ class FrameClipPlayer(context: Context) : Closeable {
                     require(clip.frames.all { it.substringAfterLast('/') in files }) { "${clip.id} 缺少清单声明的实际动画帧" }
                 }
                 val loader = BitmapFrameLoader(FrameAssetSource { assets.open(it) }, manifest.width, manifest.height)
+                if (memoryPressure) loader.trimMemory()
                 if (closed) loader.close() else {
                     loaded.set(Loaded(manifest, loader))
                     if (closed) loaded.getAndSet(null)?.loader?.close()
-                    else loader.prefetch(manifest.clips.getValue(manifest.initialClip).frames.take(8))
+                    else if (active) loader.prefetch(manifest.clips.getValue(manifest.initialClip).frames.take(8))
                 }
             } catch (error: Exception) {
                 startupError.set("完整角色动画资源尚不可用：${error.message ?: "无法读取清单"}")
@@ -68,12 +71,31 @@ class FrameClipPlayer(context: Context) : Closeable {
         val control = director
         if (control == null) { pendingRequest = clipId; return loaded.get()?.manifest?.clips?.containsKey(clipId) ?: true }
         val accepted = control.request(clipId)
-        if (accepted) { startupError.set(null); loaded.get()?.loader?.prefetch(control.prefetchPaths()) }
+        if (accepted) { startupError.set(null); if (active) loaded.get()?.loader?.prefetch(control.prefetchPaths()) }
         return accepted
     }
     fun setActive(value: Boolean) {
+        if (active == value) return
         active = value; cadence.reset()
-        if (!value) loaded.get()?.loader?.cancelPrefetch()
+        if (!value) {
+            restoreAfterActiveSeconds = null
+            loaded.get()?.loader?.cancelPrefetch()
+        } else restoreAfterActiveSeconds = 0.0
+    }
+
+    fun trimMemory() {
+        memoryPressure = true; restoreAfterActiveSeconds = null
+        loaded.get()?.loader?.trimMemory()
+        cadence.reset()
+    }
+
+    /** Explicit recovery, or automatic only after a genuine pause/resume stays active five seconds. */
+    fun restoreMemoryBudget() {
+        memoryPressure = false; restoreAfterActiveSeconds = null
+        loaded.get()?.loader?.let { loader ->
+            loader.restoreMemoryBudget()
+            if (active) director?.let { loader.prefetch(it.prefetchPaths()) }
+        }
     }
 
     fun tick(deltaSeconds: Double): ClipPlaybackFrame {
@@ -97,6 +119,10 @@ class FrameClipPlayer(context: Context) : Closeable {
             recent.add(current.path)
         }
         if (!active) return ClipPlaybackFrame(currentBitmap, control.clipId, control.frameIndex, false, startupError.get()).also { snapshot = it }
+        restoreAfterActiveSeconds?.let { seconds ->
+            val elapsed = seconds + (deltaSeconds.takeIf { it.isFinite() && it > 0 }?.coerceAtMost(.25) ?: 0.0)
+            if (elapsed >= 5.0) restoreMemoryBudget() else restoreAfterActiveSeconds = elapsed
+        }
         // No frame skipping after a stalled decoder or a long background pause.
         val fps = resources.manifest.clips.getValue(control.clipId).fps
         cadence.add(deltaSeconds, fps)

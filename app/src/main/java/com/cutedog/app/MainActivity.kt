@@ -33,4 +33,8 @@ class MainActivity : ComponentActivity() {
     private fun consumeIntent(intent: Intent) {
         request = LaunchRequest(intent.getLongExtra("reminder_id", 0L), intent.getBooleanExtra("open_daily", false), request.sequence + 1, intent.getBooleanExtra("open_chat", false), intent.getBooleanExtra("show_missed_reminders", false))
     }
+    override fun dump(prefix: String, fd: java.io.FileDescriptor?, writer: java.io.PrintWriter, args: Array<out String>?) {
+        super.dump(prefix, fd, writer, args)
+        writer.println("${prefix}CUTEDOG_VIEW_METRICS_JSON:${com.cutedog.app.pet.PetView.diagnosticSnapshots()}")
+    }
 }

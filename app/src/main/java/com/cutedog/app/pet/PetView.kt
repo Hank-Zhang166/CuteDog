@@ -1,6 +1,8 @@
 package com.cutedog.app.pet
 
 import android.content.Context
+import android.content.ComponentCallbacks2
+import android.content.res.Configuration
 import android.graphics.*
 import android.os.PowerManager
 import android.os.SystemClock
@@ -25,7 +27,21 @@ class PetView(context: Context) : View(context) {
     private var rigFrame: ClipPlaybackFrame? = null
     private var interactionAge = 0f
     private var rigSpeed = 0f
-    val locomotionSpeed: Float get() = if (hasRigAssets) rigSpeed else abs(behavior.velocity)
+    private var tickCount = 0L
+    private var drawCount = 0L
+    private var actualFrameChanges = 0L
+    private var observedFrame: Pair<String?, Int>? = null
+    private val diagnosticId = java.util.UUID.randomUUID().toString()
+    private val memoryCallbacks = object : ComponentCallbacks2 {
+        override fun onConfigurationChanged(newConfig: Configuration) = Unit
+        override fun onLowMemory() { rigPlayer?.trimMemory() }
+        override fun onTrimMemory(level: Int) {
+            if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) rigPlayer?.trimMemory()
+        }
+    }
+    val locomotionSpeed: Float get() = if (hasRigAssets) {
+        if (rigFrame?.bitmap == null || rigFrame?.loading != false || rigFrame?.error != null) 0f else rigSpeed
+    } else abs(behavior.velocity)
     val behavior = PetBehavior()
     var onDrag: ((Float, Float, Boolean) -> Unit)? = null
     var onTap: (() -> Unit)? = null
@@ -36,10 +52,10 @@ class PetView(context: Context) : View(context) {
     private val shadow = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(23, 66, 45, 29) }
     private val source = Rect()
     private val dest = RectF()
-    private val atlas = cachedAtlas.get() ?: context.assets.open("pet/samoyed.png").use {
+    private val atlas by lazy { cachedAtlas.get() ?: context.assets.open("pet/samoyed.png").use {
         BitmapFactory.decodeStream(it).also { b -> cachedAtlas = WeakReference(b) }
-    }
-    private val walk = runCatching { context.assets.open("pet/walk.png").use { BitmapFactory.decodeStream(it) } }.getOrNull()
+    } }
+    private val walk by lazy { runCatching { context.assets.open("pet/walk.png").use { BitmapFactory.decodeStream(it) } }.getOrNull() }
     private var lastFrame = 0L
     private var running = false
     private var downX = 0f; private var downY = 0f
@@ -54,6 +70,7 @@ class PetView(context: Context) : View(context) {
     private val tick = object : Runnable {
         override fun run() {
             if (!running || !isShown || !power.isInteractive) { lastFrame = 0; return }
+            tickCount++
             val now = SystemClock.uptimeMillis()
             behavior.quiet = settings.activity == "quiet" || LocalTime.now().hour in 0..7 || LocalTime.now().hour >= 22
             behavior.active = settings.activity == "lively"
@@ -63,6 +80,10 @@ class PetView(context: Context) : View(context) {
                 val player = rigPlayer
                 if (player != null) {
                     val frame = player.tick(delta.toDouble()); rigFrame = frame
+                    val frameKey = frame.clipId to frame.frameIndex
+                    if (frame.bitmap != null && frameKey != observedFrame) {
+                        actualFrameChanges++; observedFrame = frameKey
+                    }
                     interactionAge += delta
                     val battery = context.getSystemService(android.os.BatteryManager::class.java)
                     val quiet = settings.activity == "quiet" || LocalTime.now().hour in 0..7 || LocalTime.now().hour >= 22
@@ -107,20 +128,33 @@ class PetView(context: Context) : View(context) {
         interactionAge = 0f
         if (hasRigAssets) {
             brain.interact(when (intent) { "pet" -> "head"; "toy" -> "ball"; else -> intent })?.let { if (rigPlayer?.request(it) == false) brain.requestRejected(it) }
-        } else behavior.react(if (intent == "nuzzle") "cuddle" else intent)
+        } else behavior.react(if (intent == "nuzzle" || intent == "body") "cuddle" else intent)
         audio.play(if (intent == "jump" || intent == "toy" || intent == "ball") "ball" else if (intent == "pet" || intent == "cuddle") "breath" else "paw")
         resume()
     }
     fun pause() { running = false; removeCallbacks(tick); removeCallbacks(singleTap); rigPlayer?.setActive(false); lastFrame = 0 }
-    fun resume() { if (isAttachedToWindow) { running = true; rigPlayer?.setActive(true); removeCallbacks(tick); post(tick) } }
-    override fun onAttachedToWindow() { super.onAttachedToWindow(); if (hasRigAssets && rigPlayer == null) rigPlayer = FrameClipPlayer(context); resume() }
-    override fun onDetachedFromWindow() { pause(); audio.release(); rigPlayer?.close(); rigPlayer = null; rigFrame = null; super.onDetachedFromWindow() }
+    fun resume() { if (isAttachedToWindow && visibility == VISIBLE && power.isInteractive) { running = true; rigPlayer?.setActive(true); removeCallbacks(tick); post(tick) } }
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        context.applicationContext.registerComponentCallbacks(memoryCallbacks)
+        attachedViews.removeAll { it.get() == null || it.get() === this }
+        attachedViews.add(WeakReference(this))
+        if (hasRigAssets && rigPlayer == null) rigPlayer = FrameClipPlayer(context)
+        resume()
+    }
+    override fun onDetachedFromWindow() {
+        pause(); audio.release(); rigPlayer?.close(); rigPlayer = null; rigFrame = null
+        context.applicationContext.unregisterComponentCallbacks(memoryCallbacks)
+        attachedViews.removeAll { it.get() == null || it.get() === this }
+        super.onDetachedFromWindow()
+    }
     override fun onWindowVisibilityChanged(visibility: Int) {
         super.onWindowVisibilityChanged(visibility)
         if (visibility == VISIBLE) resume() else pause()
     }
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
+        drawCount++
         if (hasRigAssets) {
             val frame = rigFrame
             val pixels = frame?.bitmap
@@ -131,7 +165,8 @@ class PetView(context: Context) : View(context) {
                 paint.alpha = 255
                 canvas.drawBitmap(pixels, source, dest, paint)
             } else if (frame?.error != null) {
-                paint.alpha = 255; paint.color = Color.rgb(77, 85, 75); paint.textSize = 14 * resources.displayMetrics.scaledDensity
+                paint.alpha = 255; paint.color = Color.rgb(77, 85, 75)
+                paint.textSize = android.util.TypedValue.applyDimension(android.util.TypedValue.COMPLEX_UNIT_SP, 14f, resources.displayMetrics)
                 paint.textAlign = Paint.Align.CENTER
                 canvas.drawText("角色资源未能加载，请检查安装包", width / 2f, height / 2f, paint)
                 contentDescription = "角色资源未能加载，请重新安装完整版本"
@@ -189,7 +224,7 @@ class PetView(context: Context) : View(context) {
                     dragged = true
                     onDrag?.invoke(event.rawX - lastX, event.rawY - lastY, false)
                 } else if (!dragged && settings.pettingEnabled && distance > slop && SystemClock.uptimeMillis() - downAt < settings.dragHoldMs) {
-                    if (!stroked) { react(if (event.y < height * .6f) "pet" else "nuzzle"); if (settings.haptics) performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK) }
+                    if (!stroked) { react(if (event.y < height * .6f) "pet" else "body"); if (settings.haptics) performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK) }
                     stroked = true
                 }
                 lastX = event.rawX; lastY = event.rawY
@@ -211,5 +246,29 @@ class PetView(context: Context) : View(context) {
         return super.onTouchEvent(event)
     }
     override fun performClick(): Boolean { super.performClick(); react("wave"); onTap?.invoke(); onAction?.invoke(settings.tapAction); return true }
-    companion object { private var cachedAtlas = WeakReference<Bitmap>(null) }
+    /** Shell dumpsys diagnostics contain counters only, never chats, reminders, names or credentials. */
+    fun diagnosticSnapshot(): org.json.JSONObject {
+        val cache = rigPlayer?.cacheStats()
+        return org.json.JSONObject().apply {
+            put("viewId", diagnosticId); put("scope", if (onDrag != null) "overlay" else "activity")
+            put("renderMode", if (hasRigAssets) "skeletal_frames" else "legacy")
+            put("running", running && isShown && power.isInteractive); put("visible", isShown)
+            put("tickCount", tickCount); put("drawCount", drawCount)
+            put("actualFrameChanges", if (hasRigAssets) actualFrameChanges else org.json.JSONObject.NULL)
+            put("clipId", rigFrame?.clipId ?: org.json.JSONObject.NULL)
+            put("clipFps", if (hasRigAssets) rigPlayer?.requiredTickRate ?: 0 else 0)
+            put("loading", rigFrame?.loading ?: false)
+            put("cacheBytes", cache?.allocatedBytes ?: 0L); put("cacheEntries", cache?.cachedFrames ?: 0)
+            put("decodedFrames", cache?.decodedFrames ?: 0L); put("reusedBuffers", cache?.reusedBuffers ?: 0L)
+            put("pendingFrames", cache?.pendingFrames ?: 0); put("activeDecoder", cache?.activeDecoder ?: false)
+            put("uptimeMs", SystemClock.uptimeMillis())
+        }
+    }
+    companion object {
+        private var cachedAtlas = WeakReference<Bitmap>(null)
+        private val attachedViews = mutableListOf<WeakReference<PetView>>()
+        fun diagnosticSnapshots() = org.json.JSONArray().apply {
+            attachedViews.mapNotNull { it.get() }.forEach { put(it.diagnosticSnapshot()) }
+        }
+    }
 }

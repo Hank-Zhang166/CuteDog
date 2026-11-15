@@ -237,9 +237,9 @@ class PetBrain(seed: Long = System.nanoTime()) {
     private fun normalize(kind: String): String? = when (kind.lowercase()) {
         "pet", "head", "pet_head" -> "head"
         "body", "back" -> "body"
-        "nose", "call", "happy", "calm", "curious", "cuddle", "wave", "jump", "treat", "ball", "follow" -> kind.lowercase()
+        "nose", "call", "happy", "calm", "sleep", "curious", "cuddle", "wave", "jump", "treat", "ball", "follow" -> kind.lowercase()
         "toy" -> "ball"
-        "sleep", "soothe", "comfort" -> "calm"
+        "soothe", "comfort" -> "calm"
         else -> null
     }
 
@@ -284,6 +284,7 @@ class PetBrain(seed: Long = System.nanoTime()) {
             "head" to listOf("pet_head", "nuzzle", "soothe"), "body" to listOf("cuddle", "belly_up", "relax"),
             "nose" to listOf("curious", "tilt"), "call" to listOf("call", "wave"),
             "happy" to listOf("happy", "tail_wag", "excited"), "calm" to listOf("soothe", "relax", "sit_idle"),
+            "sleep" to listOf("sleep", "curl_idle"),
             "curious" to listOf("curious", "tilt", "focus"), "cuddle" to listOf("cuddle", "nuzzle", "belly_up"),
             "wave" to listOf("wave", "call"), "jump" to listOf("jump", "hop"), "treat" to listOf("treat"),
             "ball" to listOf("play_ball"), "follow" to listOf("follow", "look_left", "look_right"),
