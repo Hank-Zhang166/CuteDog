@@ -179,7 +179,7 @@ from pathlib import Path
 (Path(sys.argv[1])/'initial-permissions.json').write_text(json.dumps({'notification':sys.argv[2],'exactAlarmAppOp':sys.argv[3]},indent=2)+'\n')
 PY
 
-denied_methods='com.cutedog.app.reminder.ReminderPersistenceTest#deniedExactAlarmPermissionUsesInexactSchedulingWithoutSecurityFailure,com.cutedog.app.reminder.ReminderReliabilityTest#deniedNotificationPermissionRetainsDurablePendingOccurrence'
+denied_methods='com.cutedog.app.reminder.ReminderPersistenceTest#deniedExactAlarmPermissionUsesInexactSchedulingWithoutSecurityFailure,com.cutedog.app.reminder.ReminderReliabilityTest#deniedNotificationPermissionRetainsDurablePendingOccurrence,com.cutedog.app.daily.DailyInstrumentationTest#deniedNotificationPermissionRetainsDailyQuoteWithoutClaimingDelivery'
 run_phase() {
   local phase="$1"
   local result_code=0
@@ -203,6 +203,12 @@ run_phase() {
   # between phases could silently replace the APK bytes recorded before installation.
   local args=(:app:connectedDebugAndroidTest --rerun --no-daemon --console=plain --stacktrace -Pandroid.injected.androidTest.leaveApksInstalledAfterRun=true)
   args+=("-Pandroid.testInstrumentationRunnerArguments.cuteDogEvidencePhase=$phase")
+  # Reached only after the explicit --disposable and single-emulator checks above.
+  # Destructive fixture tests must independently require this contract before touching data.
+  args+=("-Pandroid.testInstrumentationRunnerArguments.cuteDogDisposable=true")
+  args+=("-Pandroid.testInstrumentationRunnerArguments.cuteDogSourceCommit=$(git rev-parse HEAD)")
+  args+=("-Pandroid.testInstrumentationRunnerArguments.cuteDogRunId=${GITHUB_RUN_ID:-local}")
+  args+=("-Pandroid.testInstrumentationRunnerArguments.cuteDogRunAttempt=${GITHUB_RUN_ATTEMPT:-1}")
   if [[ "$phase" == denied ]]; then args+=("-Pandroid.testInstrumentationRunnerArguments.class=$denied_methods"); fi
   set +e
   stage "${phase}_instrumentation"
@@ -217,6 +223,10 @@ run_phase() {
   local failure_remote="/sdcard/Android/data/$package/files/ui-test-evidence/$phase"
   if adb_cmd shell test -d "$failure_remote" >"$output_phase/ui-evidence-pull.log" 2>&1; then
     adb_cmd pull "$failure_remote" "$output_phase/ui-failures" >>"$output_phase/ui-evidence-pull.log" 2>&1 || true
+  fi
+  local daily_remote="/sdcard/Android/data/$package/files/daily-test-evidence/$phase"
+  if adb_cmd shell test -d "$daily_remote" >"$output_phase/daily-evidence-pull.log" 2>&1; then
+    adb_cmd pull "$daily_remote" "$output_phase/daily-evidence" >>"$output_phase/daily-evidence-pull.log" 2>&1 || true
   fi
   python3 - "$output" "$phase" "$result_code" "$api" "$denied_methods" <<'PY'
 import datetime,hashlib,json,re,shutil,sys,xml.etree.ElementTree as ET
@@ -256,7 +266,8 @@ counts={status:sum(case['status']==status for case in cases) for status in ('pas
 apks_unchanged=all(value['unchanged'] for value in apk_provenance)
 passed=rc==0 and bool(files) and apks_unchanged and not any([missing,unexpected,duplicates,parse_errors,unexpected_skips,missing_required_skips]) and counts['failed']==0 and counts['error']==0
 ui_files=sorted(str(p.relative_to(out)) for p in (out/'ui-failures').rglob('*') if p.is_file()) if (out/'ui-failures').exists() else []
-summary={'phase':phase,'api':api,'status':'passed' if passed else 'failed','gradleExitCode':rc,'apksUnchanged':apks_unchanged,'counts':counts,'expectedTests':len(expected),'expectedSkipped':sorted(expected_skip),'unexpectedSkipped':unexpected_skips,'expectedSkipNotObserved':missing_required_skips,'missingTests':missing,'unexpectedTests':unexpected,'duplicateTests':duplicates,'xmlParseErrors':parse_errors,'junitFiles':files,'testCases':cases,'uiFailureEvidenceFiles':ui_files,'capturedAt':datetime.datetime.now(datetime.timezone.utc).isoformat()}
+daily_files=sorted(str(p.relative_to(out)) for p in (out/'daily-evidence').rglob('*') if p.is_file()) if (out/'daily-evidence').exists() else []
+summary={'phase':phase,'api':api,'status':'passed' if passed else 'failed','gradleExitCode':rc,'apksUnchanged':apks_unchanged,'counts':counts,'expectedTests':len(expected),'expectedSkipped':sorted(expected_skip),'unexpectedSkipped':unexpected_skips,'expectedSkipNotObserved':missing_required_skips,'missingTests':missing,'unexpectedTests':unexpected,'duplicateTests':duplicates,'xmlParseErrors':parse_errors,'junitFiles':files,'testCases':cases,'uiFailureEvidenceFiles':ui_files,'dailyEvidenceFiles':daily_files,'capturedAt':datetime.datetime.now(datetime.timezone.utc).isoformat()}
 (out/'summary.json').write_text(json.dumps(summary,ensure_ascii=False,indent=2)+'\n')
 metadata=json.loads((root/'summary.json').read_text());metadata['phases'][phase]=summary;(root/'summary.json').write_text(json.dumps(metadata,ensure_ascii=False,indent=2)+'\n')
 log=out/'selected-logcat.txt'

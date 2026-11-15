@@ -53,7 +53,9 @@ class PetView(context: Context) : View(context) {
         val canonical = player.manifest?.canonicalClipId(target)
         canonical !in STATIONARY_PROP_ACTIONS && player.manifest?.travelReady(target) == true
     } ?: false
-    val authoredTravelInProgress: Boolean get() = rigPlayer?.let { it.manifest?.travelReady(it.currentClip) == true && it.canonicalClipId !in STATIONARY_PROP_ACTIONS } ?: false
+    val authoredTravelInProgress: Boolean get() = rigPlayer?.let {
+        (it.hasReservedTravelSequence || it.manifest?.travelReady(it.currentClip) == true) && it.canonicalClipId !in STATIONARY_PROP_ACTIONS
+    } ?: false
     val authoredStoppingDistancePixels: Float? get() = rigPlayer?.stoppingTravelFraction?.let { (it * min(width, height) * spatialDepth).toFloat() }
     val authoredPlanningMarginPixels: Float get() = ((rigPlayer?.maximumStepFraction ?: 0.0) * min(width, height) * spatialDepth * 3).toFloat()
     val authoredActualHeading: Int get() = rigPlayer?.let { player ->
@@ -66,8 +68,10 @@ class PetView(context: Context) : View(context) {
     var onDrag: ((Float, Float, Boolean) -> Unit)? = null
     var onTap: (() -> Unit)? = null
     var onAction: ((String) -> Unit)? = null
-    var onAuthoredFrameCommitted: ((Int) -> Unit)? = null
-    var onAuthoredStepAllowed: ((Float) -> Boolean)? = null
+    var onAuthoredFrameCommitted: ((Int, Long) -> Unit)? = null
+    var onAuthoredStepAllowed: ((Float, Long) -> Boolean)? = null
+    var onAuthoredEntryAllowed: ((Float) -> Boolean)? = null
+    private var authoredStepSequence = 0L
     var movementDirection = 0f
     var spatialDepth = 1f
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
@@ -98,10 +102,10 @@ class PetView(context: Context) : View(context) {
     private val approveAuthoredTravel: (Double) -> Boolean = { fraction ->
         // The app's in-place animation preview has no moving system window. Overlay playback
         // requires permission for the complete measured step before either frame or window advances.
-        onDrag == null || (hostAllowsTravel && authoredTravelInProgress && onAuthoredStepAllowed?.invoke((fraction * min(width, height) * spatialDepth).toFloat()) == true)
+        onDrag == null || (hostAllowsTravel && authoredTravelInProgress && onAuthoredStepAllowed?.invoke((fraction * min(width, height) * spatialDepth).toFloat(), authoredStepSequence) == true)
     }
     private val approveAuthoredEntry: (Int, Double) -> Boolean = { heading, fraction ->
-        onDrag == null || (hostAllowsTravel && onAuthoredStepAllowed?.invoke(
+        onDrag == null || (hostAllowsTravel && onAuthoredEntryAllowed?.invoke(
             (heading * fraction * min(width, height) * spatialDepth).toFloat()) == true)
     }
     private fun advanceFrame(now: Long, frameTimeNanos: Long?) {
@@ -119,6 +123,7 @@ class PetView(context: Context) : View(context) {
         if (hasRigAssets) {
             val player = rigPlayer
             if (player != null) {
+                authoredStepSequence++
                 val frame = player.tick(seconds, approveAuthoredTravel, approveAuthoredEntry)
                 frame.rejectedTravelTarget?.let(brain::requestRejected)
                 if (frame.error != rigFrame?.error) needsInvalidate = true
@@ -133,7 +138,7 @@ class PetView(context: Context) : View(context) {
                 val stepHeading = if (travel > 0.0) 1 else if (travel < 0.0) -1 else player.travelHeading
                 authoredTravel.record(travel, min(width, height).toDouble() * spatialDepth,
                     stepHeading, onDrag != null && hostAllowsTravel && (travel != 0.0 || canAuthoredTravel), now)
-                if (travel != 0.0 && onDrag != null && hostAllowsTravel) onAuthoredFrameCommitted?.invoke(stepHeading)
+                if (travel != 0.0 && onDrag != null && hostAllowsTravel) onAuthoredFrameCommitted?.invoke(stepHeading, authoredStepSequence)
                 if (!frameLifecycle.isCurrent(scheduleToken)) { if (needsInvalidate) invalidate(); return }
                 if (stoppingForSpace && player.canonicalClipId == "stand") stoppingForSpace = false
                 // Waiting checks only touch the ready-frame cache; no battery query/behavior

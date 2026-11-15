@@ -45,6 +45,7 @@ class FrameClipPlayer(context: Context) : Closeable {
     val currentClip: String? get() = director?.clipId
     val requestedClip: String? get() = director?.requestedClip ?: pendingRequest
     val canonicalClipId: String? get() = director?.canonicalClipId
+    val hasReservedTravelSequence: Boolean get() = director?.hasReservedTravelSequence == true
     val canInterrupt: Boolean get() = director?.canInterrupt ?: false
     val canTravel: Boolean get() = !closed && active && snapshot.bitmap != null &&
         !snapshot.loading && !snapshot.travelBlocked && snapshot.error == null && snapshot.clipId == director?.clipId && director?.canTravel == true

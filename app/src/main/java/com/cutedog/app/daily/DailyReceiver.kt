@@ -40,7 +40,9 @@ class DailyReceiver : BroadcastReceiver() {
         })
         if (manager.getNotificationChannel(CHANNEL)?.importance == NotificationManager.IMPORTANCE_NONE) return
         synchronized(DailyRepository.lock) {
-            val repository = DailyRepository(context)
+            // Keep the archive, selected quote and delivery claim on the same day even
+            // when the clock crosses midnight between the permission check and storage.
+            val repository = DailyRepository(context) { now.toLocalDate() }
             val date = now.toLocalDate().toString()
             if (repository.wasGreeted(date)) return
             val quote = repository.today()

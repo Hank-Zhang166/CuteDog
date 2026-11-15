@@ -136,19 +136,19 @@ internal fun SettingsScreen(onNotificationPermission: () -> Unit, onRefresh: () 
         }
         SoftCard(Modifier.fillMaxWidth()) {
             Text("每天一句暖心话", style = MaterialTheme.typography.titleLarge)
-            SettingSwitch("每日问候", "每日最多主动提醒一次；勿扰时段内不打扰。", dailyEnabled) { dailyEnabled = it; daily.enabled = it; scope.launch { withContext(Dispatchers.IO) { DailyScheduler(context).schedule() } } }
-            OutlinedTextField(hour, { hour = it.filter(Char::isDigit).take(2) }, label = { Text("问候时间（0–23 点）") }, modifier = Modifier.fillMaxWidth(), singleLine = true, keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number), shape = RoundedCornerShape(16.dp))
+            SettingSwitch("每日问候", "每日最多主动提醒一次；勿扰时段内不打扰。", dailyEnabled, modifier = Modifier.testTag("daily_enabled")) { dailyEnabled = it; daily.enabled = it; scope.launch { withContext(Dispatchers.IO) { DailyScheduler(context).schedule() } } }
+            OutlinedTextField(hour, { hour = it.filter(Char::isDigit).take(2) }, label = { Text("问候时间（0–23 点）") }, modifier = Modifier.fillMaxWidth().testTag("daily_hour"), singleLine = true, keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number), shape = RoundedCornerShape(16.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedTextField(quietStart, { quietStart = it.filter(Char::isDigit).take(2) }, label = { Text("勿扰开始（点）") }, modifier = Modifier.weight(1f), singleLine = true, keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number), shape = RoundedCornerShape(16.dp))
-                OutlinedTextField(quietEnd, { quietEnd = it.filter(Char::isDigit).take(2) }, label = { Text("勿扰结束（点）") }, modifier = Modifier.weight(1f), singleLine = true, keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number), shape = RoundedCornerShape(16.dp))
+                OutlinedTextField(quietStart, { quietStart = it.filter(Char::isDigit).take(2) }, label = { Text("勿扰开始（点）") }, modifier = Modifier.weight(1f).testTag("daily_quiet_start"), singleLine = true, keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number), shape = RoundedCornerShape(16.dp))
+                OutlinedTextField(quietEnd, { quietEnd = it.filter(Char::isDigit).take(2) }, label = { Text("勿扰结束（点）") }, modifier = Modifier.weight(1f).testTag("daily_quiet_end"), singleLine = true, keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number), shape = RoundedCornerShape(16.dp))
             }
             Text("开始与结束相同表示不设勿扰时段。每日问候使用非精确调度，可能随系统节电而延后。", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            TextButton(onClick = {
+            TextButton(modifier = Modifier.testTag("daily_save_time"), onClick = {
                 val h = hour.toIntOrNull(); val start = quietStart.toIntOrNull(); val end = quietEnd.toIntOrNull()
                 if (h == null || start == null || end == null || h !in 0..23 || start !in 0..23 || end !in 0..23) context.message("时间请填写 0 到 23 的整数。")
                 else { daily.hour = h; daily.quietStart = start; daily.quietEnd = end; scope.launch { withContext(Dispatchers.IO) { DailyScheduler(context).schedule() } }; context.message("问候时间已保存。") }
             }) { Text("保存问候时间") }
-            OutlinedButton(onClick = { historyVisible = true }, modifier = Modifier.fillMaxWidth()) { Text("翻看历史与珍藏") }
+            OutlinedButton(onClick = { historyVisible = true }, modifier = Modifier.fillMaxWidth().testTag("daily_history")) { Text("翻看历史与珍藏") }
         }
         SoftCard(Modifier.fillMaxWidth()) {
             Text("陪伴，也尊重边界", style = MaterialTheme.typography.titleLarge)
@@ -169,10 +169,10 @@ internal fun SettingsScreen(onNotificationPermission: () -> Unit, onRefresh: () 
 }
 
 @Composable
-private fun SettingSwitch(title: String, detail: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+private fun SettingSwitch(title: String, detail: String, checked: Boolean, modifier: Modifier = Modifier, onChange: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         Column(Modifier.weight(1f)) { Text(title, style = MaterialTheme.typography.titleMedium); Text(detail, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-        Switch(checked, onChange)
+        Switch(checked, onChange, modifier)
     }
 }
 
@@ -198,7 +198,7 @@ private fun QuoteHistoryDialog(onDismiss: () -> Unit) {
             Column(Modifier.padding(22.dp)) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Text("把温柔收藏起来", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f)); TextButton(onClick = onDismiss) { Text("关闭") } }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { FilterChip(!favoritesOnly, { favoritesOnly = false }, label = { Text("历史") }); FilterChip(favoritesOnly, { favoritesOnly = true }, label = { Text("珍藏") }) }
-                LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                LazyColumn(Modifier.weight(1f).testTag("daily_history_list"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     if (quotes.isEmpty()) item { EmptyNote("温柔会慢慢积攒", "每天打开应用看一句，也可以把喜欢的话珍藏起来。") }
                     items(quotes, key = { "${it.id}-${it.date}" }) { quote -> SoftCard(Modifier.fillMaxWidth()) {
                         Text(quote.date, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

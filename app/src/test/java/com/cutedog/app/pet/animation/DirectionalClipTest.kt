@@ -73,6 +73,32 @@ class DirectionalClipTest {
         assertEquals("stand", d.clipId); assertEquals("stand", d.requestedClip)
     }
 
+    @Test fun approvedZeroTravelStartupRemainsAnExistingSequenceUntilSafeStanding() {
+        val d = ClipDirector(manifest(fixture().map {
+            if (it.id == "walk_start") it.copy(projectedTravel = List(4) { 0.0 }, travelEnabled = false) else it
+        }))
+        d.request("walk"); assertFalse(d.hasReservedTravelSequence)
+        repeat(3) { d.commit(d.peekNext()) }
+        assertNotNull(d.commitIfTravelAllowed(d.peekNext(), { true }, { _, _ -> true }))
+        assertEquals("walk_start", d.clipId); assertFalse(d.canTravel)
+        assertTrue(d.hasReservedTravelSequence)
+        d.request("pet_head") // Interaction still needs the authored startup/walk/stop return.
+        assertTrue(d.hasReservedTravelSequence)
+        advanceTo(d, "walk_stop") { assertTrue(d.hasReservedTravelSequence) }
+        advanceTo(d, "stand") { assertTrue(d.hasReservedTravelSequence) }
+        assertFalse(d.hasReservedTravelSequence)
+    }
+
+    @Test fun rejectedStartupAndUncommittedPrefetchNeverAcquireASequenceReservation() {
+        val d = ClipDirector(manifest()); d.request("walk")
+        repeat(3) { d.commit(d.peekNext()) }
+        repeat(10) { d.travelReservationFor(d.peekNext()); d.prefetchPaths() }
+        assertFalse(d.hasReservedTravelSequence)
+        assertNull(d.commitIfTravelAllowed(d.peekNext(), { true }, { _, _ -> false }))
+        assertFalse(d.hasReservedTravelSequence); assertEquals("stand", d.clipId)
+        assertTrue(d.requestStop()); assertFalse(d.hasReservedTravelSequence)
+    }
+
     @Test fun rejectedRightVariantReportsTheCanonicalBrainTarget() {
         val d = ClipDirector(manifest()); d.request("walk_right")
         repeat(3) { d.commit(d.peekNext()) }

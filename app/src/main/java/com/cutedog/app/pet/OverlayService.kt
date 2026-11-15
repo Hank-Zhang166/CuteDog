@@ -8,6 +8,8 @@ import android.os.*
 import android.provider.Settings
 import android.view.*
 import com.cutedog.app.MainActivity
+import com.cutedog.app.pet.animation.AuthoredStepApproval
+import com.cutedog.app.pet.animation.OverlayTravelPolicy
 import kotlin.math.*
 
 /** Only the pet's small rectangle and a temporary bubble receive touches. */
@@ -21,6 +23,9 @@ class OverlayService : Service() {
     private var hidden = false
     private var bubble: PetBubbleView? = null
     private var bubbleTimeout: Runnable? = null
+    private var bubbleWindow: WindowManager.LayoutParams? = null
+    private var bubbleTailEdge = PetBubbleView.TailEdge.BOTTOM
+    private val stepApproval = AuthoredStepApproval()
     private var snapTask: Runnable? = null
     private var screenWidth = 0
     private var screenHeight = 0
@@ -60,12 +65,13 @@ class OverlayService : Service() {
     }
     private val motion = object : Runnable {
         override fun run() {
-            if (attached && !hidden && bubble == null && snapTask == null && pet.isShown && !dragging && !prefs.locked && !prefs.reducedMotion) {
+            if (attached && !hidden && (bubble == null || pet.usesAuthoredFrames) && snapTask == null && pet.isShown && !dragging && !prefs.locked && !prefs.reducedMotion) {
                 val now = SystemClock.uptimeMillis()
                 val dt = if (lastMotion == 0L) .05f else ((now - lastMotion) / 1000f).coerceAtMost(.1f)
                 lastMotion = now
                 if (pet.usesAuthoredFrames) moveAuthoredFrames() else moveLegacyPreview(dt)
             } else {
+                stepApproval.clear()
                 pet.setAuthoredTravelAllowed(false)
                 lastMotion = 0
             }
@@ -80,6 +86,13 @@ class OverlayService : Service() {
     private fun moveAuthoredFrames() {
         if (!spaceAvailable) {
             route.clear(); pet.setAuthoredTravelAllowed(false); return
+        }
+        if (bubble != null) {
+            route.clear()
+            // Keep a reminder's wave/interaction route. Only a roaming target needs a stop request.
+            if (OverlayTravelPolicy.shouldStop(true, pet.authoredTravelRequested)) pet.stopAuthoredTravel()
+            pet.setAuthoredTravelAllowed(pet.authoredTravelInProgress)
+            return
         }
         if (!pet.authoredTravelRequested) {
             // An interaction/stop request must not erase the old heading's measured deceleration.
@@ -122,31 +135,47 @@ class OverlayService : Service() {
         pet.setAuthoredTravelAllowed(true)
     }
 
-    /** Runs in PetView's successful-frame callback, before its bitmap is invalidated for this vsync. */
-    private fun authoredMovementHostReady(): Boolean = attached && !hidden && bubble == null && snapTask == null && pet.isShown &&
+    /** Checks common window/permission state. A bubble itself does not invalidate a committed step. */
+    private fun authoredMovementHostReady(): Boolean = attached && !hidden && snapTask == null && pet.isShown &&
         !dragging && !prefs.locked && !prefs.reducedMotion && spaceAvailable
 
-    private fun allowAuthoredStep(pixels: Float): Boolean {
-        if (!authoredMovementHostReady() || !pixels.isFinite()) return false
+    private fun authoredSpaceClear(pixels: Float): Boolean {
+        if (!pixels.isFinite()) return false
         val next = PetSpace.Point(position.x + pixels, position.y)
         return PetSpace.valid(next, spaceArea, obstacles) && PetSpace.clearSegment(position, next, obstacles)
     }
 
-    private fun consumeAuthoredMovement(heading: Int) {
-        if (!attached || hidden || bubble != null || snapTask != null || !pet.isShown || dragging || prefs.locked ||
-            prefs.reducedMotion || !spaceAvailable) {
-            pet.setAuthoredTravelAllowed(false); return
-        }
-        // The slower route planner never consumes this queue. Each committed-frame callback does.
+    /** Whole-route geometry check: deliberately cannot issue a real-step approval. */
+    private fun allowAuthoredEntry(pixels: Float): Boolean =
+        OverlayTravelPolicy.mayReserve(authoredMovementHostReady(), bubble != null,
+            pet.authoredTravelInProgress, pet.authoredTravelRequested) && authoredSpaceClear(pixels)
+
+    private fun allowAuthoredStep(pixels: Float, sequence: Long): Boolean = stepApproval.approve(sequence, pixels,
+        SystemClock.uptimeMillis(), OverlayTravelPolicy.mayAdvance(authoredMovementHostReady(), bubble != null,
+            pet.authoredTravelInProgress) && authoredSpaceClear(pixels))
+
+    private fun consumeAuthoredMovement(heading: Int, sequence: Long) {
+        // The stop's last positive interval may already have committed stand. Use the approval
+        // from that exact frame, not the new clip's travelInProgress value, to consume it once.
         val submittedPixels = pet.consumeAuthoredTravelPixels(heading)
-        if (submittedPixels == 0f || submittedPixels * heading < 0f) return
-        if (!allowAuthoredStep(submittedPixels)) {
+        val allowed = stepApproval.consume(sequence, submittedPixels, SystemClock.uptimeMillis(),
+            authoredMovementHostReady(), authoredSpaceClear(submittedPixels))
+        if (!allowed || submittedPixels * heading <= 0f) {
             route.clear(); pet.setAuthoredTravelAllowed(false); return
         }
         position = PetSpace.Point(position.x + submittedPixels, position.y)
         params.x = (position.x - params.width / 2f).toInt()
         pet.movementDirection = heading.toFloat()
         safelyUpdate()
+        updateBubbleTail()
+    }
+
+    private fun updateBubbleTail() {
+        val view = bubble ?: return
+        val window = bubbleWindow ?: return
+        val horizontal = bubbleTailEdge == PetBubbleView.TailEdge.TOP || bubbleTailEdge == PetBubbleView.TailEdge.BOTTOM
+        val target = if (horizontal) params.x + params.width / 2f - window.x else params.y + params.height / 2f - window.y
+        view.setTail(bubbleTailEdge, target)
     }
 
     private fun moveLegacyPreview(dt: Float) {
@@ -182,6 +211,7 @@ class OverlayService : Service() {
         pet = PetView(this)
         pet.onAuthoredFrameCommitted = ::consumeAuthoredMovement
         pet.onAuthoredStepAllowed = ::allowAuthoredStep
+        pet.onAuthoredEntryAllowed = ::allowAuthoredEntry
         pet.setOnApplyWindowInsetsListener { _, insets ->
             if (Build.VERSION.SDK_INT < 30) {
                 val cutout = if (Build.VERSION.SDK_INT >= 28) insets.displayCutout?.let {
@@ -370,8 +400,12 @@ class OverlayService : Service() {
     private fun attachBubble(view: PetBubbleView) {
         if (hidden || !spaceAvailable || !getSystemService(PowerManager::class.java).isInteractive || getSystemService(KeyguardManager::class.java).isKeyguardLocked) return
         cancelSnap()
-        pet.setAuthoredTravelAllowed(false)
         dismissBubble()
+        route.clear()
+        if (pet.usesAuthoredFrames) {
+            if (OverlayTravelPolicy.shouldStop(true, pet.authoredTravelRequested)) pet.stopAuthoredTravel()
+            pet.setAuthoredTravelAllowed(pet.authoredTravelInProgress)
+        }
         val dp = resources.displayMetrics.density
         val margin = (8 * dp).toInt()
         val safe = android.graphics.Rect(insetLeft + margin, insetTop + margin, screenWidth - insetRight - margin, screenHeight - insetBottom - margin)
@@ -399,7 +433,7 @@ class OverlayService : Service() {
             gravity = Gravity.TOP or Gravity.LEFT; this.x = x; this.y = y
         }
         try {
-            wm.addView(view, window); bubble = view
+            wm.addView(view, window); bubble = view; bubbleWindow = window; bubbleTailEdge = edge
             if (!prefs.reducedMotion) { view.alpha = 0f; view.animate().alpha(1f).setDuration(180).start() }
             val timeout = Runnable { if (bubble === view) dismissBubble(animated = true) }
             bubbleTimeout = timeout
@@ -413,6 +447,7 @@ class OverlayService : Service() {
     }
     private fun dismissBubble(animated: Boolean = false) {
         bubbleTimeout?.let(main::removeCallbacks); bubbleTimeout = null
+        bubbleWindow = null
         val view = bubble ?: return
         view.animate().cancel()
         if (animated && !prefs.reducedMotion && view.isAttachedToWindow)
@@ -420,7 +455,7 @@ class OverlayService : Service() {
         else { bubble = null; runCatching { wm.removeView(view) } }
     }
     override fun onDestroy() {
-        main.removeCallbacksAndMessages(null); cancelSnap(); dismissBubble(); pet.pause()
+        main.removeCallbacksAndMessages(null); stepApproval.clear(); cancelSnap(); dismissBubble(); pet.pause()
         if (attached) { savePosition(); runCatching { wm.removeView(pet) }; attached = false }
         unregisterReceiver(events)
         getSharedPreferences("pet", MODE_PRIVATE).unregisterOnSharedPreferenceChangeListener(settingsListener)

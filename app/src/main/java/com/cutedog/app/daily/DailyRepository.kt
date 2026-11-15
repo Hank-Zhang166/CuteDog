@@ -9,13 +9,16 @@ import java.time.LocalDate
 data class DailyQuote(val id: Int, val text: String, val date: String, val favorite: Boolean)
 
 /** The archive stores viewed days; favorites use stable quote IDs independently of the archive. */
-class DailyRepository(context: Context) {
+class DailyRepository internal constructor(context: Context, private val currentDate: () -> LocalDate) {
+    constructor(context: Context) : this(context, { LocalDate.now() })
+
     private val db = DailyDatabase.get(context).writableDatabase
     private val quotes = loadQuotes(context)
 
     fun today(): DailyQuote = synchronized(lock) {
-        val date = LocalDate.now().toString()
-        val id = DailyRules.quoteId(LocalDate.parse(date), quotes.size)
+        val day = currentDate()
+        val date = day.toString()
+        val id = DailyRules.quoteId(day, quotes.size)
         db.insertWithOnConflict("history", null, ContentValues().apply {
             put("day", date)
             put("quote_id", id)

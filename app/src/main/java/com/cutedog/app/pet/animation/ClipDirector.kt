@@ -13,6 +13,8 @@ class ClipDirector(val manifest: ClipManifest) {
         ?: manifest.clips["stand"]?.heading; private set
     private val route = java.util.ArrayDeque<String>()
     var rejectedTravelTarget: String? = null; private set
+    /** Includes an already-entered zero-travel startup; it is not permission for a new route. */
+    var hasReservedTravelSequence: Boolean = false; private set
     val current: ClipFrame get() = ref(clipId, frameIndex)
     val queuedClips: List<String> get() = route.toList()
     val canonicalClipId: String get() = manifest.canonicalClipId(clipId)!!
@@ -50,6 +52,7 @@ class ClipDirector(val manifest: ClipManifest) {
     }
 
     fun requestStop(): Boolean {
+        if (isSafeStandingClip()) hasReservedTravelSequence = false
         val heading = manifest.clips.getValue(clipId).exitHeading
         if (heading == null) {
             // Legacy stationary poses (for example back_stand/turn_back) may have no heading.
@@ -122,6 +125,7 @@ class ClipDirector(val manifest: ClipManifest) {
         }
         if (travel != 0.0 && !approve(travel)) return null
         commit(next)
+        if (reservation != null && !isSafeStandingClip()) hasReservedTravelSequence = true
         return travel
     }
 
@@ -146,7 +150,12 @@ class ClipDirector(val manifest: ClipManifest) {
             }
         }
         clipId = next.clipId; frameIndex = next.index
+        if (isSafeStandingClip()) hasReservedTravelSequence = false
     }
+
+    private fun isSafeStandingClip(): Boolean = manifest.clips.getValue(clipId).heading?.let {
+        manifest.headingIdle(it) == clipId
+    } == true
 
     /** Prioritized lookahead without mutating playback. Includes the next clip's first frames. */
     fun prefetchPaths(lookAhead: Int = 8): List<String> {

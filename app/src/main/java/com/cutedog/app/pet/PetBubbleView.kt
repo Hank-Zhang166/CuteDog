@@ -112,10 +112,13 @@ class PetBubbleView(context: Context) : FrameLayout(context) {
 
     /** Offset is in this view's local pixels along the selected edge, not a screen coordinate. */
     fun setTail(edge: TailEdge, offsetPx: Float = Float.NaN) {
+        val edgeChanged = tailEdge != edge
+        val offset = offsetPx.takeIf(Float::isFinite) ?: Float.NaN
+        if (!edgeChanged && (tailOffset == offset || (tailOffset.isNaN() && offset.isNaN()))) return
         tailEdge = edge
-        tailOffset = offsetPx.takeIf(Float::isFinite) ?: Float.NaN
-        applyPadding()
-        requestLayout()
+        tailOffset = offset
+        // Following a completed pet step moves only the pointer; menu buttons stay in place.
+        if (edgeChanged) { applyPadding(); requestLayout() }
         invalidate()
     }
 

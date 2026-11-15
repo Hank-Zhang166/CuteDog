@@ -91,7 +91,7 @@ internal fun HomeScreen(
             SoftCard(Modifier.fillMaxWidth()) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Text("一日一暖", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.secondary)
-                    TextButton(onClick = onFavorite, contentPadding = PaddingValues(horizontal = 8.dp)) { Text(if (quote.favorite) "已珍藏 ♥" else "珍藏 ♡") }
+                    TextButton(onClick = onFavorite, modifier = Modifier.testTag("daily_favorite"), contentPadding = PaddingValues(horizontal = 8.dp)) { Text(if (quote.favorite) "已珍藏 ♥" else "珍藏 ♡") }
                 }
                 Text(quote.text, style = MaterialTheme.typography.titleMedium, lineHeight = 29.sp)
                 Text("送给今天的你", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

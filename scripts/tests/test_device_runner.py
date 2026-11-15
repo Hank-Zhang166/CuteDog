@@ -25,6 +25,11 @@ class ReminderReliabilityTest {
     @Test fun deniedNotificationPermissionRetainsDurablePendingOccurrence() {}
 }
 """
+DAILY_SOURCE = """package com.cutedog.app.daily
+class DailyInstrumentationTest {
+    @Test fun deniedNotificationPermissionRetainsDailyQuoteWithoutClaimingDelivery() {}
+}
+"""
 
 ADB = r'''#!/usr/bin/env python3
 import json,os,sys
@@ -79,10 +84,11 @@ if state['api']>=31: assert state['exact']==('deny' if denied else 'allow')
 failure=os.environ.get('FIXTURE_FAIL_GRANTED')=='1' and not denied
 if os.environ.get('FIXTURE_NO_XML')!='1':
     root=ET.Element('testsuite')
-    for cls,method in [('ReminderPersistenceTest','normalCase'),('ReminderPersistenceTest','deniedExactAlarmPermissionUsesInexactSchedulingWithoutSecurityFailure'),('ReminderReliabilityTest','deniedNotificationPermissionRetainsDurablePendingOccurrence')]:
+    for cls,method in [('ReminderPersistenceTest','normalCase'),('ReminderPersistenceTest','deniedExactAlarmPermissionUsesInexactSchedulingWithoutSecurityFailure'),('ReminderReliabilityTest','deniedNotificationPermissionRetainsDurablePendingOccurrence'),('DailyInstrumentationTest','deniedNotificationPermissionRetainsDailyQuoteWithoutClaimingDelivery')]:
         is_denied=method.startswith('denied')
         if denied and not is_denied: continue
-        case=ET.SubElement(root,'testcase',classname='com.cutedog.app.reminder.'+cls,name=method,time='0.01')
+        package='com.cutedog.app.daily.' if cls=='DailyInstrumentationTest' else 'com.cutedog.app.reminder.'
+        case=ET.SubElement(root,'testcase',classname=package+cls,name=method,time='0.01')
         if is_denied and (not denied or state['api']==26): ET.SubElement(case,'skipped',message='fixture expected permission phase')
         elif failure and method=='normalCase': ET.SubElement(case,'failure',message='fixture business assertion failure')
     result=Path('app/build/outputs/androidTest-results/connected/debug/TEST-fixture.xml');result.parent.mkdir(parents=True,exist_ok=True);ET.ElementTree(root).write(result)
@@ -103,6 +109,7 @@ class DeviceRunnerHostTest(unittest.TestCase):
         source.mkdir(parents=True)
         (source / 'ReminderPersistenceTest.kt').write_text(SOURCE)
         (source / 'ReminderReliabilityTest.kt').write_text(SECOND_SOURCE)
+        (source / 'DailyInstrumentationTest.kt').write_text(DAILY_SOURCE)
         (self.root / 'bin').mkdir()
         for name, body in [('bin/adb', ADB), ('gradlew', GRADLE)]:
             path = self.root / name
@@ -130,15 +137,15 @@ class DeviceRunnerHostTest(unittest.TestCase):
         result, summary, state = self.run_fixture(26, FIXTURE_LOGCAT_CLEAR_FAIL='1')
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertEqual(state['phases'], ['granted', 'denied'])
-        self.assertEqual(summary['phases']['denied']['counts']['skipped'], 2)
+        self.assertEqual(summary['phases']['denied']['counts']['skipped'], 3)
         self.assertEqual(summary['phases']['denied']['counts']['passed'], 0)
         self.assertEqual((self.root / 'evidence/granted/logcat-clear-exit-code.txt').read_text().strip(), '1')
 
     def test_api35_grant_revoke_and_restore_preserve_exactly_two_phase_results(self):
         result, summary, state = self.run_fixture(35)
         self.assertEqual(result.returncode, 0, result.stdout)
-        self.assertEqual(summary['phases']['granted']['counts']['skipped'], 2)
-        self.assertEqual(summary['phases']['denied']['counts']['passed'], 2)
+        self.assertEqual(summary['phases']['granted']['counts']['skipped'], 3)
+        self.assertEqual(summary['phases']['denied']['counts']['passed'], 3)
         self.assertEqual(state['notification'], 'denied')
         self.assertEqual(state['exact'], 'default')
         self.assertEqual(state['reinstalls'], 0)
@@ -166,7 +173,7 @@ class DeviceRunnerHostTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(state['phases'], ['granted', 'denied'])
         self.assertEqual(summary['phases']['granted']['counts']['total'], 0)
-        self.assertEqual(len(summary['phases']['granted']['missingTests']), 3)
+        self.assertEqual(len(summary['phases']['granted']['missingTests']), 4)
         self.assertEqual(summary['overallStatus'], 'failed')
 
     def test_apk_bytes_changing_between_phases_invalidates_provenance(self):
