@@ -23,6 +23,7 @@ data class AttentionTarget(val x: Float, val y: Float)
  * update consumes elapsed seconds (including low-frequency callbacks), never frame counts.
  */
 class PetBrain(seed: Long = System.nanoTime()) {
+    enum class InteractionSource(val priority: Int) { MODEL(0), USER(1), REMINDER(2) }
     private val random = Random(seed)
     private var clock = 0.0
     private var knownAvailable: Set<String> = emptySet()
@@ -33,7 +34,10 @@ class PetBrain(seed: Long = System.nanoTime()) {
     private var interactionHoldUntil = 0.0
     private var lastInteractionAt = Double.NEGATIVE_INFINITY
     private var pending: Request? = null
-    private var queuedInteraction: String? = null
+    private var queuedInteraction: Interaction? = null
+    private var deferredUserInteraction: Interaction? = null
+    private var lastInteraction: Interaction? = null
+    private var activeReminderTarget: String? = null
     private var attentionAt = Double.NEGATIVE_INFINITY
     private var attention: AttentionTarget? = null
     private val lastRequested = mutableMapOf<String, Double>()
@@ -52,16 +56,24 @@ class PetBrain(seed: Long = System.nanoTime()) {
     }
     fun clearAttentionTarget() { attention = null; attentionAt = Double.NEGATIVE_INFINITY }
 
-    /** Explicit input can supersede one autonomous goal; repeated input is coalesced while routing. */
-    fun interact(kind: String): String? {
-        val key = normalize(kind) ?: return null
-        if (clock - lastInteractionAt < .65) return null
+    /** New explicit goals replan from the real player pose; they never bypass its safe exits. */
+    fun interact(kind: String, source: InteractionSource = InteractionSource.USER): String? {
+        val input = Interaction(normalize(kind) ?: return null, source)
+        // Coalesce identical touch repeats, without discarding a different, newer user intent.
+        if (input == lastInteraction && clock - lastInteractionAt < .65) return null
+        lastInteraction = input
         lastInteractionAt = clock
         interactionHoldUntil = clock + 14.0
-        queuedInteraction = key
+        val protectedPriority = maxOf(pending?.source?.priority ?: -1, queuedInteraction?.source?.priority ?: -1,
+            if (activeReminderTarget != null) InteractionSource.REMINDER.priority else -1)
+        if (source.priority < protectedPriority) {
+            if (source == InteractionSource.USER) deferredUserInteraction = input
+            return null
+        }
+        if (source == InteractionSource.USER) deferredUserInteraction = null
+        queuedInteraction = input
         if (knownAvailable.isEmpty()) return null
-        if (pending?.interactive == true) return null
-        return emitInteraction(key)
+        return emitInteraction(input)
     }
 
     /** Call when the rendering graph rejects a goal; unavailable assets never cause request storms. */
@@ -80,6 +92,9 @@ class PetBrain(seed: Long = System.nanoTime()) {
         knownAvailable = available
         lastContext = context
         if (clock - attentionAt > 12.0) attention = null
+        if (activeReminderTarget !in available || (observed == activeReminderTarget && currentClip != observed)) {
+            activeReminderTarget = null
+        }
         if (currentClip != observed) {
             observed = currentClip
             observedSince = clock
@@ -103,7 +118,8 @@ class PetBrain(seed: Long = System.nanoTime()) {
                     dwellUntil = clock + policy.dwell
                     nextDecision = max(nextDecision, dwellUntil)
                     // The new request reached an actual clip, rather than merely entering its route.
-                    if (request.interactive) interactionHoldUntil = max(interactionHoldUntil, dwellUntil + 3.0)
+                    if (request.source != null) interactionHoldUntil = max(interactionHoldUntil, dwellUntil + 3.0)
+                    if (request.source == InteractionSource.REMINDER) activeReminderTarget = request.target
                 }
                 clock - request.progressAt >= 90.0 && currentClip in stableClips -> {
                     // A rejected/stalled stable endpoint recovers once, with backoff. A transition is never churned.
@@ -114,9 +130,15 @@ class PetBrain(seed: Long = System.nanoTime()) {
                 else -> return null
             }
         }
-        if (queuedInteraction != null && pending == null && currentClip in stableClips && clock >= dwellUntil) {
-            emitInteraction(queuedInteraction!!)?.let { return it }
+        if (pending == null && activeReminderTarget == null) {
+            if (queuedInteraction == null) {
+                queuedInteraction = deferredUserInteraction
+                deferredUserInteraction = null
+            }
+            // Autonomous dwell/stable-clip policy must never hold an explicit user request.
+            queuedInteraction?.let { emitInteraction(it) }?.let { return it }
         }
+        if (activeReminderTarget != null) return null
         if (pending != null || currentClip !in stableClips || clock < dwellUntil || clock < nextDecision) return null
 
         val night = hour(context) < 7 || hour(context) >= 22
@@ -125,10 +147,10 @@ class PetBrain(seed: Long = System.nanoTime()) {
         if (currentClip == "sleep" || currentClip == "curl_idle") {
             if (night || restful) { nextDecision = clock + 45.0; return null }
             if (clock - observedSince < 60.0 && !recentlyInteracting) { nextDecision = clock + 8.0; return null }
-            if ("stretch" in available) return emit("stretch", false)
+            if ("stretch" in available) return emit("stretch", null)
         }
         if ((night || context.quiet) && !recentlyInteracting && "sleep" in available) {
-            return if (currentClip != "sleep") emit("sleep", false) else null
+            return if (currentClip != "sleep") emit("sleep", null) else null
         }
 
         nextDecision = clock + decisionInterval(context)
@@ -142,30 +164,27 @@ class PetBrain(seed: Long = System.nanoTime()) {
         var draw = random.nextDouble() * candidates.sumOf { it.second }
         for ((policy, score) in candidates) {
             draw -= score
-            if (draw <= 0.0) return emit(policy.id, false)
+            if (draw <= 0.0) return emit(policy.id, null)
         }
-        return emit(candidates.last().first.id, false)
+        return emit(candidates.last().first.id, null)
     }
 
-    private fun emitInteraction(kind: String): String? {
-        val targets = interactions.getValue(kind)
-        val selected = targets.firstOrNull { target ->
-            target in knownAvailable && target != pending?.target &&
-                (target != observed || observed in stableClips) &&
-                clock - (lastRequested[target] ?: Double.NEGATIVE_INFINITY) >= 3.0
-        }
-        if (selected == null) {
-            // Missing art is an unavailable capability, never an invented or unrelated clip.
-            queuedInteraction = null
+    private fun emitInteraction(input: Interaction): String? {
+        val selected = interactions.getValue(input.kind).firstOrNull { it in knownAvailable }
+        queuedInteraction = null
+        if (selected == null) return null // Unavailable art does not cancel an existing valid route.
+        val previous = pending
+        if (previous?.target == selected) {
+            // A reminder can protect an already-requested wave without restarting its route.
+            if (input.source.priority > (previous.source?.priority ?: -1)) pending = previous.copy(source = input.source)
             return null
         }
-        queuedInteraction = null
-        return emit(selected, true)
+        return emit(selected, input.source)
     }
 
-    private fun emit(target: String, interactive: Boolean): String {
+    private fun emit(target: String, source: InteractionSource?): String {
         check(target in catalog && target in knownAvailable)
-        pending = Request(target, clock, interactive)
+        pending = Request(target, clock, source)
         lastRequested[target] = clock
         recent.addLast(target)
         while (recent.size > 7) recent.removeFirst()
@@ -243,7 +262,8 @@ class PetBrain(seed: Long = System.nanoTime()) {
         else -> null
     }
 
-    private data class Request(val target: String, val progressAt: Double, val interactive: Boolean)
+    private data class Interaction(val kind: String, val source: InteractionSource)
+    private data class Request(val target: String, val progressAt: Double, val source: InteractionSource?)
     private enum class Family { REST, MOVE, PLAY, LOOK, GROOM, AFFECTION, STRETCH }
     private data class Policy(val id: String, val family: Family, val dwell: Double, val cooldown: Double,
         val weight: Double, val autonomous: Boolean = true)

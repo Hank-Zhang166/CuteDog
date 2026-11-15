@@ -50,7 +50,7 @@ class OverlayService : Service() {
             when (intent.action) {
                 Intent.ACTION_SCREEN_OFF, Intent.ACTION_USER_PRESENT, Intent.ACTION_SCREEN_ON -> reconcileVisibleState()
                 "com.cutedog.app.REMINDER_EVENT" -> if (!hidden && getSystemService(PowerManager::class.java).isInteractive && !getSystemService(KeyguardManager::class.java).isKeyguardLocked) {
-                    pet.react("wave"); showBubble(intent.getStringExtra("message") ?: "有一件事等着你", intent.getLongExtra("reminder_id", 0))
+                    pet.remind(); showBubble(intent.getStringExtra("message") ?: "有一件事等着你", intent.getLongExtra("reminder_id", 0))
                 }
                 PetEvents.MODEL_ACTION -> if (!hidden && spaceAvailable && getSystemService(PowerManager::class.java).isInteractive && !getSystemService(KeyguardManager::class.java).isKeyguardLocked) {
                     PetEvents.action(intent)?.let(pet::react)

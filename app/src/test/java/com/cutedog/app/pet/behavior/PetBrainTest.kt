@@ -1,5 +1,9 @@
 package com.cutedog.app.pet.behavior
 
+import com.cutedog.app.pet.animation.ClipDirector
+import com.cutedog.app.pet.animation.ClipInterrupt
+import com.cutedog.app.pet.animation.ClipManifest
+import com.cutedog.app.pet.animation.FrameClip
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
@@ -152,15 +156,112 @@ class PetBrainTest {
         expected.forEach { (kind, clip) -> assertEquals(clip, ready().interact(kind)) }
     }
 
-    @Test fun rapidInteractionCoalescesWhileTheFirstActionIsRouting() {
+    @Test fun newestUserGoalReplacesThePendingGoalWithoutWaitingForItsDwell() {
         val brain = ready()
+        assertEquals("wave", brain.interact("wave"))
+        assertNull(brain.update(.65f, "stand", all, day))
         assertEquals("happy", brain.interact("happy"))
-        assertNull(brain.interact("head"))
-        brain.update(1f, "stand", all, day)
-        assertNull(brain.interact("wave"))
         assertEquals("happy", brain.pendingTarget)
-        assertNull(brain.update(1f, "happy", all, day))
-        assertEquals("wave", brain.update(4f, "stand", all, day))
+        assertNull(brain.update(1f, "stand", all, day))
+        assertNull(brain.update(0f, "happy", all, day))
+        assertNull(brain.pendingTarget)
+        // No stale wave is replayed after the newest goal arrives.
+        assertNull(brain.update(1f, "stand", all, day))
+    }
+
+    @Test fun distinctRapidInputsKeepTheLatestIntentAndIdenticalRepeatsCoalesce() {
+        val brain = ready()
+        assertEquals("wave", brain.interact("wave"))
+        assertEquals("pet_head", brain.interact("head"))
+        assertNull(brain.interact("head"))
+        assertEquals("pet_head", brain.pendingTarget)
+        assertEquals("wave", brain.interact("wave")) // Returning to an unplayed goal is not on cooldown.
+        assertNull(brain.interact("wave"))
+        assertEquals("wave", brain.pendingTarget)
+    }
+
+    @Test fun explicitInputDuringAnActionIgnoresAutonomousDwellAndStableClipGating() {
+        val brain = ready()
+        assertEquals("wave", brain.interact("wave"))
+        assertNull(brain.update(0f, "wave", all, day))
+        assertEquals("pet_head", brain.interact("head"))
+        assertEquals("pet_head", brain.pendingTarget)
+    }
+
+    @Test fun replacingPendingInteractionPreservesEveryRequiredPlayerFrame() {
+        val ids = listOf("stand", "wave", "happy")
+        val manifest = ClipManifest(512, 512, "stand", ids.map { id ->
+            FrameClip(id, (0 until if (id == "stand") 96 else 60).map { "pet3d/$id/$it.webp" }, 24,
+                "stand_left", "stand_left", id == "stand", ClipInterrupt.BOUNDARY, ids,
+                sampling = "interval_starts")
+        }, emptySet())
+        val director = ClipDirector(manifest)
+        val brain = PetBrain(17)
+        brain.update(0f, director.clipId, ids.toSet(), day)
+        assertTrue(director.request(brain.interact("wave")!!))
+        repeat(16) { director.commit(director.peekNext()) }
+        brain.update(16f / 24, director.clipId, ids.toSet(), day)
+        assertTrue(director.request(brain.interact("happy")!!))
+        assertEquals(16, director.frameIndex) // Replanning must not move the real pose.
+        for (index in 17 until 96) {
+            assertEquals("stand", director.peekNext().clipId)
+            assertEquals(index, director.peekNext().index)
+            director.commit(director.peekNext())
+        }
+        assertEquals("happy", director.peekNext().clipId)
+        director.commit(director.peekNext())
+        assertEquals(0, director.frameIndex)
+        assertEquals("happy", director.clipId)
+    }
+
+    @Test fun reminderUpgradesAnExistingWaveAndDefersOnlyTheLatestUserUntilItFinishes() {
+        val brain = ready()
+        assertEquals("wave", brain.interact("wave"))
+        assertNull(brain.interact("wave", PetBrain.InteractionSource.REMINDER))
+        assertNull(brain.interact("happy"))
+        assertNull(brain.interact("curious", PetBrain.InteractionSource.MODEL))
+        assertEquals("wave", brain.pendingTarget)
+        assertNull(brain.update(0f, "wave", all, day))
+        assertNull(brain.interact("head")) // Replaces the deferred happy request.
+        assertNull(brain.update(1f, "wave", all, day))
+        // The actual reminder clip left; do not wait for its remaining autonomous dwell.
+        assertEquals("pet_head", brain.update(0f, "stand", all, day))
+        assertEquals("pet_head", brain.pendingTarget)
+    }
+
+    @Test fun reminderPreemptsOrdinaryInputEvenInsideTheTouchCoalescingWindow() {
+        val brain = ready()
+        assertEquals("pet_head", brain.interact("head"))
+        assertEquals("wave", brain.interact("wave", PetBrain.InteractionSource.REMINDER))
+        assertNull(brain.interact("happy", PetBrain.InteractionSource.MODEL))
+        assertEquals("wave", brain.pendingTarget)
+    }
+
+    @Test fun reminderAndLatestUserSurviveRequestsBeforeAssetsAreKnown() {
+        val brain = PetBrain(17)
+        assertNull(brain.interact("wave", PetBrain.InteractionSource.REMINDER))
+        assertNull(brain.interact("happy"))
+        assertNull(brain.interact("head"))
+        assertEquals("wave", brain.update(0f, "stand", all, day))
+        assertNull(brain.update(0f, "wave", all, day))
+        assertEquals("pet_head", brain.update(0f, "stand", all, day))
+    }
+
+    @Test fun rejectedReminderReleasesDeferredUserWithoutAutonomousBackoff() {
+        val brain = ready()
+        assertEquals("wave", brain.interact("wave", PetBrain.InteractionSource.REMINDER))
+        assertNull(brain.interact("head"))
+        brain.requestRejected("wave")
+        assertEquals("pet_head", brain.update(0f, "stand", all, day))
+    }
+
+    @Test fun modelGoalCannotOverwritePendingUserAndUnavailableInputKeepsAValidRoute() {
+        val brain = PetBrain(17)
+        brain.update(0f, "stand", setOf("stand", "wave", "happy"), day)
+        assertEquals("wave", brain.interact("wave"))
+        assertNull(brain.interact("happy", PetBrain.InteractionSource.MODEL))
+        assertNull(brain.interact("treat"))
+        assertEquals("wave", brain.pendingTarget)
     }
 
     @Test fun attentionIsBoundedTemporaryAndIgnoresInvalidCoordinates() {

@@ -182,13 +182,15 @@ class PetView(context: Context) : View(context) {
     }
     fun interact(intent: String) {
         growth.recordInteraction()
-        react(intent)
+        react(intent, PetBrain.InteractionSource.USER)
     }
-    fun react(intent: String) {
+    fun react(intent: String) = react(intent, PetBrain.InteractionSource.MODEL)
+    fun remind() = react("wave", PetBrain.InteractionSource.REMINDER)
+    private fun react(intent: String, source: PetBrain.InteractionSource) {
         stoppingForSpace = false
         interactionAge = 0f
         if (hasRigAssets) {
-            brain.interact(when (intent) { "pet" -> "head"; "toy" -> "ball"; else -> intent })?.let { if (rigPlayer?.request(it) == false) brain.requestRejected(it) }
+            brain.interact(when (intent) { "pet" -> "head"; "toy" -> "ball"; else -> intent }, source)?.let { if (rigPlayer?.request(it) == false) brain.requestRejected(it) }
         } else behavior.react(if (intent == "nuzzle" || intent == "body") "cuddle" else intent)
         audio.play(if (intent == "jump" || intent == "toy" || intent == "ball") "ball" else if (intent == "pet" || intent == "cuddle") "breath" else "paw")
         resume()
@@ -332,7 +334,7 @@ class PetView(context: Context) : View(context) {
                     dragged = true
                     onDrag?.invoke(event.rawX - lastX, event.rawY - lastY, false)
                 } else if (!dragged && settings.pettingEnabled && distance > slop && SystemClock.uptimeMillis() - downAt < settings.dragHoldMs) {
-                    if (!stroked) { react(if (event.y < height * .6f) "pet" else "body"); if (settings.haptics) performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK) }
+                    if (!stroked) { react(if (event.y < height * .6f) "pet" else "body", PetBrain.InteractionSource.USER); if (settings.haptics) performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK) }
                     stroked = true
                 }
                 lastX = event.rawX; lastY = event.rawY
@@ -344,7 +346,7 @@ class PetView(context: Context) : View(context) {
                     val now = SystemClock.uptimeMillis()
                     if (settings.doubleTapAction == "none") performClick()
                     else if (lastTap != 0L && now - lastTap <= ViewConfiguration.getDoubleTapTimeout()) {
-                        removeCallbacks(singleTap); lastTap = 0; react(settings.doubleTapAction)
+                        removeCallbacks(singleTap); lastTap = 0; react(settings.doubleTapAction, PetBrain.InteractionSource.USER)
                     } else { lastTap = now; removeCallbacks(singleTap); postDelayed(singleTap, ViewConfiguration.getDoubleTapTimeout().toLong()) }
                 }
                 parent?.requestDisallowInterceptTouchEvent(false)
@@ -354,7 +356,7 @@ class PetView(context: Context) : View(context) {
         }
         return super.onTouchEvent(event)
     }
-    override fun performClick(): Boolean { super.performClick(); react("wave"); onTap?.invoke(); onAction?.invoke(settings.tapAction); return true }
+    override fun performClick(): Boolean { super.performClick(); react("wave", PetBrain.InteractionSource.USER); onTap?.invoke(); onAction?.invoke(settings.tapAction); return true }
     /** Shell dumpsys diagnostics contain counters only, never chats, reminders, names or credentials. */
     fun diagnosticSnapshot(): org.json.JSONObject {
         val cache = rigPlayer?.cacheStats()
