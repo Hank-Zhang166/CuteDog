@@ -81,6 +81,27 @@ class OverlayTravelPolicyTest {
         assertEquals(1, director.frameIndex)
     }
 
+    @Test fun leftOnlyArtworkRejectsRightCandidatesWithoutAssumingResolveClipMeansMatchingHeading() {
+        val pack = manifest()
+        assertEquals("walk", pack.resolveClip("walk", ClipHeading.RIGHT))
+        assertTrue(OverlayTravelPolicy.canPlanHeading(pack, "stand", "walk", -1))
+        assertFalse(OverlayTravelPolicy.canPlanHeading(pack, "stand", "walk", 1))
+        assertFalse(OverlayTravelPolicy.canPlanHeading(pack, "stand", "wave", -1))
+        assertFalse(OverlayTravelPolicy.canPlanHeading(pack, "missing", "walk", -1))
+        assertFalse(OverlayTravelPolicy.canPlanHeading(pack, "stand", "walk", 0))
+    }
+
+    @Test fun rejectedDirectionCanStopExistingTravelWithoutDroppingItsMeasuredRemainingIntervals() {
+        val host = walking()
+        val before = host.position
+        assertFalse(OverlayTravelPolicy.canPlanHeading(host.director.manifest, host.director.clipId, host.director.requestedClip, 1))
+        assertFalse(host.director.requestHeading(1))
+        assertTrue(host.director.requestStop())
+        host.advanceTo("stand")
+        assertTrue(host.lastStoppedIntervalConsumed)
+        assertEquals(-(.02 + .03 + .04 + .004 + .003 + .002 + .001) * 200, host.position - before, .0001)
+    }
+
     @Test fun bubbleKeepsReminderRouteAndConsumesEveryRemainingWalkAndStopInterval() {
         val host = walking()
         host.bubble = true

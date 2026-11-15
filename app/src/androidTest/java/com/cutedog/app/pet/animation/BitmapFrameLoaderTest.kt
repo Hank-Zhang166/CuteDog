@@ -70,6 +70,29 @@ class BitmapFrameLoaderTest {
         }
     }
 
+    @Test fun verifiedFramesAndPhaseDependenciesAreCheckedOffThreadBeforeBecomingReady() {
+        val bytes = png(Color.GREEN)
+        val actual = ClipIntegrity.sha256(bytes)
+        val opened = ConcurrentLinkedQueue<Pair<String, Thread>>()
+        BitmapFrameLoader(FrameAssetSource { path ->
+            opened += path to Thread.currentThread()
+            ByteArrayInputStream(bytes)
+        }, 64, 64, 64L * 64 * 4 * 4,
+            frameDigests = mapOf("good" to actual, "corrupt" to "0".repeat(64), "bridge" to actual),
+            verificationDependencies = mapOf("bridge" to listOf(AssetDigest("wrong-source-anchor", "1".repeat(64)))))
+            .use { loader ->
+                loader.pin(setOf("good")); loader.prefetch(listOf("good", "corrupt", "bridge"))
+                waitUntil { loader.isReady("good") && loader.error("corrupt") != null && loader.error("bridge") != null && !loader.stats().activeDecoder }
+                assertEquals(Color.GREEN, loader.ready("good")!!.getPixel(0, 0))
+                assertFalse(loader.isReady("corrupt")); assertFalse(loader.isReady("bridge"))
+                assertEquals(1L, loader.stats().decodedFrames)
+                assertEquals(64L * 64 * 4, loader.stats().allocatedBytes)
+                assertTrue(opened.any { it.first == "wrong-source-anchor" })
+                assertTrue(opened.all { it.second.name == "CuteDog-frame-decode" && it.second != Looper.getMainLooper().thread })
+                logStats("phase-digest-dependency", loader)
+            }
+    }
+
     @Test fun memoryPressureDropsUnusedBuffersButNeverRecyclesDisplayedPixels() {
         val bytes = (0..15).associate { "fixture-$it" to png(Color.rgb(it * 15, 20, 30)) }
         val frameBytes = 64L * 64 * 4

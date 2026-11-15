@@ -12,6 +12,7 @@ if [[ "${TEST_API_LEVEL:-}" == 35 ]]; then
   # The instrumentation runner preserves the original APKs and restores its permissions.
   # If setup failed before installation, profile-device records that real failure itself.
   python3 scripts/profile-device.py --disposable --duration 12 --cycles 3 \
+    --tested-apks "$output/tested-apks.json" \
     --output "$output/performance" >"$output/performance/host.log" 2>&1
   profile_rc=$?
   tail -50 "$output/performance/host.log"

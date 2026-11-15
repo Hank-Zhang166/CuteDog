@@ -104,3 +104,52 @@ jobs:
           gh release create "$RELEASE_TAG" "${flags[@]}" "$APK_FILE" \
             SHA256SUMS.txt BUILD-INFO.json BUILD-INFO.txt RELEASE-INFO.json \
             signature-verification.txt apk-metadata.txt release-manifest.json
+      - name: Download the uploaded APK and verify its actual bytes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.verify.outputs.tag }}
+          APK_FILE: ${{ needs.verify.outputs.apk }}
+        run: |
+          set -euo pipefail
+          cd verified-release
+          download_dir="$(mktemp -d "$RUNNER_TEMP/cutedog-release-download.XXXXXX")"
+          gh release download "$RELEASE_TAG" --pattern "$APK_FILE" --dir "$download_dir"
+          python3 - "$download_dir/$APK_FILE" "$RUNNER_TEMP/release-download-verification.json" <<'PY'
+          import datetime, hashlib, json, os, sys
+          from pathlib import Path
+          apk, output = map(Path, sys.argv[1:])
+          expected = json.loads(Path('BUILD-INFO.json').read_text())
+          release = json.loads(Path('RELEASE-INFO.json').read_text())
+          digest = hashlib.sha256()
+          with apk.open('rb') as stream:
+              while chunk := stream.read(1024 * 1024):
+                  digest.update(chunk)
+          actual_size, actual_hash = apk.stat().st_size, digest.hexdigest()
+          passed = (apk.name == expected['file'] and actual_size == expected['bytes']
+                    and actual_hash == expected['sha256'] and release['tag'] == os.environ['RELEASE_TAG'])
+          proof = {
+              'schemaVersion': 1, 'verifiedAt': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+              'repository': os.environ['GH_REPO'], 'tag': release['tag'],
+              'sourceCommit': release['sourceCommit'], 'inputCommit': release['inputCommit'],
+              'tagObject': release['tagObject'], 'runId': os.environ['GITHUB_RUN_ID'],
+              'runAttempt': os.environ['GITHUB_RUN_ATTEMPT'], 'method': 'gh release download',
+              'file': apk.name, 'expectedBytes': expected['bytes'], 'actualBytes': actual_size,
+              'expectedSha256': expected['sha256'], 'actualSha256': actual_hash,
+              'status': 'passed' if passed else 'failed',
+              'publicUrlVerification': 'not_run; separate unauthenticated public-URL download is required',
+          }
+          output.write_text(json.dumps(proof, ensure_ascii=False, indent=2) + '\n')
+          if not passed:
+              raise SystemExit('Uploaded Release APK does not match the verified input')
+          print(f"Release download verified: {apk.name}, {actual_size} bytes, SHA-256 {actual_hash}")
+          PY
+          # This is a new evidence attachment, never a replacement of an existing asset.
+          gh release upload "$RELEASE_TAG" "$RUNNER_TEMP/release-download-verification.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: release-download-verification-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/release-download-verification.json
+          if-no-files-found: warn
+          retention-days: 30

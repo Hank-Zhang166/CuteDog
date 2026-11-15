@@ -1,3 +1,5 @@
+import hashlib
+import zipfile
 import importlib.util
 import json
 from pathlib import Path
@@ -18,6 +20,30 @@ def tree(labels, package=p.PACKAGE):
     return root
 
 class OfflineProfileRegression(unittest.TestCase):
+    def test_actual_apk_manifest_enables_strict_binding_without_using_source_tree(self):
+        with tempfile.TemporaryDirectory() as folder:
+            apk = Path(folder) / 'application.apk'
+            with zipfile.ZipFile(apk, 'w') as archive:
+                archive.writestr('assets/pet3d/manifest.json', '{"version":2}')
+            digest = hashlib.sha256(apk.read_bytes()).hexdigest()
+            record = Path(folder) / 'tested-apks.json'
+            record.write_text(json.dumps({'application': {'path':str(apk), 'sha256':digest, 'bytes':apk.stat().st_size}}))
+            actual = p.tested_apk_binding(record)
+            self.assertTrue(actual['contains_authored_manifest'])
+            self.assertEqual(digest, actual['sha256'])
+            with self.assertRaises(ValueError): p.verified_artwork_binding(apk, '0'*64)
+            with self.assertRaises(ValueError): p.verified_artwork_binding(apk, digest, apk.stat().st_size+1)
+
+    def test_legacy_apk_is_explicitly_distinguished_and_non_zip_or_missing_identity_rejected(self):
+        with tempfile.TemporaryDirectory() as folder:
+            apk = Path(folder) / 'application.apk'
+            with zipfile.ZipFile(apk, 'w') as archive: archive.writestr('assets/pet/samoyed.png', b'fixture')
+            digest = hashlib.sha256(apk.read_bytes()).hexdigest()
+            self.assertFalse(p.verified_artwork_binding(apk, digest)['contains_authored_manifest'])
+            with self.assertRaises(ValueError): p.verified_artwork_binding(apk, None)
+            apk.write_bytes(b'not an APK ZIP')
+            with self.assertRaises(zipfile.BadZipFile): p.verified_artwork_binding(apk, hashlib.sha256(apk.read_bytes()).hexdigest())
+
     def test_notification_parser_requires_exact_user_zero_state_and_flags(self):
         raw = ('requested permissions:\n android.permission.POST_NOTIFICATIONS\n'
                'User 0: installed=true\n runtime permissions:\n'

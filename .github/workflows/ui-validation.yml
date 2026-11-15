@@ -2,20 +2,25 @@ name: Published APK UI validation
 on:
   workflow_dispatch:
     inputs:
-      release_tag:
-        description: Release containing the exact APK to test
-        default: v0.1.0-preview.2
+      apk_url:
+        description: Exact HTTPS URL of the final APK to validate
         required: true
       apk_sha256:
-        description: Expected SHA-256 of the published APK
-        default: ff0d78720bd4303830badaa70c60d3da669d5fe6c6056ca6750880bb1ec59cdb
+        description: SHA-256 of that exact final APK
         required: true
+      source_commit:
+        description: Full source commit declared for that APK
+        required: true
+      baseline_url:
+        description: Optional explicit older APK URL for an in-place upgrade check
+        required: false
+      baseline_sha256:
+        description: SHA-256 required when baseline_url is supplied
+        required: false
   push:
     branches: [main]
     paths:
-      - '.github/workflows/ui-validation.yml'
-      - 'scripts/device-smoke.py'
-      - 'releases/**'
+      - 'scripts/ui-validation-request.json'
 permissions:
   contents: write
 concurrency:
@@ -24,10 +29,7 @@ concurrency:
 jobs:
   real-ui:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    env:
-      RELEASE_TAG: ${{ inputs.release_tag || 'v0.1.0-preview.2' }}
-      EXPECTED_APK_SHA: ${{ inputs.apk_sha256 || 'ff0d78720bd4303830badaa70c60d3da669d5fe6c6056ca6750880bb1ec59cdb' }}
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-java@v5
@@ -37,20 +39,26 @@ jobs:
       - uses: android-actions/setup-android@v3
         with:
           cmdline-tools-version: '13114758'
-          packages: 'platform-tools'
+          packages: 'platform-tools build-tools;35.0.0'
           log-accepted-android-sdk-licenses: false
-      - name: Download and verify the published APK
+      - name: Download and verify explicitly requested APK bytes and metadata
         env:
-          GH_TOKEN: ${{ github.token }}
+          INPUT_APK_URL: ${{ inputs.apk_url }}
+          INPUT_APK_SHA256: ${{ inputs.apk_sha256 }}
+          INPUT_SOURCE_COMMIT: ${{ inputs.source_commit }}
+          INPUT_BASELINE_URL: ${{ inputs.baseline_url }}
+          INPUT_BASELINE_SHA256: ${{ inputs.baseline_sha256 }}
+          REQUEST_EVENT: ${{ github.event_name }}
         run: |
-          mkdir -p "$RUNNER_TEMP/ui-evidence" "$RUNNER_TEMP/published-apk"
-          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern CuteDog-0.1.0-debug.apk --dir "$RUNNER_TEMP/published-apk"
-          printf '%s  %s\n' "$EXPECTED_APK_SHA" "$RUNNER_TEMP/published-apk/CuteDog-0.1.0-debug.apk" | sha256sum --check
-      - name: Enable hardware virtualization
+          request=()
+          if [[ "$REQUEST_EVENT" == push ]]; then
+            request=(--request scripts/ui-validation-request.json)
+          fi
+          python3 scripts/prepare-ui-validation.py prepare "${request[@]}" --apk-dir "$RUNNER_TEMP/published-apk" --output "$RUNNER_TEMP/ui-evidence"
+      - name: Enable and verify hardware virtualization with retained diagnostics
         run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
+          mkdir -p "$RUNNER_TEMP/ui-evidence/kvm"
+          python3 scripts/setup-ci-kvm.py --output "$RUNNER_TEMP/ui-evidence/kvm" 2>&1 | tee "$RUNNER_TEMP/ui-evidence/kvm/setup.log"
       - name: Real application UI, persistence and overlay interactions
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -60,7 +68,7 @@ jobs:
           profile: pixel_2
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot -camera-back none -accel on
-          script: python3 scripts/device-smoke.py --apk "$RUNNER_TEMP/published-apk/CuteDog-0.1.0-debug.apk" --expected-sha256 "$EXPECTED_APK_SHA" --output "$RUNNER_TEMP/ui-evidence"
+          script: python3 scripts/prepare-ui-validation.py run-device --apk-dir "$RUNNER_TEMP/published-apk" --output "$RUNNER_TEMP/ui-evidence"
       - name: Upload actual device evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -73,7 +81,7 @@ jobs:
         env:
           EVIDENCE_PATH: runs/${{ github.run_id }}-${{ github.run_attempt }}
         run: |
-          test -f "$RUNNER_TEMP/ui-evidence/assertions.json" || exit 0
+          test -f "$RUNNER_TEMP/ui-evidence/release-input.json" || exit 0
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           if git ls-remote --exit-code --heads origin refs/heads/codex/device-evidence >/dev/null; then

@@ -107,7 +107,9 @@ class OverlayService : Service() {
                 if (route.isEmpty()) {
                     val candidate = PetSpace.Point(kotlin.random.Random.nextFloat() * (spaceArea.right - spaceArea.left) + spaceArea.left, position.y)
                     val continuingHeading = if (pet.authoredTravelInProgress) pet.authoredActualHeading else 0
-                    if ((continuingHeading == 0 || (candidate.x - position.x) * continuingHeading > 0f) &&
+                    val candidateHeading = if (candidate.x > position.x) 1 else -1
+                    if (pet.canPlanAuthoredHeading(candidateHeading) &&
+                        (continuingHeading == 0 || (candidate.x - position.x) * continuingHeading > 0f) &&
                         abs(candidate.x - position.x) > params.width * .6f && PetSpace.valid(candidate, spaceArea, obstacles) &&
                         PetSpace.clearSegment(position, candidate, obstacles)) route.add(candidate)
                 }
@@ -131,7 +133,12 @@ class OverlayService : Service() {
             pet.setAuthoredTravelAllowed(true)
             return
         }
-        if (!pet.requestAuthoredHeading(heading)) { pet.setAuthoredTravelAllowed(false); return }
+        if (!pet.requestAuthoredHeading(heading)) {
+            route.clear()
+            if (pet.authoredTravelRequested) pet.stopAuthoredTravel()
+            pet.setAuthoredTravelAllowed(pet.authoredTravelInProgress)
+            return
+        }
         pet.setAuthoredTravelAllowed(true)
     }
 

@@ -68,14 +68,17 @@ class FrameClipPlayer(context: Context) : Closeable {
         val assets = context.applicationContext.assets
         initWorker.execute {
             try {
-                val json = assets.open(ClipManifest.ASSET_PATH).bufferedReader(Charsets.UTF_8).use { it.readText() }
-                val manifest = ClipManifest.parse(json)
+                val json = ClipIntegrity.readLimited(assets.open(ClipManifest.ASSET_PATH), ClipIntegrity.MAX_MANIFEST_BYTES).toString(Charsets.UTF_8)
+                val manifest = ClipManifest.parse(json, requiredClipIds = ReleasedArtwork.REQUIRED_ACTIONS)
+                val source = FrameAssetSource { assets.open(it) }
+                PhaseProofVerifier.verify(manifest, source)
                 // Validate all declared filenames once, on the loader thread, before claiming readiness.
                 for (clip in manifest.clips.values) {
                     val files = assets.list("pet3d/${clip.id}").orEmpty().toSet()
                     require(clip.frames.all { it.substringAfterLast('/') in files }) { "${clip.id} 缺少清单声明的实际动画帧" }
                 }
-                val loader = BitmapFrameLoader(FrameAssetSource { assets.open(it) }, manifest.width, manifest.height)
+                val loader = BitmapFrameLoader(source, manifest.width, manifest.height,
+                    frameDigests = manifest.frameDigests, verificationDependencies = manifest.verificationDependencies)
                 if (memoryPressure) loader.trimMemory()
                 if (closed) loader.close() else {
                     loaded.set(Loaded(manifest, loader))
@@ -93,7 +96,7 @@ class FrameClipPlayer(context: Context) : Closeable {
         if (closed) return false
         val control = director
         if (control == null) {
-            if (loaded.get()?.manifest?.clips?.containsKey(clipId) == false) return false
+            if (loaded.get()?.manifest?.requestableClipIds?.contains(clipId) == false) return false
             pendingRequest = clipId; headingAfterRequest = false
             return true
         }
@@ -191,17 +194,19 @@ class FrameClipPlayer(context: Context) : Closeable {
         var travelBlocked = false
         var rejectedTravelTarget: String? = null
         var error: String? = startupError.get()
+        control.upcomingPhaseBridge()?.frames?.take(2)?.firstNotNullOfOrNull(loader::error)?.let { error = it }
         if (cadence.due(fps)) {
-            val next = control.peekNext()
+            val plan = control.planNext(loader::isReady)
+            val next = plan.next
             val pins = (recent.filter { it != next.path } + next.path).takeLast(3).toSet()
             val pixels = loader.readyAndPin(next.path, pins)
             if (pixels != null) {
-                val travel = control.commitIfTravelAllowed(next, { error == null && approveTravel(it) }, approveEntry)
-                rejectedTravelTarget = control.rejectedTravelTarget
+                val travel = if (error != null) null else control.commitIfTravelAllowed(plan, approveTravel, approveEntry)
+                rejectedTravelTarget = if (error == null) control.rejectedTravelTarget else null
                 if (travel == null) {
                     // Keep both pose and position. Never truncate a measured step while showing
                     // the advanced feet, and never accumulate catch-up time behind a boundary.
-                    travelBlocked = true; cadence.blocked(fps)
+                    travelBlocked = error == null; cadence.blocked(fps)
                 } else {
                     recent.remove(next.path); recent.add(next.path)
                     while (recent.size > 3) recent.removeFirst()

@@ -10,24 +10,48 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
+import sqlite3
 import subprocess
 import sys
+import tempfile
 import time
 import traceback
+import uuid
 import xml.etree.ElementTree as ET
 
 PACKAGE = "com.cutedog.app"
 
 
+def file_sha256(path):
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as source:
+        while chunk := source.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def package_version(dump):
+    block = re.search(r"(?m)^\s*Package \[" + re.escape(PACKAGE) + r"\][^\n]*\n(?P<body>.*?)(?=^\s*Package \[|\Z)", dump, re.S)
+    if block is None:
+        raise AssertionError("Target package record is missing")
+    code = re.search(r"\bversionCode=(\d+)\b", block["body"])
+    name = re.search(r"\bversionName=([^\s]+)", block["body"])
+    if code is None or name is None:
+        raise AssertionError("Target package version is unavailable")
+    return {"version_code": int(code[1]), "version_name": name[1]}
+
+
 class Device:
     def __init__(self, serial, output):
-        if not serial.startswith("emulator-"):
+        if not re.fullmatch(r"emulator-\d+", serial):
             raise ValueError("This destructive test is restricted to a disposable emulator.")
         self.serial, self.output = serial, output
         self.width, self.height = 720, 1280
         self.calls = []
         self.external_dialogs = []
         self.app_pids = set()
+        self.onboarding = []
 
     def adb(self, *args, timeout=90, check=True):
         result = subprocess.run(["adb", "-s", self.serial, *map(str, args)],
@@ -164,7 +188,89 @@ class Device:
         for pid in self.adb("shell", "pidof", PACKAGE, check=False).split():
             if pid.isdigit():
                 self.app_pids.add(pid)
-        self.wait_text("首页", seconds=60)
+        # Older preview APKs go straight to the tabs; the current APK has a real five-step
+        # first-run introduction. Complete only its visible controls, never write preferences.
+        deadline = time.monotonic() + 75
+        while time.monotonic() < deadline:
+            tree = self.tree()
+            if self.recover_launcher_dialog(tree):
+                continue
+            if self.find("首页", tree=tree) is not None:
+                break
+            if self.find("稍后了解", tree=tree) is not None:
+                next_node = self.find("继续", tree=tree)
+                if next_node is None:
+                    next_node = self.find("开始陪伴", tree=tree)
+                if next_node is None:
+                    raise AssertionError("Introduction has no visible Continue/Start control")
+                if len(self.onboarding) >= 10:
+                    raise AssertionError("Introduction did not complete")
+                shot = self.screenshot("onboarding-" + str(len(self.onboarding) + 1))
+                self.onboarding.append({"action": next_node.get("text"), "screenshot": shot})
+                self.tap_node(next_node)
+                continue
+            time.sleep(.5)
+        self.wait_text("首页", seconds=10)
+        return result
+
+    def installed_apk(self, expected_hash, label):
+        paths = self.adb("shell", "pm", "path", PACKAGE)
+        candidates = [line.removeprefix("package:").strip() for line in paths.splitlines() if line.startswith("package:")]
+        if len(candidates) != 1 or not candidates[0].endswith("/base.apk"):
+            raise AssertionError("Expected one installed base APK, not a split/missing package")
+        with tempfile.TemporaryDirectory(prefix="cutedog-installed-apk-") as directory:
+            downloaded = Path(directory) / "installed.apk"
+            self.adb("pull", candidates[0], downloaded, timeout=300)
+            actual_hash, size = file_sha256(downloaded), downloaded.stat().st_size
+        dump = self.adb("shell", "dumpsys", "package", PACKAGE)
+        (self.output / (label + "-package.txt")).write_text(dump)
+        result = {"device_path": candidates[0], "sha256": actual_hash, "bytes": size, **package_version(dump)}
+        (self.output / (label + "-installed-apk.json")).write_text(json.dumps(result, indent=2) + "\n")
+        if actual_hash != expected_hash.lower():
+            raise AssertionError("Actual installed base APK does not match the pinned input SHA-256")
+        return result
+
+    def reminder_snapshot(self, label, title):
+        """Read actual stopped-process SQLite bytes; never seed or change data outside UI."""
+        self.adb("shell", "am", "force-stop", PACKAGE)
+        directory = self.output / label
+        directory.mkdir()
+        name = "cutedog-reminders.db"
+        files = []
+        present = {line.strip() for line in self.adb("shell", "run-as", PACKAGE, "ls", "databases").splitlines()}
+        if name not in present:
+            raise AssertionError("Actual application reminder database does not exist")
+        for suffix in ("", "-wal", "-shm"):
+            if name + suffix not in present:
+                continue
+            command = ["adb", "-s", self.serial, "exec-out", "run-as", PACKAGE, "cat", "databases/" + name + suffix]
+            result = subprocess.run(command, capture_output=True, timeout=45)
+            self.calls.append({"command": command, "exit": result.returncode,
+                               "binary_bytes": len(result.stdout), "stderr": result.stderr.decode(errors="replace")})
+            if result.returncode:
+                if suffix:
+                    continue
+                raise AssertionError("Cannot read the actual reminder database via run-as")
+            path = directory / (name + suffix)
+            path.write_bytes(result.stdout)
+            files.append({"file": path.name, "bytes": path.stat().st_size, "sha256": file_sha256(path)})
+        # SQLite may touch shared-memory sidecars when opening. Query a disposable copy so
+        # the archived original bytes and their hashes remain unchanged.
+        with tempfile.TemporaryDirectory(prefix="cutedog-upgrade-db-") as temporary:
+            for item in files:
+                shutil.copyfile(directory / item["file"], Path(temporary) / item["file"])
+            connection = sqlite3.connect(f"file:{Path(temporary) / name}?mode=ro", uri=True)
+            connection.row_factory = sqlite3.Row
+            try:
+                rows = [dict(row) for row in connection.execute("SELECT * FROM reminders WHERE title=?", (title,))]
+                total = connection.execute("SELECT COUNT(*) FROM reminders").fetchone()[0]
+                schema = connection.execute("PRAGMA user_version").fetchone()[0]
+            finally:
+                connection.close()
+        if len(rows) != 1 or total != 1:
+            raise AssertionError("Expected exactly the one UI-created upgrade fixture in this fresh emulator")
+        result = {"fixture": rows[0], "schema_version": schema, "total_reminders": total, "files": files}
+        (directory / "observed.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n")
         return result
 
     def overlay_frame(self):
@@ -186,16 +292,41 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--apk", type=Path, required=True)
     parser.add_argument("--expected-sha256", required=True)
+    parser.add_argument("--source-commit", required=True, help="Full source SHA declared for the exact final APK")
+    parser.add_argument("--disposable", action="store_true", help="Required: use a fresh isolated emulator with no existing CuteDog installation")
+    parser.add_argument("--baseline-apk", type=Path, help="Optional old APK for actual in-place upgrade/data-retention validation")
+    parser.add_argument("--baseline-sha256", help="Required together with --baseline-apk")
     parser.add_argument("--serial", default="emulator-5554")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
+    if not args.disposable:
+        parser.error("--disposable is required; existing app installations are never cleared")
+    if not re.fullmatch(r"[0-9a-f]{40}", args.source_commit):
+        parser.error("--source-commit must be a full lowercase 40-character source SHA")
+    if not re.fullmatch(r"[0-9a-fA-F]{64}", args.expected_sha256):
+        parser.error("--expected-sha256 must be a 64-character SHA-256")
+    if bool(args.baseline_apk) != bool(args.baseline_sha256):
+        parser.error("--baseline-apk and --baseline-sha256 must be supplied together")
+    if args.baseline_sha256 and not re.fullmatch(r"[0-9a-fA-F]{64}", args.baseline_sha256):
+        parser.error("--baseline-sha256 must be a 64-character SHA-256")
+    if args.baseline_sha256 and args.baseline_sha256.lower() == args.expected_sha256.lower():
+        parser.error("Baseline and final APK must be different bytes; testing an APK against itself is not an upgrade")
     args.output.mkdir(parents=True, exist_ok=True)
+    if (args.output / "assertions.json").exists():
+        parser.error("Use a fresh evidence output; previous assertions must not be overwritten")
     results = []
     device = Device(args.serial, args.output)
-    metadata = {"apk": args.apk.name, "apk_sha256": hashlib.sha256(args.apk.read_bytes()).hexdigest(),
+    metadata = {"apk": args.apk.name, "apk_sha256": file_sha256(args.apk),
                 "expected_sha256": args.expected_sha256, "test_source_commit": os.getenv("GITHUB_SHA"),
+                "source_commit": args.source_commit, "disposable_emulator": True,
+                "source_binding_note": "Source identity is declared by the release input; installed-byte hashes do not independently prove reproducibility.",
                 "github_run_id": os.getenv("GITHUB_RUN_ID"), "started_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "github_run_attempt": os.getenv("GITHUB_RUN_ATTEMPT"),
                 "scope": "Actual installed APK UI/overlay checks; no remote AI or physical-device performance claim."}
+    prepared = False
+    baseline = {}
+    upgrade_title = "Upgrade-" + uuid.uuid4().hex[:12]
+    upgrade_details = "Preserve this real UI reminder across the signed APK upgrade"
 
     def step(name, action):
         started = time.monotonic()
@@ -208,25 +339,44 @@ def main():
         except Exception as error:
             result = {"name": name, "status": "failed", "error": str(error),
                       "traceback": traceback.format_exc(), "elapsed_seconds": round(time.monotonic() - started, 2)}
-            try:
-                result["screenshot"] = device.screenshot("failure-" + name)
-            except Exception as capture_error:
-                result["capture_error"] = str(capture_error)
+            if prepared:
+                try:
+                    result["screenshot"] = device.screenshot("failure-" + name)
+                except Exception as capture_error:
+                    result["capture_error"] = str(capture_error)
+            else:
+                result["capture_skipped"] = "No application was installed by this run; preserve any pre-existing device contents"
             results.append(result)
             print("FAIL " + name + ": " + str(error), flush=True)
             return False
 
     def prepare():
+        nonlocal prepared
         if metadata["apk_sha256"] != args.expected_sha256.lower():
             raise AssertionError("Downloaded APK does not match the pinned SHA-256")
         device.adb("wait-for-device")
+        if device.adb("shell", "getprop", "ro.kernel.qemu").strip() != "1":
+            raise AssertionError("Selected device is not an emulator")
+        if "package:" in device.adb("shell", "pm", "path", PACKAGE, check=False):
+            raise AssertionError("Refusing an existing CuteDog installation; use a fresh disposable emulator, never pm clear")
         metadata.update(api=device.adb("shell", "getprop", "ro.build.version.sdk").strip(),
                         model=device.adb("shell", "getprop", "ro.product.model").strip(),
                         abi=device.adb("shell", "getprop", "ro.product.cpu.abi").strip())
-        installed = device.adb("install", "-r", args.apk, timeout=180)
+        install_apk = args.baseline_apk or args.apk
+        expected = args.baseline_sha256 or args.expected_sha256
+        if file_sha256(install_apk) != expected.lower():
+            raise AssertionError("APK selected for initial installation does not match its pinned SHA-256")
+        installed = device.adb("install", install_apk, timeout=300)
         if "Success" not in installed:
             raise AssertionError(installed)
-        device.adb("shell", "pm", "clear", PACKAGE)
+        prepared = True
+        actual = device.installed_apk(expected, "baseline" if args.baseline_apk else "final")
+        if args.baseline_apk:
+            baseline.update(actual)
+            metadata["baseline"] = dict(actual, input_apk=args.baseline_apk.name, expected_sha256=args.baseline_sha256)
+        else:
+            metadata["installed_base_apk_sha256"] = actual["sha256"]
+            metadata["installed_apk"] = actual
         # Keep the AVD's boot-time display configuration. Changing density during the
         # launcher's first start can cause an unrelated Pixel Launcher ANR on API 35.
         size = device.adb("shell", "wm", "size")
@@ -235,13 +385,67 @@ def main():
             raise AssertionError("Cannot read actual display dimensions")
         device.width, device.height = map(int, sizes[-1])
         density = device.adb("shell", "wm", "density").strip()
-        device.adb("shell", "settings", "put", "global", "window_animation_scale", "0")
-        device.adb("shell", "settings", "put", "global", "transition_animation_scale", "0")
-        device.adb("shell", "settings", "put", "global", "animator_duration_scale", "0")
-        device.adb("shell", "pm", "grant", PACKAGE, "android.permission.POST_NOTIFICATIONS")
+        if int(metadata["api"]) >= 33:
+            device.adb("shell", "pm", "grant", PACKAGE, "android.permission.POST_NOTIFICATIONS")
         device.adb("shell", "input", "keyevent", "KEYCODE_WAKEUP")
         device.adb("shell", "wm", "dismiss-keyguard")
         return {"install": installed.strip(), "resolution": f"{device.width}x{device.height}", "density": density}
+
+    def upgrade():
+        device.launch()
+        device.tap("事项")
+        device.tap("＋ 新建")
+        device.wait_text("记一件小事")
+        device.edit(0, upgrade_title)
+        device.edit(1, upgrade_details)
+        device.tap("保存事项")
+        device.wait_text(upgrade_title)
+        seeded_shot = device.screenshot("upgrade-baseline-ui-seeded")
+        before_uid = device.adb("shell", "run-as", PACKAGE, "id", "-u").strip()
+        if not before_uid.isdigit():
+            raise AssertionError("Baseline application UID could not be independently read")
+        before = device.reminder_snapshot("upgrade-before-database", upgrade_title)
+        if before["fixture"]["details"] != upgrade_details:
+            raise AssertionError("Baseline UI did not persist the entered reminder details")
+        installed = device.adb("install", "-r", args.apk, timeout=300)
+        if "Success" not in installed:
+            raise AssertionError("In-place installation failed: " + installed)
+        actual = device.installed_apk(args.expected_sha256, "final")
+        metadata["installed_base_apk_sha256"] = actual["sha256"]
+        metadata["installed_apk"] = actual
+        if actual["version_code"] <= baseline["version_code"]:
+            raise AssertionError("Final versionCode is not greater than the actual baseline versionCode")
+        after_uid = device.adb("shell", "run-as", PACKAGE, "id", "-u").strip()
+        if before_uid != after_uid:
+            raise AssertionError("Application UID changed during supposed in-place upgrade")
+        device.launch()
+        device.tap("事项")
+        device.wait_text(upgrade_title)
+        device.tap(upgrade_title)
+        device.wait_text("编辑事项")
+        fields = [n.get("text", "") for n in device.tree().iter("node") if n.get("class") == "android.widget.EditText"]
+        if upgrade_title not in fields or upgrade_details not in fields:
+            raise AssertionError("Final APK did not expose the original reminder title and details in its real UI")
+        retained_shot = device.screenshot("upgrade-final-ui-retained")
+        after = device.reminder_snapshot("upgrade-after-database", upgrade_title)
+        if any(after["fixture"].get(key) != value for key, value in before["fixture"].items()):
+            raise AssertionError("Reminder row fields or identity changed across actual APK update")
+        result = {"baseline_apk_sha256": baseline["sha256"], "final_installed_apk_sha256": actual["sha256"],
+                  "baseline_version_code": baseline["version_code"], "final_version_code": actual["version_code"],
+                  "install_method": "adb install -r; no pm clear or uninstall", "same_uid": before_uid,
+                  "ui_seeded": True, "ui_title_and_details_retained": True, "database_fields_retained": True,
+                  "schema_before": before["schema_version"], "schema_after": after["schema_version"],
+                  "screenshots": [seeded_shot, retained_shot]}
+        metadata["upgrade"] = result
+        # Remove only our known fixture through the product UI before the ordinary CRUD check.
+        device.launch()
+        device.tap("事项")
+        device.tap(upgrade_title)
+        device.scroll_to("删除这件事项")
+        device.tap("删除")
+        device.wait_text(upgrade_title, present=False)
+        device.wait_text("这里还很清爽")
+        return result
 
     def tabs():
         device.launch()
@@ -272,17 +476,16 @@ def main():
         device.tap("保存事项")
         device.wait_text("Device check updated")
         device.wait_text("Device check", present=False)
-        checkboxes = [n for n in device.tree().iter("node") if n.get("checkable") == "true" and n.get("class") == "android.widget.CheckBox"]
-        if len(checkboxes) != 1:
-            raise AssertionError("Expected exactly one test-reminder checkbox")
-        device.tap_node(checkboxes[0])
+        # Filter chips are also exposed as checkable accessibility nodes. Use the product's
+        # explicit reminder action label instead of counting unrelated checkboxes on the page.
+        device.tap_node(device.wait_text("完成：Device check updated"))
         device.tap("完成")
         device.wait_text("Device check updated")
         complete = device.screenshot("reminder-completed")
-        checked = [n for n in device.tree().iter("node") if n.get("class") == "android.widget.CheckBox" and n.get("checked") == "true"]
-        if len(checked) != 1:
+        checked = device.wait_text("撤销完成：Device check updated")
+        if checked.get("checked") != "true":
             raise AssertionError("Completed reminder checkbox is not checked")
-        device.tap_node(checked[0])
+        device.tap_node(checked)
         device.tap("待办")
         device.wait_text("Device check updated")
         device.tap("Device check updated")
@@ -395,30 +598,44 @@ def main():
                 "service_stopped_from_ui": True, "screenshots": [first, second, external_touch]}
 
     try:
-        if step("install-pinned-apk", prepare):
+        if step("install-pinned-apk", prepare) and (not args.baseline_apk or step("actual-in-place-upgrade-preserves-ui-data", upgrade)):
             step("launch-and-four-tabs", tabs)
             step("reminder-ui-lifecycle", reminder_crud)
             step("chat-without-credentials", offline_chat)
             step("overlay-and-drag", overlay)
     finally:
         # This emulator is disposable; never collect any API keys or private chat contents.
-        try:
-            for pid in device.adb("shell", "pidof", PACKAGE, check=False).split():
-                if pid.isdigit():
-                    device.app_pids.add(pid)
-            errors = []
-            for pid in sorted(device.app_pids, key=int):
-                crash = device.adb("logcat", "-d", "--pid=" + pid, "AndroidRuntime:E", "*:S", check=False)
-                errors.append(f"Observed CuteDog process {pid}:\n{crash}")
-                if "FATAL EXCEPTION" in crash:
-                    results.append({"name": "app-process-crash-" + pid, "status": "failed", "error": "App AndroidRuntime fatal exception captured"})
-            (args.output / "app-runtime-errors.txt").write_text("\n".join(errors))
-            device.adb("shell", "am", "force-stop", PACKAGE, check=False)
-            device.adb("shell", "appops", "set", PACKAGE, "SYSTEM_ALERT_WINDOW", "default", check=False)
-        except Exception as error:
-            metadata["cleanup_or_log_collection_error"] = str(error)
+        if prepared:
+            try:
+                for pid in device.adb("shell", "pidof", PACKAGE, check=False).split():
+                    if pid.isdigit():
+                        device.app_pids.add(pid)
+                errors = []
+                for pid in sorted(device.app_pids, key=int):
+                    crash = device.adb("logcat", "-d", "--pid=" + pid, "AndroidRuntime:E", "*:S", check=False)
+                    errors.append(f"Observed CuteDog process {pid}:\n{crash}")
+                    if "FATAL EXCEPTION" in crash:
+                        results.append({"name": "app-process-crash-" + pid, "status": "failed", "error": "App AndroidRuntime fatal exception captured"})
+                (args.output / "app-runtime-errors.txt").write_text("\n".join(errors))
+            except Exception as error:
+                results.append({"name": "app-log-collection", "status": "failed", "error": str(error)})
+            cleanup = [("stop", ("shell", "am", "force-stop", PACKAGE)),
+                       ("overlay", ("shell", "appops", "set", PACKAGE, "SYSTEM_ALERT_WINDOW", "default"))]
+            if int(metadata["api"]) >= 33:
+                cleanup.append(("notifications", ("shell", "pm", "revoke", PACKAGE, "android.permission.POST_NOTIFICATIONS")))
+            metadata["cleanup"] = []
+            for label, command in cleanup:
+                try:
+                    device.adb(*command)
+                    metadata["cleanup"].append({"action": label, "status": "completed"})
+                except Exception as error:
+                    metadata["cleanup"].append({"action": label, "status": "failed", "error": str(error)})
+                    results.append({"name": "cleanup-" + label, "status": "failed", "error": str(error)})
+        else:
+            metadata["cleanup"] = "not_needed; no installation owned by this run"
         metadata["finished_utc"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         metadata["external_environment_dialogs"] = device.external_dialogs
+        metadata["onboarding_ui_steps"] = device.onboarding
         report = {"metadata": metadata, "assertions": results,
                   "passed": sum(r["status"] == "passed" for r in results),
                   "failed": sum(r["status"] == "failed" for r in results)}

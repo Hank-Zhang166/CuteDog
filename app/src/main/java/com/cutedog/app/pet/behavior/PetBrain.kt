@@ -304,8 +304,8 @@ class PetBrain(seed: Long = System.nanoTime()) {
             "head" to listOf("pet_head", "nuzzle", "soothe"), "body" to listOf("cuddle", "belly_up", "relax"),
             "nose" to listOf("curious", "tilt"), "call" to listOf("call", "wave"),
             "happy" to listOf("happy", "tail_wag", "excited"), "calm" to listOf("soothe", "relax", "sit_idle"),
-            "sleep" to listOf("sleep", "curl_idle"),
-            "curious" to listOf("curious", "tilt", "focus"), "cuddle" to listOf("cuddle", "nuzzle", "belly_up"),
+            "sleep" to listOf("sleep", "curl_idle", "sit_idle", "relax"),
+            "curious" to listOf("curious", "tilt", "focus"), "cuddle" to listOf("cuddle", "nuzzle", "belly_up", "soothe", "relax"),
             "wave" to listOf("wave", "call"), "jump" to listOf("jump", "hop"), "treat" to listOf("treat"),
             "ball" to listOf("play_ball"), "follow" to listOf("follow", "look_left", "look_right"),
         )

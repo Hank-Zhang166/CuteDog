@@ -5,6 +5,17 @@ import kotlin.math.max
 
 /** A visible bubble permits an existing measured return, never a new roaming goal. */
 object OverlayTravelPolicy {
+    /** Resolve real directional pixels and a complete measured route, never infer a mirrored gait. */
+    fun canPlanHeading(manifest: ClipManifest, current: String?, requested: String?, sign: Int): Boolean {
+        val heading = ClipHeading.fromSign(sign) ?: return false
+        val idle = manifest.headingIdle(heading) ?: return false
+        val canonical = requested?.let(manifest::canonicalClipId) ?: return false
+        val target = manifest.resolveClip(canonical, heading) ?: return false
+        val clip = manifest.clips.getValue(target)
+        return clip.heading == heading && clip.exitHeading == heading && manifest.travelReady(target) &&
+            current != null && manifest.route(current, target) != null && manifest.route(target, idle) != null
+    }
+
     fun mayAdvance(hostReady: Boolean, bubbleVisible: Boolean, travelInProgress: Boolean): Boolean =
         hostReady && (!bubbleVisible || travelInProgress)
 

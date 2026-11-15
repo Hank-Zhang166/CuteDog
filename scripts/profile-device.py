@@ -8,6 +8,7 @@ package-scoped evidence. Permission revocation runs from the host, never inside 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -19,6 +20,7 @@ import time
 import traceback
 import uuid
 import xml.etree.ElementTree as ET
+import zipfile
 
 PACKAGE = "com.cutedog.app"
 SERVICE = PACKAGE + "/.pet.OverlayService"
@@ -32,6 +34,32 @@ RESTORABLE_PERMISSION_FLAGS = {
 }
 PAGE_MARKERS = {"home": ("轻触 · 打个招呼",), "reminders": ("把小事记好",),
                 "companion": ("记忆", "清空聊天"), "settings": ("你的小狗，你的节奏",)}
+
+
+def verified_artwork_binding(apk, expected_sha256, expected_bytes=None):
+    """Inspect the exact tested binary, never infer installed artwork from source directories."""
+    if not isinstance(expected_sha256, str) or not re.fullmatch(r"[0-9a-f]{64}", expected_sha256):
+        raise ValueError("An exact lowercase APK SHA-256 is required")
+    apk = Path(apk)
+    actual_bytes = apk.stat().st_size
+    with apk.open("rb") as stream:
+        actual_sha = hashlib.file_digest(stream, "sha256").hexdigest()
+    if actual_sha != expected_sha256 or (expected_bytes is not None and actual_bytes != expected_bytes):
+        raise ValueError("Actual APK bytes differ from tested-apks identity")
+    with zipfile.ZipFile(apk) as archive:
+        entries = [item for item in archive.infolist() if item.filename == "assets/pet3d/manifest.json"]
+        if len(entries) > 1:
+            raise ValueError("APK contains duplicate character manifests")
+        manifest_sha = hashlib.sha256(archive.read(entries[0])).hexdigest() if entries else None
+    return {"path": str(apk), "bytes": actual_bytes, "sha256": actual_sha,
+            "contains_authored_manifest": bool(entries), "manifest_sha256": manifest_sha}
+
+
+def tested_apk_binding(record):
+    identity = json.loads(Path(record).read_text())["application"]
+    if type(identity.get("bytes")) is not int or identity["bytes"] <= 0:
+        raise ValueError("tested-apks application byte count is missing or invalid")
+    return verified_artwork_binding(identity["path"], identity["sha256"], identity["bytes"])
 
 
 def percentile(values, fraction):
@@ -576,6 +604,9 @@ def main():
     parser.add_argument("--disposable", action="store_true", help="Required: permit force-stop and temporary permissions on an isolated emulator")
     parser.add_argument("--require-rig-metrics", action="store_true", help="Return failure when real rig counters are unavailable or legacy art is installed")
     parser.add_argument("--expected-apk-sha256", help="Optional expected hash of the installed base.apk; rejects mismatched binaries")
+    parser.add_argument("--apk", type=Path, help="Actual APK file; requires --expected-apk-sha256 and enables strict rig checks when bundled")
+    parser.add_argument("--tested-apks", type=Path, help="Instrumentation tested-apks.json; validates its actual APK before selecting strict rig checks")
+    parser.add_argument("--source-commit", help="Declared APK source commit, independently recorded from the test tooling commit")
     parser.add_argument("--start-label", default="召唤小狗")
     parser.add_argument("--stop-label", default="停止桌宠")
     args = parser.parse_args()
@@ -590,7 +621,7 @@ def main():
         parser.error("Use a new output directory; existing measurement evidence must not be overwritten")
     device = Device(args.serial, args.output, args.adb)
     report = {"schema_version": 2, "started_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-              "source_commit": os.getenv("GITHUB_SHA"), "github_run_id": os.getenv("GITHUB_RUN_ID"),
+              "source_commit": args.source_commit or os.getenv("GITHUB_SHA"), "test_tool_commit": os.getenv("GITHUB_SHA"), "github_run_id": os.getenv("GITHUB_RUN_ID"),
               "serial": args.serial, "checks": [], "measurements": [], "restoration": [], "scenes": device.scenes,
               "performance_acceptance": "No device-specific FPS/PSS budget has been imposed; measurements are evidence, not a commercial-quality performance claim.",
               "limitations": ["Emulator CPU, GPU, memory and latency are environment observations, not phone battery or thermal measurements.",
@@ -648,6 +679,17 @@ def main():
             check(name, lambda: assert_result(delta["actualFrameChanges"] > 0 and delta["drawCount"] > 0 and all(row.get("running") is True and row.get("visible") is True for row in after), "No visible running rig advanced/drew frames during the interval", delta), strict=False)
 
     try:
+        if args.tested_apks and args.apk:
+            raise ValueError("Use either --tested-apks or --apk, not both")
+        binding = tested_apk_binding(args.tested_apks) if args.tested_apks else (
+            verified_artwork_binding(args.apk, args.expected_apk_sha256) if args.apk else None)
+        if binding:
+            if args.expected_apk_sha256 and args.expected_apk_sha256 != binding["sha256"]:
+                raise ValueError("Expected APK hash conflicts with tested-apks identity")
+            args.expected_apk_sha256 = binding["sha256"]
+            args.require_rig_metrics = args.require_rig_metrics or binding["contains_authored_manifest"]
+            report["tested_apk_binding"] = binding
+        report["require_rig_metrics"] = args.require_rig_metrics
         device.run("wait-for-device")
         if device.run("shell", "getprop", "sys.boot_completed").strip() != "1":
             raise RuntimeError("Android has not completed boot")

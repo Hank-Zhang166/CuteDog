@@ -29,6 +29,8 @@ class BitmapFrameLoader(
     private val width: Int,
     private val height: Int,
     private val budgetBytes: Long = MAX_BYTES,
+    frameDigests: Map<String, String> = emptyMap(),
+    verificationDependencies: Map<String, List<AssetDigest>> = emptyMap(),
 ) : Closeable {
     private class Entry(val bitmap: Bitmap, var everDisplayed: Boolean = false)
     private val lock = Any()
@@ -50,16 +52,21 @@ class BitmapFrameLoader(
     private var workingBudget = budgetBytes
     private val frameBytes = width.toLong() * height * 4
     private val worker = Executors.newSingleThreadExecutor { Thread(it, "CuteDog-frame-decode").apply { isDaemon = true } }
+    private val frameDigests = frameDigests.toMap()
+    private val verificationDependencies = verificationDependencies.mapValues { it.value.toList() }
+    private val verifiedDependencies = mutableSetOf<AssetDigest>() // Decoder-thread only; APK assets are immutable.
 
     init {
         require(width in 16..1024 && height in 16..1024)
         require(budgetBytes in (frameBytes * 4)..MAX_BYTES) { "帧缓存至少容纳四帧且不超过 24 MiB" }
+        require(this.frameDigests.values.all(ClipIntegrity.SHA256::matches)) { "角色帧摘要格式无效" }
     }
 
     /** Returned pixels are read-only and valid while pinned. Renderer must not retain old frames. */
     fun ready(path: String): Bitmap? = synchronized(lock) {
         cache[path]?.also { it.everDisplayed = true }?.bitmap
     }
+    fun isReady(path: String): Boolean = synchronized(lock) { path in cache }
     fun readyAndPin(path: String, retainedPaths: Set<String>): Bitmap? = synchronized(lock) {
         val entry = cache[path] ?: return@synchronized null
         require(retainedPaths.size <= 3 && path in retainedPaths)
@@ -139,8 +146,17 @@ class BitmapFrameLoader(
             var bitmap: Bitmap? = null
             var failure: String? = null
             try {
+                for (dependency in verificationDependencies[path].orEmpty()) if (dependency !in verifiedDependencies) {
+                    ClipIntegrity.verifyWhileReading(source.open(dependency.path), dependency.sha256) { }
+                    verifiedDependencies += dependency
+                }
+                fun <T> readFrame(consume: (InputStream) -> T): T {
+                    val digest = frameDigests[path]
+                    return if (digest == null) source.open(path).use(consume)
+                        else ClipIntegrity.verifyWhileReading(source.open(path), digest, consume = consume)
+                }
                 val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                source.open(path).use { BitmapFactory.decodeStream(it, null, bounds) }
+                readFrame { BitmapFactory.decodeStream(it, null, bounds) }
                 require(bounds.outWidth == width && bounds.outHeight == height) { "角色帧尺寸与清单不符" }
                 val options = BitmapFactory.Options().apply {
                     inPreferredConfig = Bitmap.Config.ARGB_8888
@@ -148,10 +164,10 @@ class BitmapFrameLoader(
                     inScaled = false
                     if (reuse != null) inBitmap = reuse.bitmap
                 }
-                bitmap = source.open(path).use { BitmapFactory.decodeStream(it, null, options) }
-                    ?: throw IllegalArgumentException("角色帧无法解码")
+                readFrame { bitmap = BitmapFactory.decodeStream(it, null, options) }
+                requireNotNull(bitmap) { "角色帧无法解码" }
                 require(reuse == null || bitmap === reuse.bitmap) { "平台未复用约定的角色帧缓冲" }
-                require(bitmap.width == width && bitmap.height == height && bitmap.allocationByteCount <= frameBytes) { "角色帧内存超出预算" }
+                require(bitmap!!.width == width && bitmap!!.height == height && bitmap!!.allocationByteCount <= frameBytes) { "角色帧内存超出预算" }
             } catch (error: Exception) {
                 failure = "角色资源不可用：$path（${if (error is java.io.IOException) "读取失败" else "帧数据无效"}）"
             }
@@ -162,7 +178,7 @@ class BitmapFrameLoader(
                     if (reuse != null) reused++
                 }
                 if (closed || failure != null || generation != decodeGeneration || (path !in desired && path !in pinned)) {
-                    if (bitmap != null) release(Entry(bitmap, reuse?.everDisplayed == true))
+                    bitmap?.let { release(Entry(it, reuse?.everDisplayed == true)) }
                     if (reuse?.bitmap !== bitmap) reuse?.let(::release)
                     allocated -= frameBytes
                     discarded++

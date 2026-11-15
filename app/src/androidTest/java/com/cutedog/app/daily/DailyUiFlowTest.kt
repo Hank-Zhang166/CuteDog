@@ -58,8 +58,9 @@ class DailyUiFlowTest {
         compose.onNodeWithTag("daily_hour").performScrollTo().performTextReplacement("23")
         compose.onNodeWithTag("daily_quiet_start").performScrollTo().performTextReplacement("22")
         compose.onNodeWithTag("daily_quiet_end").performScrollTo().performTextReplacement("8")
-        compose.onNodeWithTag("daily_quiet_end").performImeAction()
-        compose.onNodeWithTag("daily_save_time").performScrollTo().performClick()
+        // These numeric fields expose ImeAction.Default. Use the actual visible save
+        // control instead of inventing a Done action that the product never declared.
+        compose.onNodeWithTag("daily_save_time").performScrollTo().assertIsDisplayed().performClick()
         compose.waitUntil(5_000) {
             val settings = DailySettings(fixture.context)
             settings.hour == 23 && settings.quietStart == 22 && settings.quietEnd == 8

@@ -14,6 +14,7 @@ import com.cutedog.app.pet.animation.FrameClipPlayer
 import com.cutedog.app.pet.animation.ClipPlaybackFrame
 import com.cutedog.app.pet.animation.AuthoredTravelAccumulator
 import com.cutedog.app.pet.animation.FrameScheduleGate
+import com.cutedog.app.pet.animation.OverlayTravelPolicy
 import com.cutedog.app.pet.behavior.PetBrain
 import com.cutedog.app.pet.behavior.PetContext
 import com.cutedog.app.pet.behavior.GrowthStore
@@ -76,6 +77,9 @@ class PetView(context: Context) : View(context) {
     var spatialDepth = 1f
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val shadow = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(23, 66, 45, 29) }
+    private val authoredShadow = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        shader = RadialGradient(0f, 0f, 1f, Color.argb(24, 46, 44, 39), Color.TRANSPARENT, Shader.TileMode.CLAMP)
+    }
     private val source = Rect()
     private val dest = RectF()
     private val atlas by lazy { cachedAtlas.get() ?: context.assets.open("pet/samoyed.png").use {
@@ -148,7 +152,7 @@ class PetView(context: Context) : View(context) {
                     val quiet = settings.activity == "quiet" || LocalTime.now().hour in 0..7 || LocalTime.now().hour >= 22
                     val situation = PetContext(LocalTime.now().hour, quiet || settings.reducedMotion, settings.activity,
                         battery.isCharging, power.isPowerSaveMode || settings.lowPower, !settings.soundEnabled, interactionAge)
-                    val available = player.manifest?.clips?.keys ?: emptySet()
+                    val available = player.manifest?.requestableClipIds ?: emptySet()
                     brain.update(deferredBrainSeconds, player.canonicalClipId ?: "stand", available, situation)?.let {
                         if (!player.request(it)) brain.requestRejected(it)
                     }
@@ -205,11 +209,16 @@ class PetView(context: Context) : View(context) {
         if (!allowed) authoredTravel.clear()
     }
     fun requestAuthoredHeading(sign: Int): Boolean {
-        if (!hasRigAssets || sign !in -1..1 || sign == 0) return false
+        if (!canPlanAuthoredHeading(sign)) return false
         val accepted = rigPlayer?.requestHeading(sign) == true
         if (accepted) desiredHeading = sign
         return accepted
     }
+    fun canPlanAuthoredHeading(sign: Int): Boolean = rigPlayer?.let { player ->
+        player.manifest?.let { manifest ->
+            OverlayTravelPolicy.canPlanHeading(manifest, player.currentClip, player.requestedClip, sign)
+        }
+    } == true
     fun stopAuthoredTravel(): Boolean {
         val accepted = rigPlayer?.requestStop() == true
         if (accepted) {
@@ -276,6 +285,13 @@ class PetView(context: Context) : View(context) {
                 val side = min(width, height).toFloat() * spatialDepth
                 source.set(0, 0, pixels.width, pixels.height)
                 dest.set((width - side) / 2, height - side, (width + side) / 2, height.toFloat())
+                // The released 512px artwork shares a fixed ground plane at y=452 (far paws 447).
+                // Keep the soft contact shadow on that plane even during the gait's brief flight.
+                canvas.save()
+                canvas.translate(dest.left + side * (285f / 512f), dest.top + side * (452f / 512f))
+                canvas.scale(side * (135f / 512f), side * (10f / 512f))
+                canvas.drawCircle(0f, 0f, 1f, authoredShadow)
+                canvas.restore()
                 paint.alpha = 255
                 canvas.drawBitmap(pixels, source, dest, paint)
             } else if (frame?.error != null) {

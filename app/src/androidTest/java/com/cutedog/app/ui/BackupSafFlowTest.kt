@@ -11,6 +11,8 @@ import android.os.ParcelFileDescriptor
 import android.os.SystemClock
 import android.provider.DocumentsContract
 import android.provider.OpenableColumns
+import android.view.InputDevice
+import android.view.MotionEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.activity.result.ActivityResultCallback
 import androidx.activity.result.ActivityResultRegistry
@@ -178,10 +180,6 @@ class BackupSafFlowTest {
             val localBeforeMerge = observedRows("before-merge")
             assertEquals(setOf(prefix + "A", prefix + "C"), localBeforeMerge.keys)
             openBackup()
-            compose.activityRule.scenario.onActivity { activity ->
-                observer?.close()
-                observer = ResultObserver(activity.activityResultRegistry)
-            }
             selectExportedDocument("merge")
             assertEquals(localBeforeMerge, observedRows("merge-preview-no-write"))
             compose.onNodeWithText("合并，保留原有事项（推荐）").performScrollTo().performClick()
@@ -300,12 +298,22 @@ class BackupSafFlowTest {
     }
 
     private fun selectExportedDocument(label: String) {
+        compose.onNodeWithTag("reminders_import").performScrollTo()
+        compose.waitForIdle()
+        // The real Compose launcher re-registers when its newly constructed OpenDocument
+        // contract changes during recomposition (for example after the first merge). Observe
+        // the current registration for EACH launch, never the previous selection's callback.
+        compose.activityRule.scenario.onActivity { activity ->
+            observer?.close()
+            observer = ResultObserver(activity.activityResultRegistry)
+        }
         val before = requireNotNull(observer).results.size
-        compose.onNodeWithTag("reminders_import").performScrollTo().performClick()
+        compose.onNodeWithTag("reminders_import").performClick()
         awaitPicker()
         capture("$label-open-picker")
         chooseDownloads()
-        click(awaitNode("Exported fixture file in actual DocumentsUI") { it.text?.toString() == documentName })
+        instrumentation.runOnMainSync { requireNotNull(observer).assertAttached("open") }
+        touchExportedDocument(label)
         val result = awaitResult(before, "open")
         val selected = requireNotNull(result.uri) { "Real OpenDocument result was cancelled" }
         assertEquals(documentName, displayName(selected))
@@ -325,6 +333,42 @@ class BackupSafFlowTest {
             node.text?.toString() in setOf("Downloads", "下载", "下载内容") && ancestorHasId(node, "roots_list")
         })
         awaitPicker()
+        // API 26 exposes file titles behind the closing drawer before they can be touched.
+        // Wait for the actual drawer to disappear and accessibility events to settle.
+        awaitCondition("DocumentsUI roots drawer to finish closing") {
+            nodes().none { it.isVisibleToUser && it.viewIdResourceName?.endsWith("/roots_list") == true }
+        }
+        automation.waitForIdle(300, 5_000)
+    }
+
+    private fun touchExportedDocument(label: String) {
+        val node = awaitNode("Exported fixture file in actual DocumentsUI") {
+            it.text?.toString() == documentName && it.isEnabled
+        }
+        check(node.refresh() && node.isVisibleToUser && node.text?.toString() == documentName) {
+            "The exported file title must still be visible in the actual system picker"
+        }
+        val window = automation.windows.single { it.id == node.windowId && it.isActive && it.root?.packageName?.toString() in pickerPackages }
+        val bounds = Rect().also(node::getBoundsInScreen)
+        val windowBounds = Rect().also(window::getBoundsInScreen)
+        check(!bounds.isEmpty && windowBounds.contains(bounds.centerX(), bounds.centerY()))
+        events.put(JSONObject().put("stage", "$label-document-touch")
+            .put("package", node.packageName?.toString()).put("windowId", node.windowId)
+            .put("displayName", node.text?.toString()).put("bounds", bounds.toShortString())
+            .put("elapsedMs", SystemClock.elapsedRealtime()))
+        persist()
+        // API 26's RecyclerView handles touch while every file-title ancestor reports
+        // clickable=false. Touch the observed title, away from API 35's preview-icon button.
+        // This goes through real DocumentsUI input; it never supplies an Intent or URI.
+        val downAt = SystemClock.uptimeMillis()
+        fun inject(action: Int) {
+            val event = MotionEvent.obtain(downAt, SystemClock.uptimeMillis(), action,
+                bounds.exactCenterX(), bounds.exactCenterY(), 0).apply { source = InputDevice.SOURCE_TOUCHSCREEN }
+            try { assertTrue("Actual system file touch $action", automation.injectInputEvent(event, true)) }
+            finally { event.recycle() }
+        }
+        inject(MotionEvent.ACTION_DOWN)
+        inject(MotionEvent.ACTION_UP)
     }
 
     private fun ancestorHasId(node: AccessibilityNodeInfo, suffix: String): Boolean {
@@ -504,6 +548,7 @@ class BackupSafFlowTest {
     private inner class ResultObserver(private val registry: ActivityResultRegistry) {
         val results = CopyOnWriteArrayList<SelectedResult>()
         private val replacements = mutableMapOf<String, Pair<Any, Any>>()
+        private val contractKeys = mutableMapOf<String, String>()
         private val field = ActivityResultRegistry::class.java.getDeclaredField("keyToCallback").apply { isAccessible = true }
         @Suppress("UNCHECKED_CAST") private val entries get() = field.get(registry) as MutableMap<String, Any>
 
@@ -534,7 +579,15 @@ class BackupSafFlowTest {
                 }
                 val replacement = constructor.newInstance(observed, contract)
                 replacements[key] = original to replacement
+                contractKeys[kind] = key
                 entries[key] = replacement
+            }
+        }
+
+        fun assertAttached(contract: String) {
+            val key = requireNotNull(contractKeys[contract])
+            check(entries[key] === replacements.getValue(key).second) {
+                "The current real $contract registration changed before system document selection"
             }
         }
 

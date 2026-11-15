@@ -4,6 +4,7 @@ import com.cutedog.app.pet.animation.ClipDirector
 import com.cutedog.app.pet.animation.ClipInterrupt
 import com.cutedog.app.pet.animation.ClipManifest
 import com.cutedog.app.pet.animation.FrameClip
+import com.cutedog.app.pet.animation.ReleasedArtwork
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
@@ -86,6 +87,40 @@ class PetBrainTest {
         assertNull(brain.update(0f, "sleep", all, day))
         assertNull(brain.pendingTarget)
         assertEquals("soothe", ready().interact("calm"))
+    }
+
+    @Test fun publishedHomeGesturesAndAllowedModelIntentsHaveActualAvailableTargets() {
+        val available = ReleasedArtwork.REQUIRED_ACTIONS
+        val homeAndGestures = mapOf("call" to "wave", "pet" to "soothe", "ball" to "play_ball",
+            "treat" to "treat", "sleep" to "sit_idle", "jump" to "hop", "cuddle" to "soothe")
+        val model = mapOf("happy" to "happy", "calm" to "soothe", "curious" to "curious",
+            "cuddle" to "soothe", "wave" to "wave")
+        listOf(homeAndGestures to PetBrain.InteractionSource.USER, model to PetBrain.InteractionSource.MODEL).forEach { (intents, source) ->
+            intents.forEach { (intent, expected) ->
+                val brain = PetBrain(17).also { it.update(0f, "stand", available, day) }
+                val target = brain.interact(intent, source)
+                assertEquals("$source / $intent must select the actual reviewed action", expected, target)
+                assertTrue("$intent must not invent an unavailable action", target in available)
+            }
+        }
+    }
+
+    @Test fun restAndAffectionPreferSpecificActionsBeforeGentleAvailableResponses() {
+        fun target(intent: String, available: Set<String>): String? = PetBrain(17).let {
+            it.update(0f, "stand", available + "stand", day)
+            it.interact(intent)
+        }
+        assertEquals("sleep", target("sleep", setOf("sleep", "curl_idle", "sit_idle", "relax")))
+        assertEquals("curl_idle", target("sleep", setOf("curl_idle", "sit_idle", "relax")))
+        assertEquals("sit_idle", target("sleep", setOf("sit_idle", "relax")))
+        assertEquals("relax", target("sleep", setOf("relax")))
+        assertEquals("cuddle", target("cuddle", setOf("cuddle", "nuzzle", "soothe", "relax")))
+        assertEquals("nuzzle", target("cuddle", setOf("nuzzle", "soothe", "relax")))
+        assertEquals("belly_up", target("cuddle", setOf("belly_up", "soothe", "relax")))
+        assertEquals("soothe", target("cuddle", setOf("soothe", "relax")))
+        assertEquals("relax", target("cuddle", setOf("relax")))
+        assertNull(target("sleep", emptySet()))
+        assertNull(target("cuddle", emptySet()))
     }
 
     @Test fun elapsedTimeIsIndependentOfCallbackRate() {
