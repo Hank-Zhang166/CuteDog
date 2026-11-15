@@ -17,12 +17,15 @@ import subprocess
 import sys
 import time
 import traceback
+import uuid
 import xml.etree.ElementTree as ET
 
 PACKAGE = "com.cutedog.app"
 SERVICE = PACKAGE + "/.pet.OverlayService"
 ACTIVITY = PACKAGE + "/.MainActivity"
 MODES = {"allow", "ignore", "deny", "default", "foreground"}
+PAGE_MARKERS = {"home": ("轻触 · 打个招呼",), "reminders": ("把小事记好",),
+                "companion": ("记忆", "清空聊天"), "settings": ("你的小狗，你的节奏",)}
 
 
 def percentile(values, fraction):
@@ -109,41 +112,199 @@ def visible_overlay_blocks(raw):
     return result
 
 
+def parse_keyguard(raw):
+    """Use explicit keyguard fields; a successful dismiss command is not an unlocked state."""
+    match = re.search(r"\b(?:mKeyguardShowing|keyguardShowing|isStatusBarKeyguard)=(true|false)\b", raw)
+    delegate = raw.split("KeyguardServiceDelegate", 1)[-1] if "KeyguardServiceDelegate" in raw else ""
+    showing = re.search(r"\bshowing=(true|false)\b", delegate)
+    secure = re.search(r"\bsecure=(true|false)\b", delegate)
+    return {"showing": (showing or match)[1] == "true" if showing or match else None,
+            "secure": secure[1] == "true" if secure else None}
+
+
+def ui_observation(tree):
+    if tree is None:
+        return {"available": False, "scope": "active_window_only_not_all_windows"}
+    nodes = list(tree.iter("node"))
+    labels = {node.get(field, "") for node in nodes for field in ("text", "content-desc")}
+    app_labels = {node.get(field, "") for node in nodes if node.get("package") == PACKAGE for field in ("text", "content-desc")}
+    parents = {child: parent for parent in tree.iter() for child in parent}
+    selected = []
+    for node in nodes:
+        label = node.get("text", "")
+        if node.get("package") != PACKAGE or label not in ("首页", "事项", "陪伴", "小狗"):
+            continue
+        ancestor = node
+        while ancestor is not None:
+            if ancestor.get("selected") == "true":
+                selected.append(label)
+                break
+            ancestor = parents.get(ancestor)
+    error_labels = ("isn't responding", "is not responding", "无响应", "没有响应", "keeps stopping", "屡次停止")
+    return {"available": True, "scope": "active_window_only_not_all_windows", "node_count": len(nodes),
+            "packages": sorted({node.get("package", "") for node in nodes if node.get("package")}),
+            "has_navigation": "首页" in app_labels and "小狗" in app_labels,
+            "page_markers": {name: all(marker in app_labels for marker in markers) for name, markers in PAGE_MARKERS.items()},
+            "selected_navigation": sorted(set(selected)),
+            "system_error_dialog_text_observed": any(marker in label.lower() for label in labels for marker in error_labels)}
+
+
+def scene_observation(raw, tree):
+    activities, windows = raw.get("activities", ""), raw.get("windows", "")
+    resumed = [line.strip() for line in activities.splitlines() if re.search(r"(?:mResumedActivity|topResumedActivity|ResumedActivity):?\s*[:=]?", line)]
+    focus = [line.strip() for line in windows.splitlines() if "mCurrentFocus=" in line or "mFocusedApp=" in line]
+    keyguard = parse_keyguard(raw.get("policy", ""))
+    ui = ui_observation(tree)
+    power = re.search(r"mWakefulness=(\w+)", raw.get("power", ""))
+    app_resumed = any(PACKAGE + "/" in line for line in resumed) if resumed else None
+    observations = []
+    if keyguard["showing"] is True:
+        observations.append("keyguard_showing")
+    if power and power[1] != "Awake":
+        observations.append("screen_not_awake")
+    if ui.get("system_error_dialog_text_observed"):
+        observations.append("system_error_dialog_text_observed")
+    overlays = len(visible_overlay_blocks(windows))
+    if app_resumed and not ui.get("has_navigation") and overlays:
+        observations.append("app_resumed_but_navigation_absent_from_single_active_window_tree")
+    if ui.get("has_navigation"):
+        observations.append("main_navigation_observed")
+    return {"resumed_activity_lines": resumed, "focus_lines": focus, "app_resumed": app_resumed,
+            "keyguard": keyguard, "wakefulness": power[1] if power else None, "ui": ui,
+            "visible_app_overlay_windows": overlays, "observations": observations,
+            "root_cause": "unknown; raw contemporaneous evidence requires review",
+            "anr_note": "lastanr and events are historical evidence; neither alone proves an ANR at this failure"}
+
+
 class Device:
     def __init__(self, serial, output, adb="adb"):
         self.serial, self.output, self.executable = serial, output, adb
         self.calls = []
         self.sequence = 0
+        self.stage = "preflight"
+        self.run_id = uuid.uuid4().hex[:12]
+        self.last_ui = None
+        self.scenes = []
+        self.failure_captures = []
 
-    def run(self, *args, timeout=45, check=True):
+    def run(self, *args, timeout=45, check=True, binary=False):
         started = time.monotonic()
-        result = subprocess.run([self.executable, "-s", self.serial, *map(str, args)],
-                                capture_output=True, text=True, timeout=timeout)
-        text = result.stdout + result.stderr
+        try:
+            result = subprocess.run([self.executable, "-s", self.serial, *map(str, args)],
+                                    capture_output=True, text=not binary, timeout=timeout)
+        except subprocess.TimeoutExpired as error:
+            partial = error.stderr or b""
+            if isinstance(partial, bytes):
+                partial = partial.decode("utf-8", errors="replace")
+            stdout = error.stdout or b""
+            if isinstance(stdout, bytes):
+                stdout = stdout.decode("utf-8", errors="replace")
+            self.calls.append({"args": list(map(str, args)), "stage": self.stage, "exit_code": None,
+                               "timed_out": True, "timeout_seconds": timeout,
+                               "elapsed_seconds": round(time.monotonic() - started, 3), "stderr": partial[-2000:],
+                               "partial_stdout": stdout[-2000:] if not binary else "binary response omitted"})
+            raise
+        stderr = result.stderr.decode("utf-8", errors="replace") if binary else result.stderr
+        text = result.stdout if binary else result.stdout + result.stderr
         self.calls.append({"args": list(map(str, args)), "exit_code": result.returncode,
+                           "stage": self.stage,
                            "elapsed_seconds": round(time.monotonic() - started, 3),
-                           "stderr": result.stderr[-2000:]})
+                           "stderr": stderr[-2000:]})
         if check and result.returncode:
-            raise RuntimeError(f"adb failed ({result.returncode}): {' '.join(map(str, args))}: {text[-1200:]}")
+            detail = stderr if binary else text
+            raise RuntimeError(f"adb failed ({result.returncode}): {' '.join(map(str, args))}: {detail[-1200:]}")
         return text
 
     def evidence(self, name, text):
         path = self.output / name
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text, encoding="utf-8")
+        if isinstance(text, bytes):
+            path.write_bytes(text)
+        else:
+            path.write_text(text, encoding="utf-8")
         return str(path.relative_to(self.output))
 
-    def tree(self):
-        self.run("shell", "uiautomator", "dump", "/sdcard/cutedog-profile-ui.xml")
-        raw = self.run("shell", "cat", "/sdcard/cutedog-profile-ui.xml")
-        start = raw.find("<?xml")
-        if start < 0:
-            raise RuntimeError("UIAutomator produced no accessibility XML")
-        return ET.fromstring(raw[start:])
+    def tree(self, timeout=20):
+        self.sequence += 1
+        name = f"navigation/{self.sequence:04d}"
+        remote = f"/sdcard/cutedog-profile-{self.run_id}-{self.sequence}.xml"
+        self.last_ui = {"stage": self.stage, "sequence": self.sequence, "captured_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+        try:
+            stdout = self.run("shell", "uiautomator", "dump", remote, timeout=timeout, check=False)
+            self.last_ui["dump_output"] = self.evidence(name + "-dump.txt", stdout)
+            if self.calls and self.calls[-1].get("exit_code") not in (0, None):
+                raise RuntimeError("UIAutomator dump returned an error; see the retained raw output")
+            # A fresh path prevents a CLI failure with exit code zero from returning an old tree.
+            raw = self.run("shell", "cat", remote, timeout=5)
+            self.last_ui["xml"] = self.evidence(name + ".xml", raw)
+            start = raw.find("<?xml")
+            if start < 0:
+                raise RuntimeError("UIAutomator produced no fresh accessibility XML")
+            tree = ET.fromstring(raw[start:])
+            self.last_ui["observation"] = ui_observation(tree)
+            return tree
+        except Exception as error:
+            self.last_ui["error"] = str(error)
+            raise
+        finally:
+            self.evidence(name + "-metadata.json", json.dumps(self.last_ui, ensure_ascii=False, indent=2))
+            try:
+                self.run("shell", "rm", "-f", remote, timeout=5, check=False)
+            except Exception:
+                pass
+
+    def capture_scene(self, name, failure=False):
+        """Read-only observations before cleanup or recovery input; errors never replace a failure."""
+        folder = "scenes/" + re.sub(r"[^A-Za-z0-9_.-]", "_", name)
+        record = {"name": name, "stage": self.stage, "failure": failure,
+                  "captured_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                  "previous_ui_attempt": dict(self.last_ui) if self.last_ui else None, "evidence": {}, "errors": {}}
+        raw = {}
+        try:
+            png = self.run("exec-out", "screencap", "-p", timeout=10, binary=True)
+            if not png.startswith(b"\x89PNG\r\n\x1a\n"):
+                raise RuntimeError("screencap did not return PNG bytes")
+            record["evidence"]["screenshot"] = self.evidence(folder + "/screen.png", png)
+        except Exception as error:
+            record["errors"]["screenshot"] = str(error)
+        commands = {"activities": ("activity", "activities"), "windows": ("window", "windows"),
+                    "policy": ("window", "policy"), "power": ("power",),
+                    "services": ("activity", "services", PACKAGE)}
+        if failure:
+            commands.update(processes=("activity", "processes"), lastanr=("activity", "lastanr"))
+        for key, command in commands.items():
+            try:
+                raw[key] = self.run("shell", "dumpsys", *command, timeout=10)
+                record["evidence"][key] = self.evidence(folder + "/" + key + ".txt", raw[key])
+            except Exception as error:
+                record["errors"][key] = str(error)
+        if failure:
+            try:
+                events = self.run("shell", "logcat", "-b", "events", "-d", "-v", "threadtime", "-t", "200", "am_anr:I", "am_crash:I", "*:S", timeout=10)
+                record["evidence"]["error_events"] = self.evidence(folder + "/error-events.txt", events)
+            except Exception as error:
+                record["errors"]["error_events"] = str(error)
+        tree = None
+        try:
+            tree = self.tree(timeout=12)
+            record["fresh_ui_attempt"] = dict(self.last_ui)
+            record["evidence"]["xml"] = self.last_ui["xml"]
+        except Exception as error:
+            record["errors"]["fresh_ui"] = str(error)
+            record["fresh_ui_attempt"] = dict(self.last_ui) if self.last_ui else None
+        record["observation"] = scene_observation(raw, tree)
+        record["capture_finished_utc"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        self.evidence(folder + "/scene.json", json.dumps(record, ensure_ascii=False, indent=2))
+        self.scenes.append(record)
+        if failure:
+            self.failure_captures.append(record)
+        return record
 
     @staticmethod
     def find(tree, label):
         for node in tree.iter("node"):
+            if node.get("package") != PACKAGE:
+                continue
             if label not in (node.get("text", ""), node.get("content-desc", "")):
                 continue
             bounds = list(map(int, re.findall(r"-?\d+", node.get("bounds", ""))))
@@ -153,13 +314,16 @@ class Device:
 
     def tap(self, label, scroll=False):
         for attempt in range(10 if scroll else 3):
-            bounds = self.find(self.tree(), label)
+            tree = self.tree()
+            bounds = self.find(tree, label)
             if bounds:
                 left, top, right, bottom = bounds
                 self.run("shell", "input", "tap", (left + right) // 2, (top + bottom) // 2)
                 time.sleep(.7)
                 return
             if scroll:
+                if not ui_observation(tree)["has_navigation"]:
+                    raise AssertionError("Cannot safely scroll: app navigation is absent from the single active-window tree")
                 size = re.findall(r"(\d+)x(\d+)", self.run("shell", "wm", "size"))
                 if not size:
                     raise RuntimeError("Cannot read display dimensions")
@@ -170,17 +334,43 @@ class Device:
         raise AssertionError(f"Visible app control not found: {label}")
 
     def launch(self):
+        self.await_unlocked()
         text = self.run("shell", "am", "start", "-W", "-n", ACTIVITY, timeout=90)
+        self.sequence += 1
+        name = f"navigation/{self.sequence:04d}-launch"
+        self.evidence(name + "-am-start.txt", text)
         if "Status: ok" not in text:
             raise AssertionError("Activity did not report Status: ok")
-        for _ in range(6):
+        for attempt in range(6):
+            activities = self.run("shell", "dumpsys", "activity", "activities", timeout=10)
+            self.evidence(name + f"-activities-{attempt + 1}.txt", activities)
+            resumed = scene_observation({"activities": activities}, None)["app_resumed"]
             tree = self.tree()
-            if self.find(tree, "稍后了解"):
+            if resumed is True and self.find(tree, "稍后了解"):
                 self.tap("稍后了解")
-            elif self.find(tree, "首页"):
+            elif resumed is True and self.find(tree, "首页") and self.find(tree, "小狗"):
                 return
             time.sleep(1)
-        raise AssertionError("App did not reach its navigation screen")
+        raise AssertionError("MainActivity resumed state and navigation could not both be verified; the CLI UI tree covers only the active window")
+
+    def await_unlocked(self):
+        def unlocked():
+            policy = self.run("shell", "dumpsys", "window", "policy", timeout=10)
+            return self.screen_state()["interactive"] is True and parse_keyguard(policy)["showing"] is False
+        self.wait(unlocked, 15, "Interactive and keyguard-dismissed states were not both observed")
+
+    def show_page(self, label, page, capture=True):
+        self.tap(label)
+        self.wait(lambda: ui_observation(self.tree())["page_markers"][page], 12,
+                  f"The {label} tab did not expose its actual {page} content")
+        if not capture:
+            return {"page": page, "content_verified": True}
+        scene = self.capture_scene("page-" + page)
+        if not scene["evidence"].get("screenshot") or not scene["evidence"].get("xml"):
+            raise AssertionError(f"The {page} page was reached but PNG/XML evidence is incomplete: {scene['errors']}")
+        if not scene["observation"]["ui"].get("page_markers", {}).get(page):
+            raise AssertionError(f"The retained {page} XML did not contain the page's own content markers")
+        return {"page": page, "content_verified": True, "scene": scene["name"], "evidence": scene["evidence"]}
 
     def start_overlay(self, start_label):
         self.launch()
@@ -330,9 +520,9 @@ def main():
     if (args.output / "profile.json").exists():
         parser.error("Use a new output directory; existing measurement evidence must not be overwritten")
     device = Device(args.serial, args.output, args.adb)
-    report = {"schema_version": 1, "started_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    report = {"schema_version": 2, "started_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
               "source_commit": os.getenv("GITHUB_SHA"), "github_run_id": os.getenv("GITHUB_RUN_ID"),
-              "serial": args.serial, "checks": [], "measurements": [], "restoration": [],
+              "serial": args.serial, "checks": [], "measurements": [], "restoration": [], "scenes": device.scenes,
               "performance_acceptance": "No device-specific FPS/PSS budget has been imposed; measurements are evidence, not a commercial-quality performance claim.",
               "limitations": ["Emulator CPU, GPU, memory and latency are environment observations, not phone battery or thermal measurements.",
                               "Short PSS trends cannot prove absence of leaks. Use long physical-device sessions and heap/allocation profiling for a release claim.",
@@ -341,7 +531,18 @@ def main():
     changed_op = changed_timeout = app_mutated = False
     exit_code = 1
 
+    def capture_failure(name):
+        if device.failure_captures and device.failure_captures[-1]["stage"] == name:
+            return device.failure_captures[-1]["name"]
+        try:
+            return device.capture_scene("failure-" + name, failure=True)["name"]
+        except Exception as error:
+            # An unavailable adb or full evidence disk must not conceal the original failure.
+            report.setdefault("capture_errors", []).append({"stage": name, "error": str(error)})
+            return None
+
     def check(name, action, strict=True):
+        device.stage = name
         started = time.monotonic()
         try:
             detail = action()
@@ -349,7 +550,9 @@ def main():
             print("PASS " + name, flush=True)
             return detail
         except Exception as error:
-            report["checks"].append({"name": name, "status": "failed", "error": str(error), "seconds": time.monotonic() - started})
+            elapsed = time.monotonic() - started
+            scene = capture_failure(name)
+            report["checks"].append({"name": name, "status": "failed", "error": str(error), "seconds": elapsed, "failure_scene": scene})
             print("FAIL " + name + ": " + str(error), file=sys.stderr, flush=True)
             if strict:
                 raise
@@ -411,7 +614,11 @@ def main():
         device.run("shell", "settings", "put", "system", "screen_off_timeout", "600000")
         device.run("shell", "input", "keyevent", "KEYCODE_WAKEUP")
         device.run("shell", "wm", "dismiss-keyguard")
-        device.launch(); device.tap("首页")
+        check("initial-launch-unlocked", device.launch)
+        for label, page in (("首页", "home"), ("事项", "reminders"), ("陪伴", "companion"), ("小狗", "settings")):
+            check("visual-page-" + page, lambda label=label, page=page: device.show_page(label, page))
+        check("return-to-home-before-measurement", lambda: device.show_page("首页", "home", capture=False))
+        device.stage = "foreground-measurement"
         time.sleep(5)
         foreground = device.interval("foreground", "activity", args.duration, ticks_per_second)
         report["measurements"].append(foreground)
@@ -419,21 +626,28 @@ def main():
         check("foreground-memory-is-measurable", lambda: assert_result(foreground["after_memory"]["total_pss_kib"] is not None,
                                                                         "No app PSS measurement was returned", foreground["after_memory"]), strict=False)
         check("start-overlay-from-user-control", lambda: device.start_overlay(args.start_label) or device.service_state())
+        device.capture_scene("overlay-active")
+        device.stage = "overlay-measurement"
         time.sleep(5)
         overlay = device.interval("overlay", "overlay", args.duration, ticks_per_second)
         report["measurements"].append(overlay)
         rig_assertion("overlay-real-rig-advances", overlay)
+        device.stage = "screen-off"
         device.run("shell", "input", "keyevent", "KEYCODE_SLEEP")
         device.wait(lambda: device.screen_state()["interactive"] is False, 10, "Screen did not enter a non-interactive state")
+        device.capture_scene("screen-off")
         time.sleep(3)
         paused = device.interval("screen-off", "overlay", min(args.duration, 15), ticks_per_second)
         report["measurements"].append(paused)
         rig_assertion("screen-off-render-and-decode-stopped", paused, paused=True)
         check("screen-remained-off", lambda: assert_result(paused["before_screen"]["interactive"] is False and paused["after_screen"]["interactive"] is False,
                                                             "Screen woke during the paused measurement", paused["after_screen"]))
+        device.stage = "wake-and-dismiss-keyguard"
         device.run("shell", "input", "keyevent", "KEYCODE_WAKEUP")
         device.run("shell", "wm", "dismiss-keyguard")
-        device.wait(lambda: device.screen_state()["interactive"] is True, 10, "Screen did not resume")
+        check("screen-resumed-and-keyguard-dismissed", device.await_unlocked)
+        device.capture_scene("overlay-resumed")
+        device.stage = "resumed-overlay-measurement"
         time.sleep(3)
         resumed = device.interval("resumed-overlay", "overlay", min(args.duration, 12), ticks_per_second)
         report["measurements"].append(resumed)
@@ -443,6 +657,7 @@ def main():
         cycles = []
         for index in range(args.cycles):
             check(f"stop-overlay-cycle-{index + 1}", lambda: device.stop_overlay(args.stop_label) or device.service_state())
+            device.stage = f"stopped-cycle-{index + 1}-measurement"
             time.sleep(2)
             snap = device.snapshot(f"stopped-cycle-{index + 1}", "activity")
             cycles.append({"cycle": index + 1, "memory": snap["memory"], "pet": snap["pet"], "evidence": snap["evidence"]})
@@ -451,12 +666,15 @@ def main():
         pss = [row["memory"]["total_pss_kib"] for row in cycles]
         report["retention_observations"] = {"cycles": cycles, "last_minus_first_pss_kib": pss[-1] - pss[0] if pss and all(value is not None for value in pss) else None,
                                             "leak_verdict": "not_proven", "reason": "PSS includes caches and GC timing; these repeated lifecycle samples are regression evidence, not a heap-leak proof."}
+        device.stage = "revoke-overlay-permission"
         device.run("shell", "cmd", "appops", "set", PACKAGE, "SYSTEM_ALERT_WINDOW", "ignore")
         check("permission-revocation-stops-service", lambda: device.wait(lambda: not device.service_state()["present"], 15,
                                                                           "OverlayService remains after actual overlay-permission revocation") or device.service_state())
         check("permission-revocation-removes-window", lambda: device.wait(lambda: not visible_overlay_blocks(device.run("shell", "dumpsys", "window", "windows")),
                                                                           10, "Overlay surface remains after permission revocation") or {"visible_overlay_windows": 0})
         device.evidence("after-revocation-services.txt", device.run("shell", "dumpsys", "activity", "services", PACKAGE))
+        device.capture_scene("overlay-permission-revoked")
+        device.stage = "restore-overlay-permission"
         device.run("shell", "cmd", "appops", "set", PACKAGE, "SYSTEM_ALERT_WINDOW", "allow")
         check("permission-restoration-allows-explicit-restart", lambda: device.start_overlay(args.start_label) or device.service_state())
         check("final-stop-control-cleans-service", lambda: device.stop_overlay(args.stop_label) or device.service_state())
@@ -468,8 +686,11 @@ def main():
         report["status"] = "failed"
         report["error"] = str(error)
         report["traceback"] = traceback.format_exc()
+        report["failed_stage"] = device.stage
+        report["failure_scene"] = capture_failure(device.stage)
         print("FAIL " + str(error), file=sys.stderr, flush=True)
     finally:
+        device.stage = "restoration"
         # Host-side restoration can safely terminate the app without killing an instrumentation runner.
         restoration = [("stop-test-app", ("shell", "am", "force-stop", PACKAGE))] if app_mutated else []
         if changed_op and initial_mode in MODES:
@@ -480,6 +701,7 @@ def main():
         if initial_screen and initial_screen["interactive"] is False:
             restoration.append(("restore-screen-off", ("shell", "input", "keyevent", "KEYCODE_SLEEP")))
         for name, command in restoration:
+            device.stage = name
             try:
                 device.run(*command)
                 if name == "restore-overlay-appop" and parse_app_op(device.run("shell", "cmd", "appops", "get", PACKAGE, "SYSTEM_ALERT_WINDOW")) != initial_mode:
@@ -488,7 +710,8 @@ def main():
                     raise AssertionError("Screen timeout restoration was not observed")
                 report["restoration"].append({"name": name, "status": "passed"})
             except Exception as error:
-                report["restoration"].append({"name": name, "status": "failed", "error": str(error)})
+                report["restoration"].append({"name": name, "status": "failed", "error": str(error),
+                                              "failure_scene": capture_failure(name)})
                 exit_code = 1; report["status"] = "failed"
         report["finished_utc"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         report["exit_code"] = exit_code

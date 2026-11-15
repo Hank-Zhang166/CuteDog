@@ -2,6 +2,20 @@ name: Android verification
 on:
   push:
     branches: [main]
+    paths:
+      - 'app/**'
+      - 'gradle/**'
+      - 'gradle.properties'
+      - 'gradlew*'
+      - '*.gradle.kts'
+      - '.github/workflows/android.yml'
+      - 'art/character/motions.json'
+      - 'scripts/cloud-gradle.py'
+      - 'scripts/setup-android.py'
+      - 'scripts/package-apk.py'
+      - 'scripts/run-device-*.sh'
+      - 'scripts/profile-device.py'
+      - 'scripts/tests/**'
   pull_request:
   workflow_dispatch:
 permissions:
@@ -30,7 +44,7 @@ jobs:
       - name: Install pinned SDK
         run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
       - name: Verify device-host orchestration fixtures
-        run: python3 scripts/tests/test_device_runner.py 2>&1 | tee "$RUNNER_TEMP/build-evidence/host-regression.log"
+        run: python3 -m unittest discover -s scripts/tests -p 'test_device_*.py' 2>&1 | tee "$RUNNER_TEMP/build-evidence/host-regression.log"
       - name: Unit tests, lint, and APK
         id: verify
         run: |

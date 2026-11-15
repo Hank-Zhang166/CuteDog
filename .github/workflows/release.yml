@@ -1,21 +1,39 @@
-name: Publish APK prerelease
+name: Publish verified APK input
 on:
   push:
     tags: ['v*']
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing release tag (for example v0.1.0)
+        description: Existing tag, exactly v followed by the APK versionName
+        type: string
+        required: true
+      input_commit:
+        description: Full 40-character commit SHA containing release-manifest.json and parts/
+        type: string
         required: true
 permissions:
-  contents: write
+  contents: read
+concurrency:
+  group: cutedog-release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
 jobs:
-  publish:
+  verify:
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    outputs:
+      tag: ${{ steps.verify.outputs.tag }}
+      mode: ${{ steps.verify.outputs.mode }}
+      apk: ${{ steps.verify.outputs.apk }}
+      sourceCommit: ${{ steps.verify.outputs.sourceCommit }}
+      inputCommit: ${{ steps.verify.outputs.inputCommit }}
+      tagObject: ${{ steps.verify.outputs.tagObject }}
     steps:
+      # Run verifier code from the workflow's own commit. The APK input commit is data only.
       - uses: actions/checkout@v5
         with:
-          ref: ${{ inputs.tag || github.ref }}
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
@@ -23,28 +41,66 @@ jobs:
       - uses: android-actions/setup-android@v3
         with:
           cmdline-tools-version: '13114758'
-          packages: 'platform-tools'
+          packages: 'build-tools;35.0.0'
           log-accepted-android-sdk-licenses: false
-      - uses: gradle/actions/setup-gradle@v4
-      - run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
-      - run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
-      - name: Prepare downloadable files
+      - name: Check offline release verifier boundaries
+        run: python3 scripts/prepare-release-input.py self-test
+      - name: Fetch immutable input and verify APK against the tag source
+        id: verify
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+          INPUT_COMMIT: ${{ inputs.input_commit }}
         run: |
-          mkdir -p artifacts
-          if [ -f releases/CuteDog-0.1.0-debug.apk ]; then
-            (cd releases && sha256sum --check SHA256SUMS.txt)
-            "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify releases/CuteDog-0.1.0-debug.apk
-            cp releases/CuteDog-0.1.0-debug.apk artifacts/CuteDog-0.1.0-debug.apk
-          else
-            cp app/build/outputs/apk/debug/app-debug.apk artifacts/CuteDog-0.1.0-debug.apk
-          fi
-          cd artifacts
-          sha256sum CuteDog-0.1.0-debug.apk > SHA256SUMS.txt
-          printf 'Version: 0.1.0\nBuild: debug, test certificate; committed verified APK reused when available\nAndroid: 8.0+ (API 26), target API 35\nThis is a prerelease verification build, not production signed.\nUpdating builds signed with a different test key requires uninstalling first (local data is deleted).\n' > BUILD-INFO.txt
-      - name: Publish durable GitHub Release assets
+          set -euo pipefail
+          arguments=(fetch-verify --tag "$RELEASE_TAG"
+            --output "$RUNNER_TEMP/verified-release"
+            --build-tools "$ANDROID_HOME/build-tools/35.0.0"
+            --github-output "$GITHUB_OUTPUT")
+          if [ -n "$INPUT_COMMIT" ]; then arguments+=(--input-commit "$INPUT_COMMIT"); fi
+          python3 scripts/prepare-release-input.py "${arguments[@]}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: verified-release-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/verified-release/
+          if-no-files-found: error
+          retention-days: 30
+  publish:
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: verified-release-${{ github.run_id }}-${{ github.run_attempt }}
+          path: verified-release
+      - name: Create a new GitHub Release without replacing existing assets
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.verify.outputs.tag }}
+          RELEASE_MODE: ${{ needs.verify.outputs.mode }}
+          APK_FILE: ${{ needs.verify.outputs.apk }}
+          TAG_OBJECT: ${{ needs.verify.outputs.tagObject }}
         run: |
-          gh release view "$RELEASE_TAG" >/dev/null 2>&1 || gh release create "$RELEASE_TAG" --prerelease --title "CuteDog $RELEASE_TAG · 测试版" --notes-file artifacts/BUILD-INFO.txt
-          gh release upload "$RELEASE_TAG" artifacts/* --clobber
+          set -euo pipefail
+          cd verified-release
+          sha256sum --check SHA256SUMS.txt
+          # Check again immediately before create; gh create also rejects an existing release.
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo 'This tag already has a Release. Refusing to replace it or any asset.' >&2
+            exit 1
+          fi
+          remote_tag="$(gh api "repos/$GH_REPO/git/ref/tags/$RELEASE_TAG" --jq '.object.sha')"
+          test "$remote_tag" = "$TAG_OBJECT"
+          flags=(--verify-tag --title "CuteDog $RELEASE_TAG" --notes-file BUILD-INFO.txt --latest=false)
+          case "$RELEASE_MODE" in
+            draft) flags+=(--draft) ;;
+            prerelease) flags+=(--prerelease) ;;
+            stable) ;;
+            *) echo 'Invalid verified release mode' >&2; exit 1 ;;
+          esac
+          gh release create "$RELEASE_TAG" "${flags[@]}" "$APK_FILE" \
+            SHA256SUMS.txt BUILD-INFO.json BUILD-INFO.txt RELEASE-INFO.json \
+            signature-verification.txt apk-metadata.txt release-manifest.json
