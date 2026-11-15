@@ -481,7 +481,7 @@ def main():
     def tabs():
         device.launch()
         paths = []
-        for label, marker, filename in [("首页", "一日一暖", "home"), ("事项", "把小事记好", "reminders"),
+        for label, marker, filename in [("首页", "轻触 · 打个招呼", "home"), ("事项", "把小事记好", "reminders"),
                                          ("陪伴", "给心事一个柔软的落脚点", "chat"), ("小狗", "你的小狗，你的节奏", "settings")]:
             device.tap(label)
             device.wait_text(marker)

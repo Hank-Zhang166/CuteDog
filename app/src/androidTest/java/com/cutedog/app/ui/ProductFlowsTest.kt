@@ -9,6 +9,7 @@ import android.os.Build
 import android.os.ParcelFileDescriptor
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.platform.app.InstrumentationRegistry
 import com.cutedog.app.MainActivity
@@ -79,7 +80,16 @@ class ProductFlowsTest {
         val id = reminders().single().id
         evidenceReminderId = id
         compose.onNodeWithTag("reminder_search").performTextInput(prefix)
+        compose.waitForIdle()
+        compose.onNodeWithTag("reminder_search").assertTextContains(prefix)
         compose.onNodeWithTag("reminder_search").performImeAction()
+        // Search requests keyboard hiding and focus clearing in the real UI. Observe
+        // the resulting semantics instead of racing the API26 IME/layout update.
+        compose.waitUntil(5_000) {
+            compose.onAllNodes(hasTestTag("reminder_search") and
+                SemanticsMatcher.expectValue(SemanticsProperties.Focused, false))
+                .fetchSemanticsNodes().size == 1
+        }
         compose.onNodeWithTag("reminder_search").assertIsNotFocused()
         compose.onNodeWithTag("reminders_list").performScrollToNode(hasTestTag("reminder_complete_$id"))
         compose.onNodeWithTag("reminder_$id").assertExists()
