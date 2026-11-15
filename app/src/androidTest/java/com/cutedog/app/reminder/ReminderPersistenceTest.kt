@@ -1,8 +1,16 @@
 package com.cutedog.app.reminder
 
 import android.app.AlarmManager
+import android.app.Notification
+import android.app.NotificationManager
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import android.os.Build
+import android.os.SystemClock
+import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
+import androidx.test.runner.lifecycle.Stage
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.cutedog.app.data.Reminder
@@ -91,5 +99,72 @@ class ReminderPersistenceTest {
         assertFalse(scheduler.canScheduleExact())
         scheduler.schedule(repository.get(id)!!)
         scheduler.cancel(id)
+    }
+
+    /**
+     * Run separately with notification and exact-alarm access granted by the host device runner.
+     * The host records and restores permission/app-op state after instrumentation exits: revoking
+     * either permission inside this process can kill the entire instrumentation runner.
+     */
+    @Test fun actualAlarmDeliversAndNotificationSnoozePersists() {
+        val manager = context.getSystemService(NotificationManager::class.java)
+        val scheduler = ReminderScheduler(context)
+        assumeTrue("Host must grant POST_NOTIFICATIONS for real notification delivery",
+            Build.VERSION.SDK_INT < 33 || context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED)
+        assumeTrue("Host must allow exact alarms for the bounded delivery test", scheduler.canScheduleExact())
+        assumeTrue("App notifications must be enabled on the test device", manager.areNotificationsEnabled())
+        assumeTrue("Reminder channel must not be user-disabled",
+            manager.getNotificationChannel(ReminderReceiver.CHANNEL_ID)?.importance != NotificationManager.IMPORTANCE_NONE)
+
+        var hasVisibleActivity = false
+        InstrumentationRegistry.getInstrumentation().runOnMainSync {
+            hasVisibleActivity = ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(Stage.RESUMED).isNotEmpty()
+        }
+        assertFalse("The reminder must fire without a resumed app activity", hasVisibleActivity)
+
+        val title = "真实后台提醒 ${SystemClock.elapsedRealtime()}"
+        val due = System.currentTimeMillis() + 3000
+        val id = save(Reminder(title = title, details = "由系统闹钟真实触发", dueAt = due, priority = 3))
+        try {
+            scheduler.schedule(repository.get(id)!!)
+            var delivered: Notification? = null
+            val appeared = waitFor(20_000) {
+                delivered = manager.activeNotifications.firstOrNull {
+                    it.tag == id.toString() && it.id == ReminderReceiver.NOTIFICATION_ID
+                }?.notification
+                delivered != null
+            }
+            assertTrue("AlarmManager did not deliver the reminder notification within 20 seconds", appeared)
+            val notification = delivered!!
+            assertEquals("重要事项 · $title", notification.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString())
+            assertTrue(notification.extras.getCharSequence(Notification.EXTRA_TEXT).toString().contains(title))
+            assertEquals(due, notification.`when`)
+
+            val snooze = notification.actions.firstOrNull { it.title.toString() == "10 分钟后" }
+            assertNotNull("The real notification must expose its snooze action", snooze)
+            val actionSentAt = System.currentTimeMillis()
+            snooze!!.actionIntent.send()
+            assertTrue("Snooze action did not persist its deadline and dismiss the delivered notification", waitFor(10_000) {
+                (repository.get(id)?.snoozedUntil ?: 0) > actionSentAt &&
+                    manager.activeNotifications.none { it.tag == id.toString() && it.id == ReminderReceiver.NOTIFICATION_ID }
+            })
+            val saved = repository.get(id)!!
+            assertEquals("Snoozing must retain the original due date", due, saved.dueAt)
+            assertTrue("Snooze must schedule approximately ten minutes after the action",
+                saved.snoozedUntil in (actionSentAt + 590_000)..(System.currentTimeMillis() + 610_000))
+            assertFalse(saved.completed)
+        } finally {
+            scheduler.cancel(id)
+            repository.delete(id)
+        }
+    }
+
+    private fun waitFor(timeoutMillis: Long, condition: () -> Boolean): Boolean {
+        val deadline = SystemClock.elapsedRealtime() + timeoutMillis
+        while (SystemClock.elapsedRealtime() < deadline) {
+            if (condition()) return true
+            SystemClock.sleep(150)
+        }
+        return condition()
     }
 }
