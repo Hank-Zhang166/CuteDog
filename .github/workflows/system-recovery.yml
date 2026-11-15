@@ -1,0 +1,378 @@
+name: Android system recovery verification
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/system-recovery.yml'
+      - 'scripts/system-recovery-validation.py'
+      - 'scripts/setup-ci-kvm.py'
+      - 'app/src/main/AndroidManifest.xml'
+      - 'app/src/main/java/com/cutedog/app/reminder/**'
+      - 'app/src/main/java/com/cutedog/app/data/Reminder*.kt'
+      - 'app/src/main/java/com/cutedog/app/data/DeliveryRecord.kt'
+      - 'app/src/androidTest/AndroidManifest.xml'
+      - 'app/src/androidTest/java/com/cutedog/app/reminder/SystemRecoveryProbeRunner.kt'
+      - 'app/build.gradle.kts'
+      - 'build.gradle.kts'
+      - 'settings.gradle.kts'
+      - 'gradle.properties'
+      - 'gradle/**'
+      - 'gradlew*'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  recover:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - api-level: 26
+            scenarios: doze kill reboot
+          - api-level: 35
+            scenarios: doze kill reboot timezone
+    env:
+      REQUESTED_API: ${{ matrix.api-level }}
+      REQUESTED_SCENARIOS: ${{ matrix.scenarios }}
+      SOURCE_COMMIT: ${{ github.sha }}
+    steps:
+      - name: Initialize evidence before checkout or emulator setup can fail
+        run: |
+          export EVIDENCE_ROOT="$RUNNER_TEMP/system-recovery-evidence"
+          printf 'EVIDENCE_ROOT=%s\n' "$EVIDENCE_ROOT" >> "$GITHUB_ENV"
+          mkdir -p "$EVIDENCE_ROOT"
+          python3 - <<'PY'
+          import datetime,json,os,time
+          from pathlib import Path
+          root=Path(os.environ['EVIDENCE_ROOT'])
+          value={'schemaVersion':1,'sourceCommit':os.environ['SOURCE_COMMIT'],
+                 'runId':os.environ['GITHUB_RUN_ID'],'runAttempt':os.environ['GITHUB_RUN_ATTEMPT'],
+                 'repository':os.environ['GITHUB_REPOSITORY'],'requestedApi':int(os.environ['REQUESTED_API']),
+                 'requestedScenarios':os.environ['REQUESTED_SCENARIOS'].split(),
+                 'startedAt':datetime.datetime.now(datetime.timezone.utc).isoformat(),'startedEpoch':time.time(),
+                 'overallStatus':'not_run','scenarios':{name:{'status':'not_run'} for name in os.environ['REQUESTED_SCENARIOS'].split()},
+                 'deliveryObservationSeconds':660,
+                 'note':'Setup, compilation and installation never count as a system recovery pass. Device evidence is required.'}
+          (root/'ci-summary.json').write_text(json.dumps(value,indent=2)+'\n')
+          PY
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify source binding and host parser regression tests
+        id: host_tests
+        run: |
+          test "$(git rev-parse HEAD)" = "$SOURCE_COMMIT"
+          git status --porcelain > "$EVIDENCE_ROOT/source-status.txt"
+          python3 scripts/system-recovery-validation.py self-test 2>&1 | tee "$EVIDENCE_ROOT/host-tests.log"
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          cmdline-tools-version: '13114758'
+          packages: 'platform-tools'
+          log-accepted-android-sdk-licenses: false
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Install pinned compilation SDK
+        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Build this checkout's application and test APKs
+        id: build
+        timeout-minutes: 12
+        run: |
+          set +e
+          ./gradlew --no-daemon :app:assembleDebug :app:assembleDebugAndroidTest --console=plain --stacktrace 2>&1 | tee "$EVIDENCE_ROOT/build.log"
+          pipeline_status=("${PIPESTATUS[@]}")
+          set -e
+          printf '%s\n' "${pipeline_status[0]}" > "$EVIDENCE_ROOT/build-exit-code.txt"
+          printf '%s\n' "${pipeline_status[1]}" > "$EVIDENCE_ROOT/build-log-exit-code.txt"
+          if [ "${pipeline_status[1]}" -ne 0 ]; then exit "${pipeline_status[1]}"; fi
+          exit "${pipeline_status[0]}"
+      - name: Freeze APK bytes and record build provenance
+        id: apk_inputs
+        run: |
+          mkdir -p "$RUNNER_TEMP/recovery-apks"
+          cp app/build/outputs/apk/debug/app-debug.apk "$RUNNER_TEMP/recovery-apks/application.apk"
+          cp app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk "$RUNNER_TEMP/recovery-apks/instrumentation.apk"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$RUNNER_TEMP/recovery-apks/application.apk" > "$EVIDENCE_ROOT/application-signature.txt"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$RUNNER_TEMP/recovery-apks/instrumentation.apk" > "$EVIDENCE_ROOT/instrumentation-signature.txt"
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump xmltree "$RUNNER_TEMP/recovery-apks/instrumentation.apk" AndroidManifest.xml > "$EVIDENCE_ROOT/packaged-test-manifest.txt"
+          python3 - <<'PY'
+          import hashlib,json,os,subprocess
+          from pathlib import Path
+          def digest(path):
+              value=hashlib.sha256()
+              with path.open('rb') as stream:
+                  for block in iter(lambda:stream.read(1024*1024),b''):value.update(block)
+              return value.hexdigest()
+          source=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()
+          assert source==os.environ['SOURCE_COMMIT']
+          dirty=bool(subprocess.check_output(['git','status','--porcelain'],text=True).strip())
+          assert not dirty, 'Build changed tracked/unignored source files'
+          apks={}
+          for label in ('application','instrumentation'):
+              path=Path(os.environ['RUNNER_TEMP'])/'recovery-apks'/f'{label}.apk'
+              apks[label]={'path':str(path),'bytes':path.stat().st_size,'sha256':digest(path)}
+          value={'sourceCommit':source,'runId':os.environ['GITHUB_RUN_ID'],'runAttempt':os.environ['GITHUB_RUN_ATTEMPT'],
+                 'requestedApi':int(os.environ['REQUESTED_API']),'sourceDirty':dirty,'apks':apks}
+          (Path(os.environ['EVIDENCE_ROOT'])/'build-inputs.json').write_text(json.dumps(value,indent=2)+'\n')
+          PY
+      - name: Configure and actually probe KVM as the CI runner
+        id: kvm
+        run: |
+          mkdir -p "$EVIDENCE_ROOT/kvm"
+          python3 scripts/setup-ci-kvm.py --output "$EVIDENCE_ROOT/kvm" 2>&1 | tee "$EVIDENCE_ROOT/kvm/setup.log"
+      - name: Prepare an exclusive device invocation with a cleanup deadline
+        run: |
+          cat > "$RUNNER_TEMP/run-system-recovery.sh" <<'SH'
+          #!/usr/bin/env bash
+          set -Eeuo pipefail
+          phase=preflight
+          finish() {
+            result=$?
+            trap - EXIT
+            python3 - "$result" "$phase" <<'PY'
+          import datetime,json,os,sys
+          from pathlib import Path
+          value={'sourceCommit':os.environ['SOURCE_COMMIT'],'runId':os.environ['GITHUB_RUN_ID'],
+                 'runAttempt':os.environ['GITHUB_RUN_ATTEMPT'],'requestedApi':int(os.environ['REQUESTED_API']),
+                 'phase':sys.argv[2],'exitCode':int(sys.argv[1]),
+                 'finishedAt':datetime.datetime.now(datetime.timezone.utc).isoformat()}
+          (Path(os.environ['EVIDENCE_ROOT'])/'device-wrapper-result.json').write_text(json.dumps(value,indent=2)+'\n')
+          PY
+            exit "$result"
+          }
+          trap finish EXIT
+          timeout 30s adb devices > "$EVIDENCE_ROOT/preflight-devices.txt"
+          serial="$(python3 - <<'PY'
+          import os,re
+          from pathlib import Path
+          rows=[line.split() for line in (Path(os.environ['EVIDENCE_ROOT'])/'preflight-devices.txt').read_text().splitlines()[1:] if line.strip()]
+          if len(rows)!=1 or rows[0][1:]!=['device'] or not re.fullmatch(r'emulator-\d+',rows[0][0]):
+              raise SystemExit('Exactly one online disposable emulator is required')
+          print(rows[0][0])
+          PY
+          )"
+          export ANDROID_SERIAL="$serial"
+          test "$(timeout 30s adb -s "$serial" shell getprop ro.build.version.sdk | tr -d '\r')" = "$REQUESTED_API"
+          # Verify BOTH components from the installed test APK before any probe operation.
+          # The host later reinstalls the same frozen bytes and verifies installed base.apk hashes.
+          timeout 180s adb -s "$serial" install -r -t "$RUNNER_TEMP/recovery-apks/application.apk" > "$EVIDENCE_ROOT/preflight-install-application.log" 2>&1
+          timeout 180s adb -s "$serial" install -r -t "$RUNNER_TEMP/recovery-apks/instrumentation.apk" > "$EVIDENCE_ROOT/preflight-install-instrumentation.log" 2>&1
+          timeout 30s adb -s "$serial" shell pm list instrumentation > "$EVIDENCE_ROOT/registered-runners.txt"
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          root=Path(os.environ['EVIDENCE_ROOT'])
+          required={'com.cutedog.app.test/androidx.test.runner.AndroidJUnitRunner',
+                    'com.cutedog.app.test/com.cutedog.app.reminder.SystemRecoveryProbeRunner'}
+          registered={line.split()[0].removeprefix('instrumentation:') for line in (root/'registered-runners.txt').read_text().splitlines()
+                      if line.startswith('instrumentation:') and '(target=com.cutedog.app)' in line}
+          passed=required.issubset(registered)
+          (root/'runner-registration.json').write_text(json.dumps({'required':sorted(required),'registered':sorted(registered),'passed':passed},indent=2)+'\n')
+          if not passed:raise SystemExit('Both the standard runner and the standalone recovery probe must be registered')
+          PY
+          # Keep every scenario's requested 660-second window. The whole job has a separate
+          # soft deadline at minute 55, reserving up to 3 minutes for SIGTERM cleanup and
+          # 2 minutes for final evidence collection before the 60-minute job limit.
+          remaining="$(python3 - <<'PY'
+          import json,os,time
+          from pathlib import Path
+          started=json.loads((Path(os.environ['EVIDENCE_ROOT'])/'ci-summary.json').read_text())['startedEpoch']
+          remaining=int(started+55*60-time.time())
+          if remaining<=0:raise SystemExit('No system-test budget remains before the cleanup deadline')
+          print(remaining)
+          PY
+          )"
+          printf '%s\n' "$remaining" > "$EVIDENCE_ROOT/host-global-budget-seconds.txt"
+          read -r -a scenarios <<< "$REQUESTED_SCENARIOS"
+          phase=host_recovery
+          set +e
+          timeout --signal=TERM --kill-after=180s "${remaining}s" \
+            python3 scripts/system-recovery-validation.py run --disposable --serial "$serial" \
+              --apk "$RUNNER_TEMP/recovery-apks/application.apk" \
+              --test-apk "$RUNNER_TEMP/recovery-apks/instrumentation.apk" \
+              --source-commit "$SOURCE_COMMIT" --delivery-timeout 660 \
+              --scenarios "${scenarios[@]}" --output "$EVIDENCE_ROOT/host" \
+              2>&1 | tee "$EVIDENCE_ROOT/host.log"
+          pipeline_status=("${PIPESTATUS[@]}")
+          set -e
+          printf '%s\n' "${pipeline_status[0]}" > "$EVIDENCE_ROOT/host-exit-code.txt"
+          printf '%s\n' "${pipeline_status[1]}" > "$EVIDENCE_ROOT/host-log-exit-code.txt"
+          if [ "${pipeline_status[1]}" -ne 0 ]; then exit "${pipeline_status[1]}"; fi
+          exit "${pipeline_status[0]}"
+          SH
+      - name: Real isolated Android recovery scenarios
+        id: emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api-level }}
+          arch: x86_64
+          target: google_apis
+          profile: pixel_2
+          disable-animations: true
+          emulator-boot-timeout: 300
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot -camera-back none -accel on
+          script: bash "$RUNNER_TEMP/run-system-recovery.sh"
+      - name: Bind actual results and setup failures to this source and workflow attempt
+        if: always()
+        env:
+          HOST_TESTS_OUTCOME: ${{ steps.host_tests.outcome }}
+          BUILD_OUTCOME: ${{ steps.build.outcome }}
+          APK_INPUTS_OUTCOME: ${{ steps.apk_inputs.outcome }}
+          KVM_OUTCOME: ${{ steps.kvm.outcome }}
+          EMULATOR_OUTCOME: ${{ steps.emulator.outcome }}
+        run: |
+          python3 - <<'PY'
+          import datetime,hashlib,json,os
+          from pathlib import Path
+          root=Path(os.environ['EVIDENCE_ROOT']);root.mkdir(parents=True,exist_ok=True)
+          path=root/'ci-summary.json'
+          value=json.loads(path.read_text()) if path.exists() else {
+              'schemaVersion':1,'sourceCommit':os.environ['SOURCE_COMMIT'],'runId':os.environ['GITHUB_RUN_ID'],
+              'runAttempt':os.environ['GITHUB_RUN_ATTEMPT'],'requestedApi':int(os.environ['REQUESTED_API']),
+              'requestedScenarios':os.environ['REQUESTED_SCENARIOS'].split(),
+              'scenarios':{name:{'status':'not_run'} for name in os.environ['REQUESTED_SCENARIOS'].split()}}
+          value['stepOutcomes']={name:os.environ.get(name,'') for name in
+              ('HOST_TESTS_OUTCOME','BUILD_OUTCOME','APK_INPUTS_OUTCOME','KVM_OUTCOME','EMULATOR_OUTCOME')}
+          inputs_path=root/'build-inputs.json';inputs=json.loads(inputs_path.read_text()) if inputs_path.exists() else None
+          value['buildInputs']=inputs
+          reports=sorted((root/'host').glob('source-*/apk-*/run-*/summary.json'))
+          value['hostReports']=[str(report.relative_to(root)) for report in reports]
+          problems=[];host=None
+          if inputs:
+              for key in ('sourceCommit','runId','runAttempt','requestedApi'):
+                  if inputs.get(key)!=value[key]:problems.append('build input '+key+' binding mismatch')
+              if inputs.get('sourceDirty') is not False:problems.append('build source cleanliness not established')
+          if len(reports)==1:
+              host=json.loads(reports[0].read_text())
+              if host.get('sourceCommit')!=value['sourceCommit']:problems.append('sourceCommit mismatch')
+              if host.get('sourceDirty') is not False:problems.append('host source cleanliness not established')
+              if host.get('api')!=value['requestedApi']:problems.append('device API mismatch or setup incomplete')
+              if set(host.get('scenarios',{}))!=set(value['requestedScenarios']):problems.append('scenario set mismatch')
+              for label in ('application','instrumentation'):
+                  built=(inputs or {}).get('apks',{}).get(label,{})
+                  tested=host.get('apks',{}).get(label,{})
+                  if not built.get('sha256') or tested.get('sha256')!=built['sha256']:problems.append(label+' APK binding mismatch')
+                  if tested.get('installed',{}).get('sha256')!=built.get('sha256'):problems.append(label+' installed APK binding not established')
+              if not problems:value['scenarios']=host['scenarios']
+              value['hostOverallStatus']=host.get('overallStatus','not_run')
+          elif reports:problems.append('Unexpected multiple host invocations in one isolated job')
+          value['bindingErrors']=problems
+          passed=bool(host) and not problems and host.get('overallStatus')=='passed' and all(
+              value['scenarios'][name].get('status')=='passed' for name in value['requestedScenarios']) and all(
+              state=='success' for state in value['stepOutcomes'].values())
+          events_started=bool(host) and any(result.get('status')!='not_run' for result in host.get('scenarios',{}).values())
+          value['overallStatus']='passed' if passed else 'not_passed' if events_started else 'not_run'
+          value['setupFailed']=not events_started and not passed
+          value['finishedAt']=datetime.datetime.now(datetime.timezone.utc).isoformat()
+          value['note']='Only source/APK-bound real host observations count; setup failure leaves scenarios not_run. Cleanup/timeout failures never count as passing.'
+          path.write_text(json.dumps(value,ensure_ascii=False,indent=2)+'\n')
+          hashes={}
+          for file in sorted(root.rglob('*')):
+              if not file.is_file() or file.name=='CI-EVIDENCE-SHA256.json':continue
+              digest=hashlib.sha256()
+              with file.open('rb') as stream:
+                  for block in iter(lambda:stream.read(1024*1024),b''):digest.update(block)
+              hashes[str(file.relative_to(root))]={'bytes':file.stat().st_size,'sha256':digest.hexdigest()}
+          (root/'CI-EVIDENCE-SHA256.json').write_text(json.dumps({'sourceCommit':value['sourceCommit'],'runId':value['runId'],
+              'runAttempt':value['runAttempt'],'api':value['requestedApi'],'files':hashes},indent=2)+'\n')
+          print(json.dumps({'api':value['requestedApi'],'status':value['overallStatus'],'bindingErrors':problems,
+                            'scenarios':{name:result.get('status') for name,result in value['scenarios'].items()}},indent=2))
+          PY
+      - name: Always retain original setup logs and device evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: system-recovery-api-${{ matrix.api-level }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/system-recovery-evidence/
+          if-no-files-found: error
+          retention-days: 90
+  retain:
+    if: ${{ always() }}
+    needs: recover
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        api-level: [26, 35]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: .github/workflows/system-recovery.yml
+          sparse-checkout-cone-mode: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: system-recovery-api-${{ matrix.api-level }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/retained-system-recovery
+      - name: Append this exact run to its fixed evidence branch
+        env:
+          REQUESTED_API: ${{ matrix.api-level }}
+          SOURCE_COMMIT: ${{ github.sha }}
+          EVIDENCE_BRANCH: codex/system-recovery-evidence-api${{ matrix.api-level }}
+          EVIDENCE_PATH: runs/${{ github.run_id }}-${{ github.run_attempt }}/source-${{ github.sha }}/api-${{ matrix.api-level }}
+        run: |
+          set -euo pipefail
+          test -f "$RUNNER_TEMP/retained-system-recovery/ci-summary.json"
+          test -f "$RUNNER_TEMP/retained-system-recovery/CI-EVIDENCE-SHA256.json"
+          python3 - <<'PY'
+          import hashlib,json,os
+          from pathlib import Path
+          root=Path(os.environ['RUNNER_TEMP'])/'retained-system-recovery'
+          index=json.loads((root/'CI-EVIDENCE-SHA256.json').read_text())
+          summary=json.loads((root/'ci-summary.json').read_text())
+          for value in (index,summary):
+              assert value['sourceCommit']==os.environ['SOURCE_COMMIT']
+              assert value['runId']==os.environ['GITHUB_RUN_ID'] and value['runAttempt']==os.environ['GITHUB_RUN_ATTEMPT']
+          assert index['api']==int(os.environ['REQUESTED_API'])==summary['requestedApi']
+          actual={str(path.relative_to(root)) for path in root.rglob('*') if path.is_file() and path.name!='CI-EVIDENCE-SHA256.json'}
+          assert actual==set(index['files']), 'Retained files differ from the exact evidence index'
+          for name,expected in index['files'].items():
+              path=root/name
+              assert path.resolve().is_relative_to(root.resolve()) and not path.is_symlink()
+              digest=hashlib.sha256()
+              with path.open('rb') as stream:
+                  for block in iter(lambda:stream.read(1024*1024),b''):digest.update(block)
+              assert path.stat().st_size==expected['bytes'] and digest.hexdigest()==expected['sha256'],name
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          # Materialize only this new run's path, not all application assets or old raw evidence.
+          git sparse-checkout set --no-cone "/$EVIDENCE_PATH/"
+          # No workflow concurrency queue: GitHub can drop older pending jobs in such a queue.
+          # Retry from the current remote head so every attempt can append without force-push.
+          for attempt in 1 2 3 4 5; do
+            set +e
+            git ls-remote --exit-code --heads origin "refs/heads/$EVIDENCE_BRANCH" > "$RUNNER_TEMP/system-recovery-remote-ref.txt"
+            remote_status=$?
+            set -e
+            if [ "$remote_status" -eq 0 ]; then
+              git fetch --no-tags origin "$EVIDENCE_BRANCH"
+              git switch --detach FETCH_HEAD
+            elif [ "$remote_status" -eq 2 ]; then
+              git switch --orphan "pending-system-recovery-$GITHUB_RUN_ID-$attempt"
+            else
+              echo 'Cannot determine evidence branch state; refusing to create a replacement history.' >&2
+              exit "$remote_status"
+            fi
+            if [ -e "$EVIDENCE_PATH" ]; then
+              # A push may have succeeded even if its network acknowledgement was lost.
+              diff --brief --recursive "$RUNNER_TEMP/retained-system-recovery" "$EVIDENCE_PATH"
+              exit 0
+            fi
+            mkdir -p "$EVIDENCE_PATH"
+            cp -R "$RUNNER_TEMP/retained-system-recovery/." "$EVIDENCE_PATH/"
+            git add -- "$EVIDENCE_PATH"
+            git commit -m "[skip ci] Record API ${{ matrix.api-level }} system recovery for run $GITHUB_RUN_ID attempt $GITHUB_RUN_ATTEMPT"
+            if git push origin "HEAD:refs/heads/$EVIDENCE_BRANCH"; then exit 0; fi
+            if [ "$attempt" -eq 5 ]; then exit 1; fi
+            sleep 2
+          done

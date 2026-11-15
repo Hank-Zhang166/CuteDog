@@ -16,7 +16,6 @@ on:
       - '.github/workflows/ui-validation.yml'
       - 'scripts/device-smoke.py'
       - 'releases/**'
-    paths: ['scripts/device-smoke.py', '.github/workflows/ui-validation.yml']
 permissions:
   contents: write
 concurrency:

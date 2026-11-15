@@ -24,6 +24,12 @@ PACKAGE = "com.cutedog.app"
 SERVICE = PACKAGE + "/.pet.OverlayService"
 ACTIVITY = PACKAGE + "/.MainActivity"
 MODES = {"allow", "ignore", "deny", "default", "foreground"}
+NOTIFICATION_PERMISSION = "android.permission.POST_NOTIFICATIONS"
+RESTORABLE_PERMISSION_FLAGS = {
+    "USER_SET": "user-set", "USER_FIXED": "user-fixed", "REVIEW_REQUIRED": "review-required",
+    "REVOKED_COMPAT": "revoked-compat", "USER_SENSITIVE_WHEN_GRANTED": "user-sensitive-when-granted",
+    "USER_SENSITIVE_WHEN_DENIED": "user-sensitive-when-denied",
+}
 PAGE_MARKERS = {"home": ("轻触 · 打个招呼",), "reminders": ("把小事记好",),
                 "companion": ("记忆", "清空聊天"), "settings": ("你的小狗，你的节奏",)}
 
@@ -97,6 +103,70 @@ def parse_app_op(raw):
     if "No operations" in raw or "No op" in raw:
         return "default"
     return None
+
+
+def parse_notification_permission(raw):
+    """Read user 0's runtime state; absence or another user's grant is not a denial."""
+    user = re.search(r"^\s*User 0:.*?(?=^\s*User \d+:|\Z)", raw, re.M | re.S)
+    if user is None:
+        raise ValueError("User 0 permission state is unavailable")
+    states = re.findall(r"^\s*" + re.escape(NOTIFICATION_PERMISSION)
+                        + r":\s*granted=(true|false),\s*flags=\[([^\]]*)\]", user.group(), re.M)
+    if len(states) != 1:
+        raise ValueError("Expected one explicit user 0 POST_NOTIFICATIONS grant and flags record")
+    granted, flags = states[0]
+    return {"granted": granted == "true", "flags": sorted(flag.strip() for flag in flags.split("|") if flag.strip())}
+
+
+class ProfileNotificationPermission:
+    """Temporary host permission state, separate from the prior instrumentation phases."""
+    def __init__(self, device):
+        self.device = device
+        self.original = None
+        self.restore_required = False
+
+    def read(self, name):
+        raw = self.device.run("shell", "dumpsys", "package", PACKAGE)
+        self.device.evidence("notification-permission/" + name + ".txt", raw)
+        state = parse_notification_permission(raw)
+        self.device.evidence("notification-permission/" + name + ".json", json.dumps(state, indent=2))
+        return state
+
+    def prepare(self):
+        if not self.device.serial.startswith("emulator-") or self.device.run("shell", "getprop", "ro.kernel.qemu").strip() != "1":
+            raise RuntimeError("Temporary notification authorization requires a disposable emulator")
+        self.original = self.read("original")
+        # Set before a mutation: even an adb error after applying the grant must restore.
+        self.restore_required = True
+        if not self.original["granted"]:
+            self.device.run("shell", "pm", "grant", "--user", "0", PACKAGE, NOTIFICATION_PERMISSION)
+        observed = self.read("authorized")
+        if not observed["granted"]:
+            raise AssertionError("POST_NOTIFICATIONS grant was not observed; profiling cannot start")
+        return {"setup": "explicit_host_grant_before_ui", "original": self.original, "observed": observed,
+                "note": "This profile uses granted notifications; denied-permission behavior is tested separately by instrumentation."}
+
+    def restore(self):
+        if not self.restore_required or self.original is None:
+            raise RuntimeError("No restorable notification permission snapshot")
+        current = self.read("before-restore")
+        if current["granted"] != self.original["granted"]:
+            operation = "grant" if self.original["granted"] else "revoke"
+            self.device.run("shell", "pm", operation, "--user", "0", PACKAGE, NOTIFICATION_PERMISSION)
+        current = self.read("after-grant-restore")
+        before_flags, current_flags = set(self.original["flags"]), set(current["flags"])
+        unsupported = (before_flags ^ current_flags) - RESTORABLE_PERMISSION_FLAGS.keys()
+        if unsupported:
+            raise AssertionError("Cannot safely restore changed permission flags: " + ", ".join(sorted(unsupported)))
+        for operation, flags in [("clear-permission-flags", current_flags - before_flags),
+                                 ("set-permission-flags", before_flags - current_flags)]:
+            if flags:
+                self.device.run("shell", "pm", operation, "--user", "0", PACKAGE, NOTIFICATION_PERMISSION,
+                                *(RESTORABLE_PERMISSION_FLAGS[flag] for flag in sorted(flags)))
+        observed = self.read("restored")
+        if observed != self.original:
+            raise AssertionError("Notification grant and complete permission flags did not return to the original state")
+        return {"original": self.original, "observed": observed, "grant_and_flags_restored": True}
 
 
 def visible_overlay_blocks(raw):
@@ -503,8 +573,7 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--duration", type=float, default=20, help="Sampling seconds per active state (5–60)")
     parser.add_argument("--cycles", type=int, default=3, help="Additional start/stop retention observations (1–10)")
-    parser.add_argument("--disposable", action="store_true", help="Required: permit force-stop and temporary overlay permission changes")
-    parser.add_argument("--allow-physical-device", action="store_true", help="Explicitly allow a non-emulator disposable test device")
+    parser.add_argument("--disposable", action="store_true", help="Required: permit force-stop and temporary permissions on an isolated emulator")
     parser.add_argument("--require-rig-metrics", action="store_true", help="Return failure when real rig counters are unavailable or legacy art is installed")
     parser.add_argument("--expected-apk-sha256", help="Optional expected hash of the installed base.apk; rejects mismatched binaries")
     parser.add_argument("--start-label", default="召唤小狗")
@@ -512,8 +581,8 @@ def main():
     args = parser.parse_args()
     if not args.disposable:
         parser.error("--disposable is required; this workflow temporarily revokes overlay access and stops the app")
-    if not args.serial.startswith("emulator-") and not args.allow_physical_device:
-        parser.error("Physical devices require --allow-physical-device and must be disposable test devices")
+    if not args.serial.startswith("emulator-"):
+        parser.error("This permission-changing profile is restricted to disposable emulators")
     if not 5 <= args.duration <= 60 or not 1 <= args.cycles <= 10:
         parser.error("--duration must be 5–60 and --cycles 1–10")
     args.output.mkdir(parents=True, exist_ok=True)
@@ -529,6 +598,7 @@ def main():
                               "Screen-off tests do not prove secure credential-lockscreen, OEM battery optimization, Doze alarms or reboot behavior."]}
     initial_mode = initial_timeout = initial_screen = None
     changed_op = changed_timeout = app_mutated = False
+    notification_permission = ProfileNotificationPermission(device)
     exit_code = 1
 
     def capture_failure(name):
@@ -587,6 +657,8 @@ def main():
         report["device"] = {"api": api, "model": device.run("shell", "getprop", "ro.product.model").strip(),
                             "abi": device.run("shell", "getprop", "ro.product.cpu.abi").strip(),
                             "emulator": device.run("shell", "getprop", "ro.kernel.qemu").strip() == "1"}
+        if not report["device"]["emulator"] or not args.serial.startswith("emulator-"):
+            raise RuntimeError("This profile changes notification permissions and is restricted to a disposable emulator")
         package_paths = device.run("shell", "pm", "path", PACKAGE)
         base = next((line.removeprefix("package:").strip() for line in package_paths.splitlines() if line.endswith("/base.apk")), None)
         if not base or not re.fullmatch(r"/[A-Za-z0-9_./~+=@%-]+", base):
@@ -608,6 +680,8 @@ def main():
         ticks_per_second = int(hz) if hz.isdigit() and 1 <= int(hz) <= 10000 else None
         app_mutated = True
         device.run("shell", "am", "force-stop", PACKAGE)
+        if api >= 33:
+            report["notification_permission_setup"] = check("prepare-notification-permission", notification_permission.prepare)
         changed_op = True
         device.run("shell", "cmd", "appops", "set", PACKAGE, "SYSTEM_ALERT_WINDOW", "allow")
         changed_timeout = True
@@ -709,6 +783,16 @@ def main():
                 if name == "restore-screen-timeout" and device.run("shell", "settings", "get", "system", "screen_off_timeout").strip() != initial_timeout:
                     raise AssertionError("Screen timeout restoration was not observed")
                 report["restoration"].append({"name": name, "status": "passed"})
+            except Exception as error:
+                report["restoration"].append({"name": name, "status": "failed", "error": str(error),
+                                              "failure_scene": capture_failure(name)})
+                exit_code = 1; report["status"] = "failed"
+        if notification_permission.restore_required:
+            name = "restore-notification-permission"
+            device.stage = name
+            try:
+                detail = notification_permission.restore()
+                report["restoration"].append({"name": name, "status": "passed", "details": detail})
             except Exception as error:
                 report["restoration"].append({"name": name, "status": "failed", "error": str(error),
                                               "failure_scene": capture_failure(name)})
