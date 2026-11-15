@@ -51,6 +51,7 @@ class Device:
         self.calls = []
         self.external_dialogs = []
         self.app_pids = set()
+        self.edit_checks = []
         self.onboarding = []
 
     def adb(self, *args, timeout=90, check=True):
@@ -137,6 +138,30 @@ class Device:
             time.sleep(.7)
         raise AssertionError("Could not scroll to " + text)
 
+    def wait_edit_value(self, index, expected, phase, seconds=12):
+        """An input command returning zero does not prove Compose/IME committed its text."""
+        deadline = time.monotonic() + seconds
+        observed = None
+        tree = None
+        while time.monotonic() < deadline:
+            tree = self.tree()
+            fields = [node for node in tree.iter("node") if node.get("class") == "android.widget.EditText"]
+            observed = fields[index].get("text", "") if index < len(fields) else None
+            if observed == expected:
+                break
+            time.sleep(.15)
+        directory = self.output / "text-input"
+        directory.mkdir(exist_ok=True)
+        path = directory / (str(len(self.edit_checks) + 1).zfill(3) + ".xml")
+        if tree is not None:
+            ET.ElementTree(tree).write(path, encoding="utf-8", xml_declaration=True)
+        matched = observed == expected
+        self.edit_checks.append({"field_index": index, "phase": phase, "expected": expected,
+                                 "observed": observed, "matched": matched, "xml": str(path.relative_to(self.output))})
+        (directory / "checks.json").write_text(json.dumps(self.edit_checks, ensure_ascii=False, indent=2) + "\n")
+        if not matched:
+            raise AssertionError(f"Input not committed before save ({phase}, field {index}): expected {expected!r}, observed {observed!r}")
+
     def edit(self, index, value):
         fields = [n for n in self.tree().iter("node") if n.get("class") == "android.widget.EditText"]
         field = fields[index]
@@ -145,11 +170,17 @@ class Device:
         if old:
             self.adb("shell", "input", "keyevent", "KEYCODE_MOVE_END")
             self.adb("shell", "input", "keyevent", *(["KEYCODE_DEL"] * len(old)))
-        self.adb("shell", "input", "text", value.replace(" ", "%s"))
+            self.wait_edit_value(index, "", "clear-existing")
+        # Pace injection with observed field commits, not an arbitrary delay after a long burst.
+        # Every character remains required; a partial or altered chunk fails before Save.
+        for start in range(0, len(value), 8):
+            self.adb("shell", "input", "text", value[start:start + 8].replace(" ", "%s"))
+            self.wait_edit_value(index, value[:start + 8], "typed-chunk")
+        self.wait_edit_value(index, value, "before-hide-ime")
         ime = self.adb("shell", "dumpsys", "input_method")
         if re.search(r"m(?:Is)?Input(?:View)?Shown=true", ime):
             self.adb("shell", "input", "keyevent", "KEYCODE_BACK")
-        time.sleep(.8)
+        self.wait_edit_value(index, value, "after-hide-ime")
 
     def screenshot(self, name):
         shots = self.output / "screenshots"

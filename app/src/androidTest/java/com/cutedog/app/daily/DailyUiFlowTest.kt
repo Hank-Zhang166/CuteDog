@@ -1,10 +1,14 @@
 package com.cutedog.app.daily
 
 import android.graphics.Bitmap
+import android.view.inputmethod.InputMethodManager
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.test.platform.app.InstrumentationRegistry
 import com.cutedog.app.MainActivity
+import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
@@ -60,6 +64,17 @@ class DailyUiFlowTest {
         compose.onNodeWithTag("daily_quiet_end").performScrollTo().performTextReplacement("8")
         // These numeric fields expose ImeAction.Default. Use the actual visible save
         // control instead of inventing a Done action that the product never declared.
+        // On API26 the IME resize can move the save target below the navigation bar
+        // after performScrollTo. Dismiss the real keyboard and observe its window state
+        // before scrolling again; saving and persistence still use the product controls.
+        compose.activityRule.scenario.onActivity { activity ->
+            activity.getSystemService(InputMethodManager::class.java)
+                .hideSoftInputFromWindow(activity.window.decorView.windowToken, 0)
+        }
+        compose.waitUntil(5_000) { !imeVisible() }
+        compose.waitForIdle()
+        compose.onNodeWithTag("daily_save_time").performScrollTo().assertIsDisplayed()
+        saveScreen("dailySettings", "before-save-keyboard-dismissed")
         compose.onNodeWithTag("daily_save_time").performScrollTo().assertIsDisplayed().performClick()
         compose.waitUntil(5_000) {
             val settings = DailySettings(fixture.context)
@@ -95,6 +110,21 @@ class DailyUiFlowTest {
         try { fixture.evidenceFile(test, "$name.png").outputStream().use {
             assertTrue(screenshot!!.compress(Bitmap.CompressFormat.PNG, 100, it))
         } } finally { screenshot!!.recycle() }
+        val settings = DailySettings(fixture.context)
+        fixture.evidence(test, "$name-daily-state.json", JSONObject()
+            .put("observedAtMillis", System.currentTimeMillis())
+            .put("enabled", settings.enabled).put("hour", settings.hour)
+            .put("quietStart", settings.quietStart).put("quietEnd", settings.quietEnd)
+            .put("imeVisible", imeVisible()).toString(2))
         fixture.evidence(test, "$name-semantics.txt", compose.onRoot(useUnmergedTree = true).printToString())
+    }
+
+    private fun imeVisible(): Boolean {
+        var visible: Boolean? = null
+        compose.activityRule.scenario.onActivity { activity ->
+            visible = ViewCompat.getRootWindowInsets(activity.window.decorView)
+                ?.isVisible(WindowInsetsCompat.Type.ime())
+        }
+        return checkNotNull(visible) { "Cannot verify the real IME window state" }
     }
 }

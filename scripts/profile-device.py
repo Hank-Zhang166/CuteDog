@@ -528,7 +528,9 @@ class Device:
         pid = pid[0] if len(pid) == 1 and pid[0].isdigit() else None
         gfx_raw = self.run("shell", "dumpsys", "gfxinfo", PACKAGE, "framestats")
         memory_raw = self.run("shell", "dumpsys", "meminfo", PACKAGE)
-        command = ("service", SERVICE) if scope == "overlay" else ("activity", ACTIVITY)
+        # ActivityManager treats a component itself as the activity selector.
+        # An extra "activity" token produces Unknown command on Android 15.
+        command = ("service", SERVICE) if scope == "overlay" else (ACTIVITY,)
         metrics_raw = self.run("shell", "dumpsys", "activity", *command, check=False)
         paths = {
             "gfxinfo": self.evidence(name + "/gfxinfo.txt", gfx_raw),

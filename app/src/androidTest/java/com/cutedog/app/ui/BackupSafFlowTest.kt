@@ -139,7 +139,7 @@ class BackupSafFlowTest {
             awaitPicker()
             capture("create-picker-open")
             chooseDownloads()
-            val filename = awaitNode("CreateDocument filename field") { node ->
+            val filename = awaitUncoveredNode("CreateDocument filename field") { node ->
                 node.className?.toString() == "android.widget.EditText" && node.isEnabled
             }
             assertTrue("Actual DocumentsUI filename accepts text", filename.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT,
@@ -333,16 +333,16 @@ class BackupSafFlowTest {
             node.text?.toString() in setOf("Downloads", "下载", "下载内容") && ancestorHasId(node, "roots_list")
         })
         awaitPicker()
-        // API 26 exposes file titles behind the closing drawer before they can be touched.
-        // Wait for the actual drawer to disappear and accessibility events to settle.
-        awaitCondition("DocumentsUI roots drawer to finish closing") {
-            nodes().none { it.isVisibleToUser && it.viewIdResourceName?.endsWith("/roots_list") == true }
-        }
         automation.waitForIdle(300, 5_000)
+        awaitNode("Actual Downloads directory heading") { node ->
+            node.text?.toString() in setOf("Downloads", "下载", "下载内容") && !ancestorHasId(node, "roots_list")
+        }
+        // API 26 retains a visible sliver of roots_list after the drawer is closed.
+        // The next control must be unobstructed; disappearance of that node is not required.
     }
 
     private fun touchExportedDocument(label: String) {
-        val node = awaitNode("Exported fixture file in actual DocumentsUI") {
+        val node = awaitUncoveredNode("Exported fixture file in actual DocumentsUI") {
             it.text?.toString() == documentName && it.isEnabled
         }
         check(node.refresh() && node.isVisibleToUser && node.text?.toString() == documentName) {
@@ -355,20 +355,31 @@ class BackupSafFlowTest {
         events.put(JSONObject().put("stage", "$label-document-touch")
             .put("package", node.packageName?.toString()).put("windowId", node.windowId)
             .put("displayName", node.text?.toString()).put("bounds", bounds.toShortString())
+            .put("pointerToolType", MotionEvent.TOOL_TYPE_FINGER).put("touchDurationMs", 100)
             .put("elapsedMs", SystemClock.elapsedRealtime()))
-        persist()
+        capture("$label-before-document-touch")
         // API 26's RecyclerView handles touch while every file-title ancestor reports
         // clickable=false. Touch the observed title, away from API 35's preview-icon button.
-        // This goes through real DocumentsUI input; it never supplies an Intent or URI.
+        // Android 15 DocumentsUI configures SelectionTracker for FINGER/STYLUS. The short
+        // MotionEvent.obtain overload leaves toolType UNKNOWN even with source TOUCHSCREEN,
+        // which can be injected successfully without activating a document. Set both fields.
+        // This still goes through real DocumentsUI input; no Intent or URI is supplied.
         val downAt = SystemClock.uptimeMillis()
+        val pointer = MotionEvent.PointerProperties().apply { id = 0; toolType = MotionEvent.TOOL_TYPE_FINGER }
+        val coordinates = MotionEvent.PointerCoords().apply {
+            x = bounds.exactCenterX(); y = bounds.exactCenterY(); pressure = 1f; size = 1f
+        }
         fun inject(action: Int) {
-            val event = MotionEvent.obtain(downAt, SystemClock.uptimeMillis(), action,
-                bounds.exactCenterX(), bounds.exactCenterY(), 0).apply { source = InputDevice.SOURCE_TOUCHSCREEN }
-            try { assertTrue("Actual system file touch $action", automation.injectInputEvent(event, true)) }
+            val event = MotionEvent.obtain(downAt, SystemClock.uptimeMillis(), action, 1,
+                arrayOf(pointer), arrayOf(coordinates), 0, 0, 1f, 1f, 0, 0, InputDevice.SOURCE_TOUCHSCREEN, 0)
+            try {
+                check(event.getToolType(0) == MotionEvent.TOOL_TYPE_FINGER)
+                assertTrue("Actual system file touch $action", automation.injectInputEvent(event, true))
+            }
             finally { event.recycle() }
         }
         inject(MotionEvent.ACTION_DOWN)
-        inject(MotionEvent.ACTION_UP)
+        try { SystemClock.sleep(100) } finally { inject(MotionEvent.ACTION_UP) }
     }
 
     private fun ancestorHasId(node: AccessibilityNodeInfo, suffix: String): Boolean {
@@ -388,6 +399,24 @@ class BackupSafFlowTest {
     private fun awaitNode(description: String, predicate: (AccessibilityNodeInfo) -> Boolean): AccessibilityNodeInfo {
         var found: AccessibilityNodeInfo? = null
         awaitCondition(description) { found = nodes().firstOrNull { it.isVisibleToUser && predicate(it) }; found != null }
+        return requireNotNull(found)
+    }
+
+    private fun awaitUncoveredNode(description: String, predicate: (AccessibilityNodeInfo) -> Boolean): AccessibilityNodeInfo {
+        var found: AccessibilityNodeInfo? = null
+        awaitCondition("$description with its center outside the roots drawer") {
+            val observed = nodes()
+            found = observed.firstOrNull { node ->
+                val bounds = Rect().also(node::getBoundsInScreen)
+                node.isVisibleToUser && node.isEnabled && predicate(node) && !bounds.isEmpty &&
+                    observed.none { drawer ->
+                        drawer.windowId == node.windowId && drawer.isVisibleToUser &&
+                            drawer.viewIdResourceName?.endsWith("/roots_list") == true &&
+                            Rect().also(drawer::getBoundsInScreen).contains(bounds.centerX(), bounds.centerY())
+                    }
+            }
+            found != null
+        }
         return requireNotNull(found)
     }
 

@@ -20,6 +20,24 @@ def tree(labels, package=p.PACKAGE):
     return root
 
 class OfflineProfileRegression(unittest.TestCase):
+    def test_foreground_probe_uses_component_selector_and_retains_real_diagnostics(self):
+        # Android 15 rejects `dumpsys activity activity <component>`; observed in run43705660323.
+        with tempfile.TemporaryDirectory() as folder:
+            device = p.Device('offline-fixture', Path(folder))
+            metric = {'scope': 'activity', 'renderMode': 'authored_frames', 'actualFrameChanges': 42}
+            def fake_run(*args, **kwargs):
+                if args == ('shell', 'dumpsys', 'activity', p.ACTIVITY):
+                    return '  CUTEDOG_VIEW_METRICS_JSON:' + json.dumps([metric])
+                if args[:3] == ('shell', 'dumpsys', 'activity'):
+                    return 'Unknown command: activity\nBad activity command, or no activities match: activity\n'
+                return ''
+            device.run = fake_run
+            device.screen_state = lambda: {'interactive': True}
+            actual = device.snapshot('foreground-before', 'activity')
+            self.assertEqual([metric], actual['pet'])
+            self.assertIn('CUTEDOG_VIEW_METRICS_JSON',
+                          (Path(folder) / actual['evidence']['diagnostics']).read_text())
+
     def test_actual_apk_manifest_enables_strict_binding_without_using_source_tree(self):
         with tempfile.TemporaryDirectory() as folder:
             apk = Path(folder) / 'application.apk'

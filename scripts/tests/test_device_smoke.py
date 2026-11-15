@@ -18,6 +18,67 @@ SPEC.loader.exec_module(smoke)
 
 
 class SmokeBoundaryTests(unittest.TestCase):
+    def test_text_injection_waits_for_each_real_field_commit_before_hiding_ime(self):
+        expected = "Preserve this real UI reminder across the signed APK upgrade"
+        class Input(smoke.Device):
+            value = ""
+            pending = None
+            polls = 0
+            injected = []
+            hidden = False
+            def tree(self):
+                if self.pending is not None:
+                    self.polls += 1
+                    if self.polls >= 2:
+                        self.value, self.pending = self.pending, None
+                root = ET.Element("hierarchy")
+                ET.SubElement(root, "node", {"class":"android.widget.EditText", "text":self.value})
+                return root
+            def tap_node(self, node):
+                pass
+            def adb(self, *args, **kwargs):
+                if args[:3] == ("shell", "input", "text"):
+                    if self.pending is not None:
+                        raise AssertionError("Next input arrived before the previous field commit")
+                    chunk = args[3].replace("%s", " ")
+                    self.injected.append(chunk)
+                    self.pending, self.polls = self.value + chunk, 0
+                elif args == ("shell", "dumpsys", "input_method"):
+                    return "mInputShown=true"
+                elif args == ("shell", "input", "keyevent", "KEYCODE_BACK"):
+                    if self.value != expected or self.pending is not None:
+                        raise AssertionError("IME hidden before complete expected text was committed")
+                    self.hidden = True
+                return ""
+        with tempfile.TemporaryDirectory() as temporary, mock.patch.object(smoke.time, "sleep"):
+            device = Input("emulator-5554", Path(temporary))
+            device.edit(0, expected)
+            self.assertEqual(expected, "".join(device.injected))
+            self.assertTrue(device.hidden)
+            self.assertEqual(expected, device.value)
+            self.assertTrue(all(item["matched"] for item in device.edit_checks))
+            self.assertEqual(["before-hide-ime", "after-hide-ime"], [item["phase"] for item in device.edit_checks[-2:]])
+
+    def test_truncated_baseline_details_fail_before_save_and_retain_exact_observation(self):
+        expected = "Preserve this real UI reminder across the signed APK upgrade"
+        observed = "Preserve this real UI reminder across the signed APK upgra"
+        class Truncated(smoke.Device):
+            def tree(self):
+                root = ET.Element("hierarchy")
+                ET.SubElement(root, "node", {"class":"android.widget.EditText", "text":observed})
+                return root
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary)
+            device = Truncated("emulator-5554", output)
+            with mock.patch.object(smoke.time, "monotonic", side_effect=[0, 1, 13]), mock.patch.object(smoke.time, "sleep"):
+                with self.assertRaisesRegex(AssertionError, "Input not committed before save"):
+                    device.wait_edit_value(0, expected, "before-hide-ime")
+            check = json.loads((output / "text-input/checks.json").read_text())[0]
+            self.assertFalse(check["matched"])
+            self.assertEqual(expected, check["expected"])
+            self.assertEqual(observed, check["observed"])
+            self.assertTrue((output / check["xml"]).is_file())
+
     def test_package_version_uses_real_archived_api26_and_api35_records(self):
         for api in (26, 35):
             raw = (ROOT / f"scripts/tests/fixtures/system-recovery-uid/api{api}-package.stdout.txt").read_text()
