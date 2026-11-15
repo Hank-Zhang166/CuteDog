@@ -1,0 +1,40 @@
+name: Publish APK prerelease
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag (for example v0.1.0)
+        required: true
+permissions:
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+      - run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
+      - name: Prepare downloadable files
+        run: |
+          mkdir -p artifacts
+          cp app/build/outputs/apk/debug/app-debug.apk artifacts/CuteDog-0.1.0-debug.apk
+          cd artifacts
+          sha256sum CuteDog-0.1.0-debug.apk > SHA256SUMS.txt
+          printf 'Version: 0.1.0\nBuild: debug, automatically generated test certificate\nAndroid: 8.0+ (API 26), target API 35\nThis is a prerelease verification build, not production signed.\nUpdating builds signed with a different test key requires uninstalling first (local data is deleted).\n' > BUILD-INFO.txt
+      - name: Publish durable GitHub Release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          gh release view "$RELEASE_TAG" >/dev/null 2>&1 || gh release create "$RELEASE_TAG" --prerelease --title "CuteDog $RELEASE_TAG · 测试版" --notes-file artifacts/BUILD-INFO.txt
+          gh release upload "$RELEASE_TAG" artifacts/* --clobber

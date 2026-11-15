@@ -1,0 +1,4 @@
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item><shape><solid android:color="#59775E"/><corners android:radius="24dp"/></shape></item>
+    <item android:drawable="@drawable/ic_notification" android:width="52dp" android:height="52dp" android:gravity="center"/>
+</layer-list>
