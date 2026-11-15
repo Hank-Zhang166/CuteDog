@@ -24,6 +24,14 @@ class ReminderDraftParserTest {
     @Test fun supports24HourClock() {
         assertEquals(time("2026-11-17T18:45+08:00[Asia/Shanghai]"), parse("后天18:45接朋友")!!.dueAt)
     }
+    @Test fun quarterHourIsNotMistakenForOneMinute() {
+        assertEquals(time("2026-11-16T15:15+08:00[Asia/Shanghai]"), parse("明天下午三点一刻开会")!!.dueAt)
+    }
+    @Test fun numberAtStartOfTitleIsNotConsumedAsMinutes() {
+        val result = parse("明天下午三点两人一起散步")!!
+        assertEquals("两人一起散步", result.title)
+        assertEquals(time("2026-11-16T15:00+08:00[Asia/Shanghai]"), result.dueAt)
+    }
     @Test fun neverSilentlyMovesPastTimeToTomorrow() { assertNull(parse("今天上午九点喝水")) }
     @Test fun rejectsImpossibleCalendarDate() { assertNull(parse("2026-02-30 12:00 看牙")) }
     @Test fun rejectsImpossibleClockTime() { assertNull(parse("明天25:70散步")) }

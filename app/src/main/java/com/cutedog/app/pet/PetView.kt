@@ -39,7 +39,14 @@ class PetView(context: Context) : View(context) {
             behavior.quiet = settings.activity == "quiet" || LocalTime.now().hour in 0..7 || LocalTime.now().hour >= 22
             behavior.active = settings.activity == "lively"
             behavior.reducedMotion = settings.reducedMotion
-            if (lastFrame != 0L) behavior.update((now - lastFrame) / 1000f)
+            if (lastFrame != 0L) {
+                var elapsed = ((now - lastFrame) / 1000f).coerceAtMost(.25f)
+                while (elapsed > 0f) {
+                    val step = min(elapsed, .05f)
+                    behavior.update(step)
+                    elapsed -= step
+                }
+            }
             lastFrame = now
             invalidate()
             postDelayed(this, if (settings.reducedMotion || power.isPowerSaveMode || settings.lowPower) 100L

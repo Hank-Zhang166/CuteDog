@@ -11,7 +11,7 @@ data class ReminderDraft(val title: String, val dueAt: Long, val explanation: St
 
 /** Explicit, local date extraction only. A draft always needs user confirmation before being saved. */
 object ReminderDraftParser {
-    private val relative = Regex("""(今天|明天|后天)\s*(凌晨|早上|上午|中午|下午|晚上)?\s*([零〇一二两三四五六七八九十\d]{1,3})\s*(?:点|[:：])\s*(半|[零〇一二两三四五六七八九十\d]{1,3}(?:分)?)?""")
+    private val relative = Regex("""(今天|明天|后天)\s*(凌晨|早上|上午|中午|下午|晚上)?\s*([零〇一二两三四五六七八九十\d]{1,3})\s*(?:点\s*(半|一刻|三刻|[零〇一二两三四五六七八九十\d]{1,3}分)?|[:：]\s*(\d{1,2}))(?!\d)""")
     private val absolute = Regex("""\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}""")
     private val formatter = DateTimeFormatter.ofPattern("uuuu-MM-dd HH:mm").withResolverStyle(ResolverStyle.STRICT)
 
@@ -37,8 +37,8 @@ object ReminderDraftParser {
             }
         }
         if (hour !in 0..23) return null
-        val minuteText = match.groupValues[4].removeSuffix("分")
-        val minute = when (minuteText) { "" -> 0; "半" -> 30; else -> number(minuteText) ?: return null }
+        val minuteText = (match.groupValues[4].ifEmpty { match.groupValues[5] }).removeSuffix("分")
+        val minute = when (minuteText) { "" -> 0; "半" -> 30; "一刻" -> 15; "三刻" -> 45; else -> number(minuteText) ?: return null }
         if (minute !in 0..59) return null
         val today = Instant.ofEpochMilli(now).atZone(zone).toLocalDate()
         val date = today.plusDays(when (match.groupValues[1]) { "明天" -> 1L; "后天" -> 2L; else -> 0L })

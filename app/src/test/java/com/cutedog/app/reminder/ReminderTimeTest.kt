@@ -39,6 +39,13 @@ class ReminderTimeTest {
         assertEquals(ms("2026-03-31T09:00+08:00[Asia/Shanghai]"), ReminderTime.nextOccurrence(january.copy(dueAt = february), february))
     }
 
+    @Test fun nonexistentDstHourShiftsOnceThenReturnsToOriginalWallTime() {
+        val reminder = item("2026-03-07T02:30-05:00[America/New_York]", "daily").copy(anchorTime = "02:30")
+        val shifted = ReminderTime.nextOccurrence(reminder, reminder.dueAt)!!
+        assertEquals(ms("2026-03-08T03:30-04:00[America/New_York]"), shifted)
+        assertEquals(ms("2026-03-09T02:30-04:00[America/New_York]"), ReminderTime.nextOccurrence(reminder.copy(dueAt = shifted), shifted))
+    }
+
     @Test fun monthlySupportsLeapYear() {
         val reminder = item("2028-01-31T09:00+08:00[Asia/Shanghai]", "monthly", anchor = 31)
         assertEquals(ms("2028-02-29T09:00+08:00[Asia/Shanghai]"), ReminderTime.nextOccurrence(reminder, reminder.dueAt))

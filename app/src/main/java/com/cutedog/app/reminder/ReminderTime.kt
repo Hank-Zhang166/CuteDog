@@ -3,6 +3,7 @@ package com.cutedog.app.reminder
 import com.cutedog.app.data.Reminder
 import java.time.Instant
 import java.time.YearMonth
+import java.time.LocalTime
 import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.time.temporal.ChronoUnit
@@ -23,20 +24,21 @@ object ReminderTime {
             else -> ChronoUnit.MONTHS.between(YearMonth.from(anchor), YearMonth.from(threshold)).coerceAtLeast(0)
         }.coerceAtLeast(1)
         var count = steps
-        var next = increment(anchor, count, item.repeat, item.anchorDay)
+        val wallTime = item.anchorTime.takeIf { it.isNotEmpty() }?.let(LocalTime::parse) ?: anchor.toLocalTime()
+        var next = increment(anchor, count, item.repeat, item.anchorDay, wallTime)
         while (next.toInstant().toEpochMilli() <= now + item.leadMinutes * 60_000L) {
-            next = increment(anchor, ++count, item.repeat, item.anchorDay)
+            next = increment(anchor, ++count, item.repeat, item.anchorDay, wallTime)
         }
         return next.toInstant().toEpochMilli()
     }
 
-    private fun increment(anchor: ZonedDateTime, count: Long, repeat: String, anchorDay: Int): ZonedDateTime = when (repeat) {
-        "daily" -> anchor.plusDays(count)
-        "weekly" -> anchor.plusWeeks(count)
+    private fun increment(anchor: ZonedDateTime, count: Long, repeat: String, anchorDay: Int, wallTime: LocalTime): ZonedDateTime = when (repeat) {
+        "daily" -> anchor.toLocalDate().plusDays(count).atTime(wallTime).atZone(anchor.zone)
+        "weekly" -> anchor.toLocalDate().plusWeeks(count).atTime(wallTime).atZone(anchor.zone)
         "monthly" -> {
             val month = YearMonth.from(anchor).plusMonths(count)
             val day = (anchorDay.takeIf { it > 0 } ?: anchor.dayOfMonth).coerceAtMost(month.lengthOfMonth())
-            month.atDay(day).atTime(anchor.toLocalTime()).atZone(anchor.zone)
+            month.atDay(day).atTime(wallTime).atZone(anchor.zone)
         }
         else -> error("Unsupported repeat rule")
     }

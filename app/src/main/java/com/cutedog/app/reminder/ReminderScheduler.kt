@@ -2,6 +2,7 @@ package com.cutedog.app.reminder
 
 import android.app.AlarmManager
 import android.app.PendingIntent
+import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -19,8 +20,11 @@ class ReminderScheduler(context: Context) {
 
     fun schedule(item: Reminder) {
         require(item.id > 0) { "Save the reminder before scheduling it" }
-        cancel(item.id)
-        if (item.completed) return
+        cancelAlarms(item.id)
+        if (item.completed) {
+            dismissNotification(item.id)
+            return
+        }
         if (!repository.wasDelivered(item.id, normalToken(item.dueAt))) {
             scheduleAlarm(ReminderTime.alarmAt(item), operation(item.id, ACTION_FIRE, item.dueAt))
         }
@@ -30,8 +34,17 @@ class ReminderScheduler(context: Context) {
     }
 
     fun cancel(id: Long) {
+        cancelAlarms(id)
+        dismissNotification(id)
+    }
+
+    private fun cancelAlarms(id: Long) {
         alarms.cancel(operation(id, ACTION_FIRE, 0))
         alarms.cancel(operation(id, ACTION_SNOOZE_FIRE, 0))
+    }
+
+    private fun dismissNotification(id: Long) {
+        context.getSystemService(NotificationManager::class.java).cancel(id.toString(), ReminderReceiver.NOTIFICATION_ID)
     }
 
     fun restoreAll() {

@@ -60,6 +60,7 @@ class ReminderPersistenceTest {
         assertTrue(repository.claimDelivery(id, "due:200"))
         repository.delete(id)
         assertFalse(repository.wasDelivered(id, "due:100"))
+        assertFalse(repository.claimDelivery(id, "due:300"))
     }
 
     @Test fun recurrenceAdvanceDoesNotOverwriteAnEditedDate() {

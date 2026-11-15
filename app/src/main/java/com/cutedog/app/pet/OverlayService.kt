@@ -77,7 +77,7 @@ class OverlayService : Service() {
             addAction(Intent.ACTION_SCREEN_OFF); addAction(Intent.ACTION_SCREEN_ON); addAction(Intent.ACTION_USER_PRESENT)
             addAction("com.cutedog.app.REMINDER_EVENT")
         }
-        if (Build.VERSION.SDK_INT >= 33) registerReceiver(events, filter, RECEIVER_NOT_EXPORTED) else registerReceiver(events, filter)
+        androidx.core.content.ContextCompat.registerReceiver(this, events, filter, androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED)
         getSharedPreferences("pet", MODE_PRIVATE).registerOnSharedPreferenceChangeListener(settingsListener)
         main.post(motion)
     }
@@ -181,7 +181,7 @@ class OverlayService : Service() {
         private const val CHANNEL = "pet_status"
         private const val STOP = "pet.stop"; private const val HIDE = "pet.hide"; private const val TOGGLE = "pet.toggle"
         fun start(context: Context) { context.startForegroundService(Intent(context, OverlayService::class.java)) }
-        fun stop(context: Context) { context.stopService(Intent(context, OverlayService::class.java)) }
+        fun stop(context: Context) { val request = Intent(context, OverlayService::class.java); context.stopService(request) }
         fun hide(context: Context) { context.startService(Intent(context, OverlayService::class.java).setAction(HIDE)) }
         fun show(context: Context) = start(context)
     }

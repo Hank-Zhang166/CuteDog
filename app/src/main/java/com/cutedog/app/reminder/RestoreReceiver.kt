@@ -3,6 +3,7 @@ package com.cutedog.app.reminder
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.util.Log
 import com.cutedog.app.daily.DailyScheduler
 
 class RestoreReceiver : BroadcastReceiver() {
@@ -11,8 +12,10 @@ class RestoreReceiver : BroadcastReceiver() {
         val pending = goAsync()
         ReminderExecutor.run {
             try {
-                ReminderScheduler(context.applicationContext).restoreAll()
-                DailyScheduler(context.applicationContext).schedule()
+                try { ReminderScheduler(context.applicationContext).restoreAll() }
+                catch (error: Exception) { Log.w("CuteDogReminders", "Reminder restore failed: ${error.javaClass.simpleName}") }
+                try { DailyScheduler(context.applicationContext).schedule() }
+                catch (error: Exception) { Log.w("CuteDogReminders", "Daily restore failed: ${error.javaClass.simpleName}") }
             }
             finally { pending.finish() }
         }

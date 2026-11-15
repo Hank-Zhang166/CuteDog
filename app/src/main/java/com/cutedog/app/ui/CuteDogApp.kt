@@ -3,6 +3,8 @@ package com.cutedog.app.ui
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
+import androidx.activity.ComponentActivity
+import androidx.lifecycle.ViewModelProvider
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
@@ -41,7 +43,8 @@ fun CuteDogApp(initialReminderId: Long = 0L, openDaily: Boolean = false, launchS
     var editing by remember { mutableStateOf<Reminder?>(null) }
     var editingId by rememberSaveable { mutableLongStateOf(0L) }
     var editorVisible by rememberSaveable { mutableStateOf(false) }
-    var savingReminder by remember { mutableStateOf(false) }
+    val writes = remember(context) { ViewModelProvider(context as ComponentActivity)[ReminderWriteModel::class.java] }
+    val savingReminder = writes.running
     var loading by remember { mutableStateOf(true) }
     var loadError by remember { mutableStateOf<String?>(null) }
     val notifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -50,6 +53,17 @@ fun CuteDogApp(initialReminderId: Long = 0L, openDaily: Boolean = false, launchS
     fun requestNotifications() {
         if (Build.VERSION.SDK_INT >= 33 && context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
             notifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+    }
+    LaunchedEffect(writes.result) {
+        writes.result?.let { result ->
+            if (result.savedId > 0) {
+                if (editingId == result.originalId) editorVisible = false
+                revision++
+                requestNotifications()
+            }
+            context.message(result.message)
+            writes.consumeResult()
+        }
     }
     DisposableEffect(lifecycle) {
         val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_RESUME) { restoreRevision++; revision++ } }
@@ -125,25 +139,13 @@ fun CuteDogApp(initialReminderId: Long = 0L, openDaily: Boolean = false, launchS
             }
         }
     }
-    if (editorVisible && (editingId == 0L || editing != null)) ReminderEditor(editing, saving = savingReminder, onDismiss = { if (!savingReminder) editorVisible = false }, onSave = save@{ reminder ->
-        if (savingReminder) return@save
-        savingReminder = true
-        scope.launch {
-            try {
-                withContext(Dispatchers.IO) {
-                    val id = repository.save(reminder)
-                    repository.get(id)?.let { scheduler.schedule(it) }
-                }
-                editorVisible = false; revision++
-                requestNotifications()
-                context.message("事项已保存。可在小狗设置中检查提醒权限。")
-            } catch (e: Exception) { context.message("保存失败：${e.message ?: "请稍后重试"}") }
-            finally { savingReminder = false }
-        }
+    if (editorVisible && (editingId == 0L || editing?.id == editingId)) key(editingId) { ReminderEditor(editing, saving = savingReminder, onDismiss = { if (!savingReminder) editorVisible = false }, onSave = { reminder ->
+        writes.save(context, reminder)
     }, onDelete = { item ->
         scope.launch {
             try { withContext(Dispatchers.IO) { scheduler.cancel(item.id); repository.delete(item.id) }; editorVisible = false; revision++ }
             catch (e: Exception) { context.message("删除失败，请重试。") }
         }
     })
+    }
 }

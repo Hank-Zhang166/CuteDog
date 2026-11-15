@@ -16,7 +16,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        consumeIntent(intent)
+        if (savedInstanceState == null) consumeIntent(intent)
         setContent {
             CuteDogTheme {
                 CuteDogApp(request.reminderId, request.openDaily, request.sequence)

@@ -11,6 +11,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
+import android.util.Log
 import com.cutedog.app.data.Reminder
 import com.cutedog.app.data.ReminderRepository
 import java.time.Instant
@@ -25,6 +26,7 @@ class ReminderReceiver : BroadcastReceiver() {
         val pending = goAsync()
         ReminderExecutor.run {
             try { handle(context.applicationContext, intent, id) }
+            catch (error: Exception) { Log.w("CuteDogReminders", "Reminder processing failed: ${error.javaClass.simpleName}") }
             finally { pending.finish() }
         }
     }
@@ -55,7 +57,7 @@ class ReminderReceiver : BroadcastReceiver() {
             ReminderScheduler.ACTION_DISMISS -> manager.cancel(id.toString(), NOTIFICATION_ID)
             ReminderScheduler.ACTION_FIRE -> {
                 if (item.completed || item.dueAt != occurrence) return
-                if (!repository.claimDelivery(id, ReminderScheduler.normalToken(occurrence))) return
+                if (!repository.claimDelivery(id, ReminderScheduler.normalToken(occurrence), expectedDue = occurrence)) return
                 deliver(context, item, occurrence)
                 ReminderTime.nextOccurrence(item, System.currentTimeMillis())?.let { next ->
                     repository.advance(id, item.dueAt, next)
@@ -65,7 +67,7 @@ class ReminderReceiver : BroadcastReceiver() {
             }
             ReminderScheduler.ACTION_SNOOZE_FIRE -> {
                 if (item.completed || item.snoozedUntil != occurrence) return
-                if (!repository.claimDelivery(id, "snooze:$occurrence")) return
+                if (!repository.claimDelivery(id, "snooze:$occurrence", expectedSnooze = occurrence)) return
                 repository.setSnooze(id, 0)
                 deliver(context, item, item.dueAt, isSnooze = true)
                 changed(context)
@@ -120,7 +122,7 @@ class ReminderReceiver : BroadcastReceiver() {
 
     companion object {
         const val CHANNEL_ID = "reminders"
-        private const val NOTIFICATION_ID = 1
+        internal const val NOTIFICATION_ID = 1
     }
 }
 

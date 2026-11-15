@@ -1,6 +1,7 @@
 package com.cutedog.app.data
 
 import java.time.ZoneId
+import java.time.LocalTime
 
 data class Reminder(
     val id: Long = 0,
@@ -15,6 +16,7 @@ data class Reminder(
     val snoozedUntil: Long = 0,
     val timeZoneId: String = ZoneId.systemDefault().id,
     val anchorDay: Int = 0,
+    val anchorTime: String = "",
 ) {
     fun validated(): Reminder {
         require(title.isNotBlank() && title.length <= 200) { "标题须为 1–200 个字符" }
@@ -27,6 +29,7 @@ data class Reminder(
         require(snoozedUntil >= 0) { "稍后提醒时间无效" }
         require(anchorDay in 0..31) { "月度日期无效" }
         ZoneId.of(timeZoneId)
+        if (anchorTime.isNotEmpty()) LocalTime.parse(anchorTime)
         return copy(title = title.trim(), category = category.trim())
     }
 }

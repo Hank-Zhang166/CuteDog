@@ -3,6 +3,7 @@
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -19,16 +20,19 @@ badging = subprocess.run([str(sdk / "build-tools/35.0.0/aapt"), "dump", "badging
                          check=True, capture_output=True, text=True).stdout
 output = repo / "artifacts"
 output.mkdir(exist_ok=True)
-target = output / "CuteDog-0.1.0-debug.apk"
+version = re.search(r"versionName='([^']+)'", badging).group(1)
+minimum_sdk = int(re.search(r"sdkVersion:'(\d+)'", badging).group(1))
+target_sdk = int(re.search(r"targetSdkVersion:'(\d+)'", badging).group(1))
+target = output / f"CuteDog-{version}-debug.apk"
 shutil.copy2(source, target)
 sha256 = hashlib.sha256(target.read_bytes()).hexdigest()
 (output / "SHA256SUMS.txt").write_text(f"{sha256}  {target.name}\n")
 (output / "signature-verification.txt").write_text(verification)
 (output / "apk-metadata.txt").write_text(badging)
 (output / "BUILD-INFO.json").write_text(json.dumps({
-    "file": target.name, "version": "0.1.0", "build": "debug",
+    "file": target.name, "version": version, "build": "debug",
     "signing": "Android debug certificate; not production signing",
-    "minimumAndroid": "8.0 (API 26)", "targetSdk": 35,
+    "minimumSdk": minimum_sdk, "targetSdk": target_sdk,
     "sha256": sha256, "bytes": target.stat().st_size,
 }, ensure_ascii=False, indent=2) + "\n")
 print(target)

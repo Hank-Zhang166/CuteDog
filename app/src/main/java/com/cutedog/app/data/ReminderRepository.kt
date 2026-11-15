@@ -22,14 +22,17 @@ class ReminderRepository(context: Context) {
 
     fun save(item: Reminder): Long {
         val value = item.validated()
-        val day = value.anchorDay.takeIf { it > 0 }
-            ?: Instant.ofEpochMilli(value.dueAt).atZone(ZoneId.of(value.timeZoneId)).dayOfMonth
+        val wallTime = Instant.ofEpochMilli(value.dueAt).atZone(ZoneId.of(value.timeZoneId))
+        val existing = if (value.id > 0) get(value.id) else null
+        val editedTime = existing != null && (existing.dueAt != value.dueAt || existing.timeZoneId != value.timeZoneId)
+        val day = if (editedTime) wallTime.dayOfMonth else value.anchorDay.takeIf { it > 0 } ?: wallTime.dayOfMonth
+        val anchorTime = if (editedTime || value.anchorTime.isEmpty()) wallTime.toLocalTime().toString() else value.anchorTime
         val fields = ContentValues().apply {
             put("title", value.title); put("details", value.details); put("due_at", value.dueAt)
             put("lead_minutes", value.leadMinutes); put("repeat_rule", value.repeat)
             put("priority", value.priority); put("category", value.category)
             put("completed", if (value.completed) 1 else 0); put("snoozed_until", value.snoozedUntil)
-            put("time_zone_id", value.timeZoneId); put("anchor_day", day)
+            put("time_zone_id", value.timeZoneId); put("anchor_day", day); put("anchor_time", anchorTime)
         }
         val db = helper.writableDatabase
         if (value.id == 0L) return db.insertOrThrow("reminders", null, fields)
@@ -60,11 +63,21 @@ class ReminderRepository(context: Context) {
     ).use { it.moveToFirst() }
 
     /** Unique constraint makes repeated broadcasts and reboot restoration idempotent. */
-    internal fun claimDelivery(id: Long, token: String): Boolean = helper.writableDatabase.insertWithOnConflict(
-        "deliveries", null, ContentValues().apply {
-            put("reminder_id", id); put("token", token); put("delivered_at", System.currentTimeMillis())
-        }, SQLiteDatabase.CONFLICT_IGNORE
-    ) != -1L
+    internal fun claimDelivery(id: Long, token: String, expectedDue: Long? = null, expectedSnooze: Long? = null): Boolean {
+        val db = helper.writableDatabase
+        db.beginTransaction()
+        try {
+            val where = "id=? AND completed=0" + if (expectedDue != null) " AND due_at=?" else if (expectedSnooze != null) " AND snoozed_until=?" else ""
+            val args = listOfNotNull(id.toString(), (expectedDue ?: expectedSnooze)?.toString()).toTypedArray()
+            val exists = db.query("reminders", arrayOf("id"), where, args, null, null, null).use { it.moveToFirst() }
+            if (!exists) { db.setTransactionSuccessful(); return false }
+            val inserted = db.insertWithOnConflict("deliveries", null, ContentValues().apply {
+                put("reminder_id", id); put("token", token); put("delivered_at", System.currentTimeMillis())
+            }, SQLiteDatabase.CONFLICT_IGNORE) != -1L
+            db.setTransactionSuccessful()
+            return inserted
+        } finally { db.endTransaction() }
+    }
 
     internal fun advance(id: Long, expectedDue: Long, nextDue: Long): Boolean =
         helper.writableDatabase.update("reminders", ContentValues().apply { put("due_at", nextDue) },
@@ -78,6 +91,7 @@ class ReminderRepository(context: Context) {
         completed = getInt(getColumnIndexOrThrow("completed")) != 0,
         snoozedUntil = getLong(getColumnIndexOrThrow("snoozed_until")),
         timeZoneId = getString(getColumnIndexOrThrow("time_zone_id")), anchorDay = getInt(getColumnIndexOrThrow("anchor_day")),
+        anchorTime = getString(getColumnIndexOrThrow("anchor_time")),
     )
 }
 
@@ -91,7 +105,7 @@ private class ReminderDatabase(context: Context) : SQLiteOpenHelper(context, "cu
             repeat_rule TEXT NOT NULL DEFAULT 'none', priority INTEGER NOT NULL DEFAULT 1,
             category TEXT NOT NULL DEFAULT '生活', completed INTEGER NOT NULL DEFAULT 0,
             snoozed_until INTEGER NOT NULL DEFAULT 0, time_zone_id TEXT NOT NULL,
-            anchor_day INTEGER NOT NULL DEFAULT 0)""")
+            anchor_day INTEGER NOT NULL DEFAULT 0, anchor_time TEXT NOT NULL DEFAULT '')""")
         db.execSQL("CREATE INDEX reminders_due ON reminders(completed, due_at)")
         db.execSQL("""CREATE TABLE deliveries (
             reminder_id INTEGER NOT NULL REFERENCES reminders(id) ON DELETE CASCADE,

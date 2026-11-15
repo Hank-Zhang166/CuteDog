@@ -11,6 +11,7 @@ import com.cutedog.app.R
 /** New Android versions restrict boot-time foreground services: offer an explicit restart. */
 class PetBootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action != Intent.ACTION_BOOT_COMPLETED) return
         if (!PetSettings(context).boot) return
         if (Build.VERSION.SDK_INT >= 33 && context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
         val manager = context.getSystemService(NotificationManager::class.java)
