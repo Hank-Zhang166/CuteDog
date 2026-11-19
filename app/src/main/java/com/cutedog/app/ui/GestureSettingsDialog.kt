@@ -33,7 +33,7 @@ internal fun GestureSettingsDialog(onDismiss: () -> Unit) {
             Column(Modifier.padding(22.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(18.dp)) {
                 Text("用你习惯的方式互动", style = MaterialTheme.typography.titleLarge)
                 Text("单击小狗", style = MaterialTheme.typography.titleMedium)
-                GestureOptions(tap, listOf("menu" to "快捷菜单", "chat" to "打开聊天", "wave" to "打个招呼")) { tap = it }
+                GestureOptions(tap, listOf("pet" to "摸摸", "wave" to "打招呼", "cuddle" to "抱抱")) { tap = it }
                 Text("双击小狗", style = MaterialTheme.typography.titleMedium)
                 GestureOptions(doubleTap, listOf("cuddle" to "抱抱", "jump" to "蹦一下", "wave" to "打招呼", "none" to "无动作")) { doubleTap = it }
                 Row { Text("识别轻抚动作", modifier = Modifier.weight(1f)); Switch(petting, { petting = it }) }

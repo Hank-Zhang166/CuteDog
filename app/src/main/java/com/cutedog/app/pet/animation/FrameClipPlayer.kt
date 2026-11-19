@@ -57,7 +57,8 @@ class FrameClipPlayer(context: Context) : Closeable {
     val requiredTickRate: Int get() = currentClip?.let { manifest?.clips?.get(it)?.fps } ?: 24
     fun nextFrameDelayMillis(elapsedSinceVsyncNanos: Long = 0L): Long {
         val retry = when {
-            loaded.get() == null || snapshot.error != null || snapshot.travelBlocked -> 250L
+            startupError.get() != null || snapshot.error != null || snapshot.travelBlocked -> 250L
+            loaded.get() == null -> 32L
             snapshot.loading -> 16L // A lightweight cache check at the next vsync; decoding remains off-thread.
             else -> return cadence.delayUntilNextFrameMillis(requiredTickRate, elapsedSinceVsyncNanos)
         }
@@ -96,7 +97,8 @@ class FrameClipPlayer(context: Context) : Closeable {
         if (closed) return false
         val control = director
         if (control == null) {
-            if (loaded.get()?.manifest?.requestableClipIds?.contains(clipId) == false) return false
+            val manifest = loaded.get()?.manifest
+            if (manifest != null && manifest.requestableName(clipId) == null) return false
             pendingRequest = clipId; headingAfterRequest = false
             return true
         }

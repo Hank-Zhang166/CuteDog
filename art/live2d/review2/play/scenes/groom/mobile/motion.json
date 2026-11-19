@@ -1,0 +1,61 @@
+{
+  "sourceScene": "groom",
+  "appAction": "groom",
+  "fps": 24,
+  "intervals": 125,
+  "terminalSample": true,
+  "sourceSceneStart": 22,
+  "sourceIntervals": 81,
+  "sourceTemplate": "%05d.webp",
+  "width": 512,
+  "height": 512,
+  "orientation": "left",
+  "entry": "Stand",
+  "exit": "Stand",
+  "appRootTravel": 0,
+  "clippedDogFrames": 0,
+  "camera": "x = rounded tracked dog root x; y = 0, preserving lift and contact trajectories",
+  "propVisibilityBySourceFrame": {},
+  "events": [
+    {
+      "frame": 22,
+      "id": "sit"
+    },
+    {
+      "frame": 27,
+      "id": "turn_toward_shoulder"
+    },
+    {
+      "frame": 39,
+      "id": "lower_muzzle"
+    },
+    {
+      "frame": 48,
+      "id": "touch_chest_coat"
+    },
+    {
+      "frame": 53,
+      "id": "comb_first_stroke"
+    },
+    {
+      "frame": 62,
+      "id": "pause_in_contact"
+    },
+    {
+      "frame": 67,
+      "id": "comb_second_stroke"
+    },
+    {
+      "frame": 75,
+      "id": "release_coat"
+    },
+    {
+      "frame": 84,
+      "id": "raise_head"
+    },
+    {
+      "frame": 99,
+      "id": "sit_settled"
+    }
+  ]
+}

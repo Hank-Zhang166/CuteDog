@@ -1,0 +1,41 @@
+{
+  "purpose": "Explicit synthetic serialization fixture only; no rendered asset or QA evidence.",
+  "record": {
+    "schema": "cutedog-clip-content-v2",
+    "width": 512,
+    "height": 512,
+    "id": "stand",
+    "fps": 24,
+    "sampling": "interval_starts",
+    "entryPose": "stand_left",
+    "exitPose": "stand_left",
+    "loop": true,
+    "interrupt": "boundary",
+    "transitions": [
+      "stand"
+    ],
+    "safeExitFrames": [],
+    "variantOf": null,
+    "heading": "left",
+    "exitHeading": "left",
+    "frames": [
+      "pet3d/stand/000.png",
+      "pet3d/stand/001.png"
+    ],
+    "frameSha256": [
+      "0000000000000000000000000000000000000000000000000000000000000000",
+      "1111111111111111111111111111111111111111111111111111111111111111"
+    ],
+    "travelUnits": "canvas_width_fraction",
+    "projectedTravel": [
+      0.0,
+      -0.0
+    ],
+    "canTravel": false,
+    "entryStateSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "exitStateSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "terminalProof": null
+  },
+  "expectedCanonicalUtf8": "{\"canTravel\":false,\"entryPose\":\"stand_left\",\"entryStateSha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"exitHeading\":\"left\",\"exitPose\":\"stand_left\",\"exitStateSha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"fps\":24,\"frameSha256\":[\"0000000000000000000000000000000000000000000000000000000000000000\",\"1111111111111111111111111111111111111111111111111111111111111111\"],\"frames\":[\"pet3d/stand/000.png\",\"pet3d/stand/001.png\"],\"heading\":\"left\",\"height\":512,\"id\":\"stand\",\"interrupt\":\"boundary\",\"loop\":true,\"projectedTravel\":[0,0],\"safeExitFrames\":[],\"sampling\":\"interval_starts\",\"schema\":\"cutedog-clip-content-v2\",\"terminalProof\":null,\"transitions\":[\"stand\"],\"travelUnits\":\"canvas_width_fraction\",\"variantOf\":null,\"width\":512}",
+  "expectedSha256": "f536fe19c22ebe8afaf80f3961c99200918fb6ac4862af41e0d15a8ab1e7aecd"
+}

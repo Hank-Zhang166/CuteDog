@@ -1,0 +1,12 @@
+{
+  "fps": 24,
+  "intervals": 109,
+  "samples": 110,
+  "byteIdenticalRestEndpoints": true,
+  "detachedHalfOpaqueFrames": 0,
+  "maxLocalDarkCentroidOffsetPx": {
+    "farEye": 0.934,
+    "nearEye": 0.947,
+    "nose": 0.891
+  }
+}

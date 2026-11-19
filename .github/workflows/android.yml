@@ -9,7 +9,8 @@ on:
       - 'gradlew*'
       - '*.gradle.kts'
       - '.github/workflows/android.yml'
-      - 'art/character/motions.json'
+      - 'art/live2d/review2/integration/**'
+      - 'docs/phase-v2-golden.json'
       - 'scripts/cloud-gradle.py'
       - 'scripts/setup-android.py'
       - 'scripts/package-apk.py'
@@ -139,49 +140,6 @@ jobs:
           path: ${{ runner.temp }}/build-evidence/
           if-no-files-found: error
           retention-days: 90
-  retain-build-evidence:
-    if: ${{ always() && github.event_name != 'pull_request' }}
-    needs: build
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    permissions:
-      contents: write
-      actions: read
-    concurrency:
-      group: cutedog-build-evidence
-      cancel-in-progress: false
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/download-artifact@v4
-        with:
-          name: verification-reports
-          path: ${{ runner.temp }}/retained-build
-      - name: Append build evidence without changing application branches
-        env:
-          EVIDENCE_PATH: runs/${{ github.run_id }}-${{ github.run_attempt }}
-        run: |
-          set -euo pipefail
-          test -f "$RUNNER_TEMP/retained-build/summary.json"
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          if git ls-remote --exit-code --heads origin refs/heads/codex/build-evidence >/dev/null; then
-            git fetch origin codex/build-evidence
-            git switch --detach FETCH_HEAD
-            git switch -C codex/build-evidence
-          else
-            git switch --orphan codex/build-evidence
-          fi
-          test ! -e "$EVIDENCE_PATH"
-          mkdir -p "$EVIDENCE_PATH"
-          cp -R "$RUNNER_TEMP/retained-build/." "$EVIDENCE_PATH/"
-          git add -- "$EVIDENCE_PATH"
-          git commit -m "[skip ci] Record build evidence for run $GITHUB_RUN_ID"
-          for attempt in 1 2 3; do
-            if git push origin HEAD:refs/heads/codex/build-evidence; then exit 0; fi
-            if [ "$attempt" -eq 3 ]; then exit 1; fi
-            git fetch origin codex/build-evidence
-            git rebase FETCH_HEAD
-          done
   device-tests:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
@@ -230,52 +188,3 @@ jobs:
           path: ${{ runner.temp }}/instrumentation-evidence/
           if-no-files-found: error
           retention-days: 90
-  retain-device-evidence:
-    # PR code never receives repository write access. Artifact retention above still applies.
-    if: ${{ always() && github.event_name != 'pull_request' }}
-    needs: device-tests
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    permissions:
-      contents: write
-      actions: read
-    strategy:
-      fail-fast: false
-      matrix:
-        api-level: [26, 35]
-    concurrency:
-      group: cutedog-instrumentation-evidence-api-${{ matrix.api-level }}
-      cancel-in-progress: false
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/download-artifact@v4
-        with:
-          name: instrumentation-evidence-api-${{ matrix.api-level }}
-          path: ${{ runner.temp }}/retained-instrumentation
-      - name: Append evidence to its dedicated API branch
-        env:
-          EVIDENCE_BRANCH: codex/instrumentation-evidence-api${{ matrix.api-level }}
-          EVIDENCE_PATH: runs/${{ github.run_id }}-${{ github.run_attempt }}/api-${{ matrix.api-level }}
-        run: |
-          set -euo pipefail
-          test -f "$RUNNER_TEMP/retained-instrumentation/summary.json"
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          if git ls-remote --exit-code --heads origin "refs/heads/$EVIDENCE_BRANCH" >/dev/null; then
-            git fetch origin "$EVIDENCE_BRANCH"
-            git switch --detach FETCH_HEAD
-            git switch -C "$EVIDENCE_BRANCH"
-          else
-            git switch --orphan "$EVIDENCE_BRANCH"
-          fi
-          test ! -e "$EVIDENCE_PATH"
-          mkdir -p "$EVIDENCE_PATH"
-          cp -R "$RUNNER_TEMP/retained-instrumentation/." "$EVIDENCE_PATH/"
-          git add -- "$EVIDENCE_PATH"
-          git commit -m "[skip ci] Record API ${{ matrix.api-level }} instrumentation evidence for run $GITHUB_RUN_ID"
-          for attempt in 1 2 3; do
-            if git push origin "HEAD:refs/heads/$EVIDENCE_BRANCH"; then exit 0; fi
-            if [ "$attempt" -eq 3 ]; then exit 1; fi
-            git fetch origin "$EVIDENCE_BRANCH"
-            git rebase FETCH_HEAD
-          done

@@ -4,7 +4,7 @@ import android.content.Context
 import android.content.res.Configuration
 import android.view.View
 import android.view.ViewGroup
-import android.widget.Button
+import android.widget.CheckBox
 import android.widget.ScrollView
 import android.widget.TextView
 import androidx.test.core.app.ApplicationProvider
@@ -15,12 +15,12 @@ import org.junit.Test
 
 /** Real Android measurement and native button callbacks, without creating an overlay or changing permissions. */
 class PetBubbleViewTest {
-    @Test fun largeTextMenuStaysBoundedAndScrollsToItsRealActions() = onMain {
+    @Test fun largeReminderStaysBoundedAndItsCheckboxIsReachable() = onMain {
         val context = configuredContext(2f, dark = true)
         val bubble = PetBubbleView(context)
-        val actual = mutableListOf<String>()
-        bubble.onAction = actual::add
-        bubble.showMenu("测试小狗", "这是用于验证两倍字体与受限高度的说明。操作应该可以滚动到达。")
+        var completions = 0
+        bubble.onComplete = { completions++ }
+        bubble.showReminder("这是用于验证两倍字体与受限高度的长事项标题。勾选框应该可以滚动到达。", "14:30")
         val maxWidth = dp(context, 260); val maxHeight = dp(context, 180)
         val measured = bubble.measureForBounds(maxWidth, maxHeight)
         bubble.layout(0, 0, measured.width, measured.height)
@@ -28,19 +28,17 @@ class PetBubbleViewTest {
         assertTrue(measured.height in 1..maxHeight)
         val scroll = find<ScrollView>(bubble)!!
         assertTrue("Large content must be scrollable instead of clipped", scroll.canScrollVertically(1))
-        for (action in listOf("chat", "pet", "open", "hide")) {
-            val button = bubble.findViewWithTag<Button>("pet_bubble_$action")
-            assertNotNull(button)
-            assertTrue(button.minimumHeight >= dp(context, 48))
-            assertTrue(button.performClick())
-        }
-        assertEquals(listOf("chat", "pet", "open", "hide"), actual)
+        val check = find<CheckBox>(bubble)!!
+        assertTrue(check.minimumHeight >= dp(context, 48))
+        assertTrue(check.performClick())
+        assertTrue(check.isChecked)
+        assertEquals(1, completions)
     }
 
     @Test fun allFourTailDirectionsClampToActualMeasuredBounds() = onMain {
         val context = configuredContext(1f, dark = false)
         val bubble = PetBubbleView(context)
-        bubble.showReminder("查看测试约定", "提醒正文")
+        bubble.showReminder("查看测试约定", "14:30")
         for (edge in PetBubbleView.TailEdge.entries) {
             for (offset in listOf(-10000f, Float.NaN, 10000f)) {
                 bubble.setTail(edge, offset)
@@ -59,19 +57,21 @@ class PetBubbleViewTest {
         }
     }
 
-    @Test fun reminderHasExplicitTitleAndDetailsActionAndRebindingClearsOldText() = onMain {
+    @Test fun reminderHasOnlyOneCompletionControlAndRebindingClearsOldText() = onMain {
         val bubble = PetBubbleView(configuredContext(1f, dark = false))
-        var action: String? = null
-        bubble.onAction = { action = it }
-        bubble.showReminder("测试事项标题", "仅用于本测试的提醒说明")
-        assertTrue(texts(bubble).contains("事项提醒"))
+        var completions = 0
+        bubble.onComplete = { completions++ }
+        bubble.showReminder("测试事项标题", "14:30")
+        assertTrue(texts(bubble).contains("待办提醒 · 14:30"))
         assertTrue(texts(bubble).contains("测试事项标题"))
-        bubble.findViewWithTag<Button>("pet_bubble_details").performClick()
-        assertEquals(PetBubbleView.ACTION_DETAILS, action)
-        bubble.showMenu("测试小狗")
+        val check = find<CheckBox>(bubble)!!
+        assertEquals(listOf(check), allViews(bubble).filter { it.isClickable })
+        check.performClick()
+        assertEquals(1, completions)
+        bubble.showReminder("新事项", "15:00")
+        assertFalse(check.isChecked)
         assertFalse(texts(bubble).contains("测试事项标题"))
-        assertFalse(texts(bubble).contains("仅用于本测试的提醒说明"))
-        assertNull(bubble.findViewWithTag<View>("pet_bubble_details"))
+        assertTrue(texts(bubble).contains("新事项"))
     }
 
     private fun configuredContext(fontScale: Float, dark: Boolean): Context {

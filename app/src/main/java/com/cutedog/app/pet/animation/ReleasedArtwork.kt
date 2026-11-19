@@ -1,12 +1,12 @@
 package com.cutedog.app.pet.animation
 
-/** Explicit reviewed release scope, never supplied by an untrusted asset manifest. */
+/** Explicit art acceptance scope independent of the asset manifest being checked. */
 object ReleasedArtwork {
-    val REQUIRED_ACTIONS = setOf(
-        "stand", "breathe", "tail_wag", "happy", "tilt", "wave", "blink", "look_left", "look_right",
-        "curious", "expect", "relax", "soothe", "focus", "walk", "walk_start", "walk_stop",
-        "sit", "sit_idle", "stand_up",
-        "trot", "walk_to_trot", "trot_to_walk", "run", "trot_to_run", "run_to_trot",
-        "play_ball", "treat", "hop",
-    )
+    private val directional = setOf("stand", "walk_start", "walk", "walk_stop", "walk_to_trot",
+        "trot", "trot_to_walk", "backstep", "chase",
+        "jump", "jump_takeoff", "land", "pause", "rebound", "slide_correct")
+    val REQUIRED_ACTIONS = ClipManifest.REQUIRED_ACTIONS + setOf(
+        "walk_to_trot", "trot_to_walk", "side_lie_idle",
+        "side_to_lie", "curl_idle", "uncurl", "look_around", "chase", "jump_takeoff", "turn_to_left",
+    ) + directional.map { "${it}_right" }
 }

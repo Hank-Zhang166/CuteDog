@@ -1,0 +1,57 @@
+{
+  "fps": 24,
+  "frameCount": 109,
+  "terminalSample": true,
+  "poses": [
+    [
+      "Rest",
+      0
+    ],
+    [
+      "TurnFace",
+      4
+    ],
+    [
+      "Roll25",
+      10
+    ],
+    [
+      "Roll60",
+      16
+    ],
+    [
+      "Roll",
+      19
+    ],
+    [
+      "Belly",
+      37
+    ],
+    [
+      "Belly",
+      70
+    ],
+    [
+      "Roll",
+      89
+    ],
+    [
+      "Roll60",
+      93
+    ],
+    [
+      "Roll25",
+      99
+    ],
+    [
+      "TurnFace",
+      105
+    ],
+    [
+      "Rest",
+      109
+    ]
+  ],
+  "entry": "Rest",
+  "exit": "Rest"
+}

@@ -13,6 +13,3 @@ __pycache__/
 *.pyc
 *.blend1
 *.blend2
-art/character/*.pfm
-art/character/*.exr
-art/character/*.log

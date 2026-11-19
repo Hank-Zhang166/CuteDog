@@ -1,0 +1,14 @@
+# Android verifies the packaged proof bytes against the frame manifest.
+app/src/main/assets/pet3d/*.json text eol=lf
+art/live2d/**/*.json text eol=lf
+art/live2d/review2/**/*.py text eol=lf
+art/live2d/review2/**/*.tsv text eol=lf
+app/src/main/assets/pet3d/**/*.webp binary
+# These exact source bytes are fingerprinted in native-provenance.json.
+tools/cubism/*.java -text whitespace=cr-at-eol
+tools/cubism/*.py -text whitespace=cr-at-eol
+art/live2d/**/*.cmo3 binary
+art/live2d/**/*.can3 binary
+art/live2d/**/*.moc3 binary
+art/live2d/**/*.psd binary
+tools/cubism/base/render.py -text whitespace=cr-at-eol

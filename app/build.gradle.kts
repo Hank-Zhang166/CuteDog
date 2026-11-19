@@ -10,8 +10,8 @@ android {
         applicationId = "com.cutedog.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "0.2.0-preview.1"
+        versionCode = 4
+        versionName = "0.2.1-preview.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildTypes {

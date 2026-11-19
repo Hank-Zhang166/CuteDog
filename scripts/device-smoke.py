@@ -560,13 +560,16 @@ def main():
                                         "small_non_modal_window": True}
         (args.output / "overlay-window-before.txt").write_text(window)
         first = device.screenshot("overlay-on-launcher")
+        # The dog can walk while the screenshot and accessibility tree are being collected.
+        before, _ = device.overlay_frame()
+        left, top, right, bottom = before
         cx, cy = (left + right) // 2, (top + bottom) // 2
         destination_x = int(device.width * (.2 if cx > device.width / 2 else .8))
         destination_y = max(120, min(device.height - 180, cy - 180))
         device.long_drag(cx, cy, destination_x, destination_y)
         time.sleep(2)
         after, after_window = device.overlay_frame()
-        if abs(after[0] - before[0]) + abs(after[1] - before[1]) < 40:
+        if abs(after[1] - before[1]) < 40:
             raise AssertionError("Long drag did not change overlay position: " + str(after))
         metadata["overlay_observed"].update(window_after=after, drag_moved=True)
         (args.output / "overlay-window-after.txt").write_text(after_window)

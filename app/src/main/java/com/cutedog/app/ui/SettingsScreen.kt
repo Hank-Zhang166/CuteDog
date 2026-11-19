@@ -164,7 +164,7 @@ internal fun SettingsScreen(onNotificationPermission: () -> Unit, onRefresh: () 
     if (gesturesVisible) GestureSettingsDialog { gesturesVisible = false }
     if (historyVisible) QuoteHistoryDialog { historyVisible = false; onRefresh() }
     if (aiSettings) AiSettingsDialog { aiSettings = false }
-    if (helpVisible) AlertDialog(onDismissRequest = { helpVisible = false }, title = { Text("和小狗相处的小方法") }, text = { Text("轻触：引起注意或打开应用。\n\n短距离轻抚：给小狗一点温柔的回应。\n\n长按后拖动：移动桌宠，松手后靠近边缘。\n\n临时隐藏：在本页或常驻通知中操作；需要时再恢复。\n\n锁定位置与减少动态效果可在此页调整。桌宠不会识别其他应用中的图标或文字。") }, confirmButton = { TextButton(onClick = { helpVisible = false }) { Text("知道啦") } })
+    if (helpVisible) AlertDialog(onDismissRequest = { helpVisible = false }, title = { Text("和小狗相处的小方法") }, text = { Text("轻触或轻抚，小狗会用动作回应。长按后拖动，可移动桌宠。\n\n待办到提醒时间时，点击小狗旁的勾选框即可完成本次事项。\n\n要聊天，请进入应用的聊天页。临时隐藏可在本页或常驻通知中操作。") }, confirmButton = { TextButton(onClick = { helpVisible = false }) { Text("知道啦") } })
     if (policyVisible) AlertDialog(onDismissRequest = { policyVisible = false }, title = { Text("你的数据，由你决定") }, text = { Column(Modifier.verticalScroll(rememberScrollState())) { Text("CuteDog 不要求登录，不读取通讯录、位置、其他应用内容或屏幕。\n\n备忘录、设置、聊天和长期记忆保存在应用私有存储。API Key 使用 Android Keystore 加密。卸载或清除应用数据会删除本地内容，请先导出需要的记忆。\n\n只有主动发起联网聊天时，消息和近期上下文才发送给你设置的模型服务商。长期记忆默认关闭，开启后会随请求发送。服务商可能收取费用并按其隐私政策处理数据。\n\n你可以删除聊天、编辑或清空记忆、清除密钥。删除本机数据不会删除服务商已接收的数据。\n\n系统强制停止、通知拒绝、节电限制或设备关机可能影响提醒。重要事项请保留独立提醒渠道。") } }, confirmButton = { TextButton(onClick = { policyVisible = false }) { Text("知道了") } })
 }
 

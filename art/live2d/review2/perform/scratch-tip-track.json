@@ -1,0 +1,1107 @@
+{
+ "canvas": [
+  512,
+  512
+ ],
+ "fps": 24,
+ "coordinates": "screen XY in pixels from upper left, inclusive terminal",
+ "toeMaterial": "subpixel center of leading upper toe surface, mapped from UV (241.5,154) in the registered high painting",
+ "earRootMaterial": [
+  224,
+  139
+ ],
+ "frames": [
+  {
+   "frame": 0,
+   "toe": [
+    234.037,
+    410.567
+   ],
+   "earRoot": [
+    224,
+    139
+   ],
+   "toeEdgeToEarPx": 256.56,
+   "contact": false
+  },
+  {
+   "frame": 1,
+   "toe": [
+    234.037,
+    410.567
+   ],
+   "earRoot": [
+    224,
+    139
+   ],
+   "toeEdgeToEarPx": 256.56,
+   "contact": false
+  },
+  {
+   "frame": 2,
+   "toe": [
+    234.037,
+    410.567
+   ],
+   "earRoot": [
+    224,
+    139
+   ],
+   "toeEdgeToEarPx": 256.56,
+   "contact": false
+  },
+  {
+   "frame": 3,
+   "toe": [
+    234.037,
+    410.567
+   ],
+   "earRoot": [
+    224,
+    139
+   ],
+   "toeEdgeToEarPx": 256.56,
+   "contact": false
+  },
+  {
+   "frame": 4,
+   "toe": [
+    234.061,
+    410.295
+   ],
+   "earRoot": [
+    224,
+    139
+   ],
+   "toeEdgeToEarPx": 255.71,
+   "contact": false
+  },
+  {
+   "frame": 5,
+   "toe": [
+    234.133,
+    409.493
+   ],
+   "earRoot": [
+    224,
+    139
+   ],
+   "toeEdgeToEarPx": 255.63,
+   "contact": false
+  },
+  {
+   "frame": 6,
+   "toe": [
+    234.253,
+    408.146
+   ],
+   "earRoot": [
+    224,
+    139
+   ],
+   "toeEdgeToEarPx": 254.71,
+   "contact": false
+  },
+  {
+   "frame": 7,
+   "toe": [
+    234.422,
+    406.251
+   ],
+   "earRoot": [
+    224,
+    139
+   ],
+   "toeEdgeToEarPx": 253.64,
+   "contact": false
+  },
+  {
+   "frame": 8,
+   "toe": [
+    234.633,
+    403.874
+   ],
+   "earRoot": [
+    224,
+    139
+   ],
+   "toeEdgeToEarPx": 251.72,
+   "contact": false
+  },
+  {
+   "frame": 9,
+   "toe": [
+    234.873,
+    401.173
+   ],
+   "earRoot": [
+    224,
+    139
+   ],
+   "toeEdgeToEarPx": 249.72,
+   "contact": false
+  },
+  {
+   "frame": 10,
+   "toe": [
+    235.184,
+    397.689
+   ],
+   "earRoot": [
+    224,
+    139
+   ],
+   "toeEdgeToEarPx": 246.81,
+   "contact": false
+  },
+  {
+   "frame": 11,
+   "toe": [
+    235.618,
+    392.821
+   ],
+   "earRoot": [
+    224,
+    139
+   ],
+   "toeEdgeToEarPx": 242.91,
+   "contact": false
+  },
+  {
+   "frame": 12,
+   "toe": [
+    236.17,
+    386.677
+   ],
+   "earRoot": [
+    225,
+    139
+   ],
+   "toeEdgeToEarPx": 237.84,
+   "contact": false
+  },
+  {
+   "frame": 13,
+   "toe": [
+    236.818,
+    379.522
+   ],
+   "earRoot": [
+    225,
+    139
+   ],
+   "toeEdgeToEarPx": 231.95,
+   "contact": false
+  },
+  {
+   "frame": 14,
+   "toe": [
+    237.526,
+    371.775
+   ],
+   "earRoot": [
+    225,
+    139
+   ],
+   "toeEdgeToEarPx": 225.18,
+   "contact": false
+  },
+  {
+   "frame": 15,
+   "toe": [
+    238.247,
+    363.967
+   ],
+   "earRoot": [
+    225,
+    139
+   ],
+   "toeEdgeToEarPx": 218.66,
+   "contact": false
+  },
+  {
+   "frame": 16,
+   "toe": [
+    238.927,
+    356.687
+   ],
+   "earRoot": [
+    225,
+    140
+   ],
+   "toeEdgeToEarPx": 210.86,
+   "contact": false
+  },
+  {
+   "frame": 17,
+   "toe": [
+    239.62,
+    349.356
+   ],
+   "earRoot": [
+    226,
+    140
+   ],
+   "toeEdgeToEarPx": 203.8,
+   "contact": false
+  },
+  {
+   "frame": 18,
+   "toe": [
+    240.395,
+    341.226
+   ],
+   "earRoot": [
+    226,
+    140
+   ],
+   "toeEdgeToEarPx": 196.74,
+   "contact": false
+  },
+  {
+   "frame": 19,
+   "toe": [
+    241.233,
+    332.457
+   ],
+   "earRoot": [
+    227,
+    140
+   ],
+   "toeEdgeToEarPx": 187.86,
+   "contact": false
+  },
+  {
+   "frame": 20,
+   "toe": [
+    242.131,
+    323.038
+   ],
+   "earRoot": [
+    227,
+    140
+   ],
+   "toeEdgeToEarPx": 179.01,
+   "contact": false
+  },
+  {
+   "frame": 21,
+   "toe": [
+    243.097,
+    312.857
+   ],
+   "earRoot": [
+    228,
+    141
+   ],
+   "toeEdgeToEarPx": 168.08,
+   "contact": false
+  },
+  {
+   "frame": 22,
+   "toe": [
+    244.141,
+    301.754
+   ],
+   "earRoot": [
+    229,
+    141
+   ],
+   "toeEdgeToEarPx": 157.81,
+   "contact": false
+  },
+  {
+   "frame": 23,
+   "toe": [
+    245.267,
+    289.588
+   ],
+   "earRoot": [
+    230,
+    141
+   ],
+   "toeEdgeToEarPx": 145.88,
+   "contact": false
+  },
+  {
+   "frame": 24,
+   "toe": [
+    246.458,
+    276.388
+   ],
+   "earRoot": [
+    231,
+    142
+   ],
+   "toeEdgeToEarPx": 131.97,
+   "contact": false
+  },
+  {
+   "frame": 25,
+   "toe": [
+    247.641,
+    262.74
+   ],
+   "earRoot": [
+    232,
+    142
+   ],
+   "toeEdgeToEarPx": 118.83,
+   "contact": false
+  },
+  {
+   "frame": 26,
+   "toe": [
+    248.717,
+    249.483
+   ],
+   "earRoot": [
+    234,
+    143
+   ],
+   "toeEdgeToEarPx": 104.24,
+   "contact": false
+  },
+  {
+   "frame": 27,
+   "toe": [
+    249.588,
+    237.471
+   ],
+   "earRoot": [
+    236,
+    143
+   ],
+   "toeEdgeToEarPx": 92.07,
+   "contact": false
+  },
+  {
+   "frame": 28,
+   "toe": [
+    250.364,
+    226.163
+   ],
+   "earRoot": [
+    238,
+    144
+   ],
+   "toeEdgeToEarPx": 79.91,
+   "contact": false
+  },
+  {
+   "frame": 29,
+   "toe": [
+    251.098,
+    215.282
+   ],
+   "earRoot": [
+    241,
+    146
+   ],
+   "toeEdgeToEarPx": 66.75,
+   "contact": false
+  },
+  {
+   "frame": 30,
+   "toe": [
+    251.771,
+    205.031
+   ],
+   "earRoot": [
+    244,
+    147
+   ],
+   "toeEdgeToEarPx": 55.44,
+   "contact": false
+  },
+  {
+   "frame": 31,
+   "toe": [
+    252.438,
+    194.485
+   ],
+   "earRoot": [
+    247,
+    148
+   ],
+   "toeEdgeToEarPx": 43.57,
+   "contact": false
+  },
+  {
+   "frame": 32,
+   "toe": [
+    253.087,
+    183.564
+   ],
+   "earRoot": [
+    250,
+    149
+   ],
+   "toeEdgeToEarPx": 32.02,
+   "contact": false
+  },
+  {
+   "frame": 33,
+   "toe": [
+    253.633,
+    173.57
+   ],
+   "earRoot": [
+    252,
+    150
+   ],
+   "toeEdgeToEarPx": 21.0,
+   "contact": false
+  },
+  {
+   "frame": 34,
+   "toe": [
+    254.025,
+    165.589
+   ],
+   "earRoot": [
+    253,
+    151
+   ],
+   "toeEdgeToEarPx": 12.0,
+   "contact": false
+  },
+  {
+   "frame": 35,
+   "toe": [
+    254.248,
+    160.528
+   ],
+   "earRoot": [
+    254,
+    151
+   ],
+   "toeEdgeToEarPx": 7.0,
+   "contact": false
+  },
+  {
+   "frame": 36,
+   "toe": [
+    254.376,
+    157.356
+   ],
+   "earRoot": [
+    256,
+    151
+   ],
+   "toeEdgeToEarPx": 3.0,
+   "contact": false
+  },
+  {
+   "frame": 37,
+   "toe": [
+    254.466,
+    154.952
+   ],
+   "earRoot": [
+    257,
+    151
+   ],
+   "toeEdgeToEarPx": 1.0,
+   "contact": true
+  },
+  {
+   "frame": 38,
+   "toe": [
+    254.5,
+    154.0
+   ],
+   "earRoot": [
+    257,
+    151
+   ],
+   "toeEdgeToEarPx": 0.0,
+   "contact": true
+  },
+  {
+   "frame": 39,
+   "toe": [
+    254.388,
+    157.026
+   ],
+   "earRoot": [
+    257,
+    152
+   ],
+   "toeEdgeToEarPx": 2.0,
+   "contact": false
+  },
+  {
+   "frame": 40,
+   "toe": [
+    254.102,
+    163.894
+   ],
+   "earRoot": [
+    256,
+    152
+   ],
+   "toeEdgeToEarPx": 9.0,
+   "contact": false
+  },
+  {
+   "frame": 41,
+   "toe": [
+    253.762,
+    171.045
+   ],
+   "earRoot": [
+    256,
+    152
+   ],
+   "toeEdgeToEarPx": 16.0,
+   "contact": false
+  },
+  {
+   "frame": 42,
+   "toe": [
+    253.591,
+    174.386
+   ],
+   "earRoot": [
+    256,
+    152
+   ],
+   "toeEdgeToEarPx": 19.0,
+   "contact": false
+  },
+  {
+   "frame": 43,
+   "toe": [
+    253.869,
+    168.873
+   ],
+   "earRoot": [
+    256,
+    152
+   ],
+   "toeEdgeToEarPx": 14.0,
+   "contact": false
+  },
+  {
+   "frame": 44,
+   "toe": [
+    254.308,
+    159.054
+   ],
+   "earRoot": [
+    256,
+    152
+   ],
+   "toeEdgeToEarPx": 4.0,
+   "contact": false
+  },
+  {
+   "frame": 45,
+   "toe": [
+    254.5,
+    154.0
+   ],
+   "earRoot": [
+    257,
+    151
+   ],
+   "toeEdgeToEarPx": 0.0,
+   "contact": true
+  },
+  {
+   "frame": 46,
+   "toe": [
+    254.384,
+    157.139
+   ],
+   "earRoot": [
+    257,
+    152
+   ],
+   "toeEdgeToEarPx": 2.0,
+   "contact": false
+  },
+  {
+   "frame": 47,
+   "toe": [
+    254.085,
+    164.273
+   ],
+   "earRoot": [
+    256,
+    152
+   ],
+   "toeEdgeToEarPx": 9.0,
+   "contact": false
+  },
+  {
+   "frame": 48,
+   "toe": [
+    253.728,
+    171.709
+   ],
+   "earRoot": [
+    256,
+    152
+   ],
+   "toeEdgeToEarPx": 17.0,
+   "contact": false
+  },
+  {
+   "frame": 49,
+   "toe": [
+    253.549,
+    175.186
+   ],
+   "earRoot": [
+    256,
+    152
+   ],
+   "toeEdgeToEarPx": 20.0,
+   "contact": false
+  },
+  {
+   "frame": 50,
+   "toe": [
+    253.841,
+    169.449
+   ],
+   "earRoot": [
+    256,
+    152
+   ],
+   "toeEdgeToEarPx": 14.04,
+   "contact": false
+  },
+  {
+   "frame": 51,
+   "toe": [
+    254.301,
+    159.244
+   ],
+   "earRoot": [
+    256,
+    152
+   ],
+   "toeEdgeToEarPx": 4.0,
+   "contact": false
+  },
+  {
+   "frame": 52,
+   "toe": [
+    254.5,
+    154.0
+   ],
+   "earRoot": [
+    257,
+    151
+   ],
+   "toeEdgeToEarPx": 0.0,
+   "contact": true
+  },
+  {
+   "frame": 53,
+   "toe": [
+    254.436,
+    155.773
+   ],
+   "earRoot": [
+    257,
+    151
+   ],
+   "toeEdgeToEarPx": 2.0,
+   "contact": false
+  },
+  {
+   "frame": 54,
+   "toe": [
+    254.26,
+    160.246
+   ],
+   "earRoot": [
+    256,
+    152
+   ],
+   "toeEdgeToEarPx": 5.0,
+   "contact": false
+  },
+  {
+   "frame": 55,
+   "toe": [
+    253.999,
+    166.134
+   ],
+   "earRoot": [
+    255,
+    152
+   ],
+   "toeEdgeToEarPx": 11.0,
+   "contact": false
+  },
+  {
+   "frame": 56,
+   "toe": [
+    253.713,
+    172.005
+   ],
+   "earRoot": [
+    255,
+    152
+   ],
+   "toeEdgeToEarPx": 17.0,
+   "contact": false
+  },
+  {
+   "frame": 57,
+   "toe": [
+    253.421,
+    177.582
+   ],
+   "earRoot": [
+    254,
+    152
+   ],
+   "toeEdgeToEarPx": 23.0,
+   "contact": false
+  },
+  {
+   "frame": 58,
+   "toe": [
+    253.08,
+    183.697
+   ],
+   "earRoot": [
+    254,
+    151
+   ],
+   "toeEdgeToEarPx": 30.0,
+   "contact": false
+  },
+  {
+   "frame": 59,
+   "toe": [
+    252.684,
+    190.44
+   ],
+   "earRoot": [
+    253,
+    151
+   ],
+   "toeEdgeToEarPx": 36.01,
+   "contact": false
+  },
+  {
+   "frame": 60,
+   "toe": [
+    252.225,
+    197.906
+   ],
+   "earRoot": [
+    252,
+    150
+   ],
+   "toeEdgeToEarPx": 45.0,
+   "contact": false
+  },
+  {
+   "frame": 61,
+   "toe": [
+    251.685,
+    206.365
+   ],
+   "earRoot": [
+    251,
+    150
+   ],
+   "toeEdgeToEarPx": 53.01,
+   "contact": false
+  },
+  {
+   "frame": 62,
+   "toe": [
+    251.057,
+    215.895
+   ],
+   "earRoot": [
+    249,
+    149
+   ],
+   "toeEdgeToEarPx": 64.01,
+   "contact": false
+  },
+  {
+   "frame": 63,
+   "toe": [
+    250.355,
+    226.294
+   ],
+   "earRoot": [
+    247,
+    148
+   ],
+   "toeEdgeToEarPx": 75.11,
+   "contact": false
+  },
+  {
+   "frame": 64,
+   "toe": [
+    249.598,
+    237.329
+   ],
+   "earRoot": [
+    245,
+    147
+   ],
+   "toeEdgeToEarPx": 87.14,
+   "contact": false
+  },
+  {
+   "frame": 65,
+   "toe": [
+    248.738,
+    249.213
+   ],
+   "earRoot": [
+    242,
+    146
+   ],
+   "toeEdgeToEarPx": 100.24,
+   "contact": false
+  },
+  {
+   "frame": 66,
+   "toe": [
+    247.663,
+    262.474
+   ],
+   "earRoot": [
+    240,
+    145
+   ],
+   "toeEdgeToEarPx": 114.28,
+   "contact": false
+  },
+  {
+   "frame": 67,
+   "toe": [
+    246.449,
+    276.482
+   ],
+   "earRoot": [
+    238,
+    144
+   ],
+   "toeEdgeToEarPx": 129.31,
+   "contact": false
+  },
+  {
+   "frame": 68,
+   "toe": [
+    245.143,
+    290.94
+   ],
+   "earRoot": [
+    236,
+    143
+   ],
+   "toeEdgeToEarPx": 144.42,
+   "contact": false
+  },
+  {
+   "frame": 69,
+   "toe": [
+    243.789,
+    305.513
+   ],
+   "earRoot": [
+    234,
+    143
+   ],
+   "toeEdgeToEarPx": 158.53,
+   "contact": false
+  },
+  {
+   "frame": 70,
+   "toe": [
+    242.434,
+    319.856
+   ],
+   "earRoot": [
+    233,
+    142
+   ],
+   "toeEdgeToEarPx": 173.49,
+   "contact": false
+  },
+  {
+   "frame": 71,
+   "toe": [
+    241.127,
+    333.557
+   ],
+   "earRoot": [
+    232,
+    142
+   ],
+   "toeEdgeToEarPx": 186.45,
+   "contact": false
+  },
+  {
+   "frame": 72,
+   "toe": [
+    239.932,
+    346.078
+   ],
+   "earRoot": [
+    231,
+    141
+   ],
+   "toeEdgeToEarPx": 199.42,
+   "contact": false
+  },
+  {
+   "frame": 73,
+   "toe": [
+    238.927,
+    356.687
+   ],
+   "earRoot": [
+    230,
+    141
+   ],
+   "toeEdgeToEarPx": 209.47,
+   "contact": false
+  },
+  {
+   "frame": 74,
+   "toe": [
+    237.928,
+    367.416
+   ],
+   "earRoot": [
+    229,
+    141
+   ],
+   "toeEdgeToEarPx": 219.45,
+   "contact": false
+  },
+  {
+   "frame": 75,
+   "toe": [
+    236.816,
+    379.548
+   ],
+   "earRoot": [
+    228,
+    141
+   ],
+   "toeEdgeToEarPx": 229.71,
+   "contact": false
+  },
+  {
+   "frame": 76,
+   "toe": [
+    235.777,
+    391.047
+   ],
+   "earRoot": [
+    227,
+    140
+   ],
+   "toeEdgeToEarPx": 240.6,
+   "contact": false
+  },
+  {
+   "frame": 77,
+   "toe": [
+    234.954,
+    400.269
+   ],
+   "earRoot": [
+    227,
+    140
+   ],
+   "toeEdgeToEarPx": 247.58,
+   "contact": false
+  },
+  {
+   "frame": 78,
+   "toe": [
+    234.408,
+    406.405
+   ],
+   "earRoot": [
+    226,
+    140
+   ],
+   "toeEdgeToEarPx": 252.51,
+   "contact": false
+  },
+  {
+   "frame": 79,
+   "toe": [
+    234.123,
+    409.61
+   ],
+   "earRoot": [
+    224,
+    139
+   ],
+   "toeEdgeToEarPx": 255.63,
+   "contact": false
+  },
+  {
+   "frame": 80,
+   "toe": [
+    234.037,
+    410.567
+   ],
+   "earRoot": [
+    224,
+    139
+   ],
+   "toeEdgeToEarPx": 256.56,
+   "contact": false
+  },
+  {
+   "frame": 81,
+   "toe": [
+    234.037,
+    410.567
+   ],
+   "earRoot": [
+    224,
+    139
+   ],
+   "toeEdgeToEarPx": 256.56,
+   "contact": false
+  },
+  {
+   "frame": 82,
+   "toe": [
+    234.037,
+    410.567
+   ],
+   "earRoot": [
+    224,
+    139
+   ],
+   "toeEdgeToEarPx": 256.56,
+   "contact": false
+  },
+  {
+   "frame": 83,
+   "toe": [
+    234.037,
+    410.567
+   ],
+   "earRoot": [
+    224,
+    139
+   ],
+   "toeEdgeToEarPx": 256.56,
+   "contact": false
+  }
+ ]
+}

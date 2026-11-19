@@ -1,0 +1,45 @@
+{
+  "sourceScene": "paw_lick",
+  "appAction": "lick_paw",
+  "fps": 24,
+  "intervals": 213,
+  "terminalSample": true,
+  "sourceSceneStart": 71,
+  "sourceIntervals": 72,
+  "sourceTemplate": "%05d.webp",
+  "width": 512,
+  "height": 512,
+  "orientation": "left",
+  "entry": "Stand",
+  "exit": "Stand",
+  "appRootTravel": 0,
+  "clippedDogFrames": 0,
+  "camera": "x = rounded tracked dog root x; y = 0, preserving lift and contact trajectories",
+  "propVisibilityBySourceFrame": {},
+  "events": [
+    {
+      "frame": 71,
+      "id": "rest"
+    },
+    {
+      "frame": 82,
+      "id": "lower_muzzle"
+    },
+    {
+      "frame": 90,
+      "id": "lick_1"
+    },
+    {
+      "frame": 102,
+      "id": "lick_2"
+    },
+    {
+      "frame": 117,
+      "id": "lick_3"
+    },
+    {
+      "frame": 128,
+      "id": "rest_chin"
+    }
+  ]
+}

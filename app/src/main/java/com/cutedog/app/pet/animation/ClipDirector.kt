@@ -22,7 +22,8 @@ class ClipDirector(val manifest: ClipManifest) {
     val canonicalClipId: String get() = manifest.canonicalClipId(clipId)!!
     /** A bridge never reports its destination heading before its genuine final pose is reached. */
     val travelHeading: Int get() = manifest.clips.getValue(clipId).let { clip ->
-        if (manifest.travelReady(clip.id) && clip.heading == clip.exitHeading) clip.heading?.sign ?: 0 else 0
+        if (manifest.travelReady(clip.id) && clip.heading == clip.exitHeading)
+            (clip.heading?.sign ?: 0) * (if (clip.backwardTravel) -1 else 1) else 0
     }
     val canTravel: Boolean get() = travelHeading != 0
     val stoppingTravelFraction: Double? get() = manifest.stoppingTravelFraction(clipId, frameIndex)
@@ -32,13 +33,14 @@ class ClipDirector(val manifest: ClipManifest) {
     }
 
     fun request(target: String): Boolean {
-        val actual = manifest.resolveClip(target, requestedHeading) ?: return false
+        val name = manifest.requestableName(target) ?: return false
+        val actual = manifest.resolveClip(name, requestedHeading) ?: return false
         val path = manifest.route(clipId, actual) ?: return false
         route.clear(); route.addAll(path); requestedClip = actual
         revision++
         // Exact variant requests also carry an explicit direction; ordinary interactions retain
         // the next desired travel direction while the graph returns to their authored front pose.
-        manifest.clips.getValue(target).takeIf { it.variantOf != null }?.heading?.let { requestedHeading = it }
+        manifest.clips.getValue(name).takeIf { it.variantOf != null }?.heading?.let { requestedHeading = it }
         releaseCancelledStaticReservation()
         return true
     }
@@ -112,6 +114,9 @@ class ClipDirector(val manifest: ClipManifest) {
         return null
     }
 
+    private fun returnIdle(): String = manifest.clips.getValue(clipId).exitHeading
+        ?.let(manifest::headingIdle) ?: manifest.initialClip
+
     /** Signed, resolution-independent authored travel, consumed only with this exact ready frame. */
     fun projectedTravelFor(next: ClipFrame): Double {
         require(next == peekNext()) { "位移必须与即将提交的真实帧对应" }
@@ -131,10 +136,11 @@ class ClipDirector(val manifest: ClipManifest) {
         val continuation = if (plan.phaseBridge != null) listOf(plan.phaseBridge) + manifest.route(plan.phaseBridge, requestedClip).orEmpty()
             else if (repeatsCycle) listOf(clipId)
             else if (route.firstOrNull() == next.clipId) route.toList()
-            else manifest.route(clipId, manifest.initialClip).orEmpty()
+            else manifest.route(clipId, returnIdle()).orEmpty()
         val firstMoving = continuation.firstOrNull { manifest.travelReady(it) } ?: return null
         val fraction = manifest.stoppingTravelFraction(firstMoving, 0) ?: return null
-        val heading = manifest.clips.getValue(firstMoving).heading!!.sign
+        val moving = manifest.clips.getValue(firstMoving)
+        val heading = moving.heading!!.sign * (if (moving.backwardTravel) -1 else 1)
         // The current inclusive interval may still move on the boundary before the new clip.
         // Adding its magnitude is conservative even when a later turn changes direction.
         return TravelReservation(heading, fraction + kotlin.math.abs(if (plan.phaseBridge != null) 0.0 else projectedTravelFor(next)))
@@ -210,7 +216,7 @@ class ClipDirector(val manifest: ClipManifest) {
         if (route.isNotEmpty() && (frameIndex == clip.frames.lastIndex || safeEarlyExit)) return ref(route.first, 0)
         if (frameIndex < clip.frames.lastIndex) return ref(clipId, frameIndex + 1)
         if (clip.loop) return ref(clipId, 0)
-        val home = manifest.route(clipId, manifest.initialClip) ?: return current
+        val home = manifest.route(clipId, returnIdle()) ?: return current
         return home.firstOrNull()?.let { ref(it, 0) } ?: current
     }
 
@@ -221,7 +227,7 @@ class ClipDirector(val manifest: ClipManifest) {
             if (route.firstOrNull() == next.clipId) route.removeFirst()
             else { // One-shot completed without a new request: retain the entire authored return route.
                 route.clear()
-                route.addAll(manifest.route(clipId, manifest.initialClip).orEmpty().drop(1))
+                route.addAll(manifest.route(clipId, returnIdle()).orEmpty().drop(1))
             }
         }
         clipId = next.clipId; frameIndex = next.index
@@ -245,7 +251,7 @@ class ClipDirector(val manifest: ClipManifest) {
             if (index <= clip.frames.lastIndex) result += clip.frames[index]
             else if (clip.loop && route.isEmpty()) result += clip.frames[index % clip.frames.size]
         }
-        val nextClip = route.firstOrNull() ?: if (!clip.loop) manifest.route(clipId, manifest.initialClip)?.firstOrNull() else null
+        val nextClip = route.firstOrNull() ?: if (!clip.loop) manifest.route(clipId, returnIdle())?.firstOrNull() else null
         nextClip?.let { result.addAll(manifest.clips.getValue(it).frames.take(3)) }
         return result.toList()
     }

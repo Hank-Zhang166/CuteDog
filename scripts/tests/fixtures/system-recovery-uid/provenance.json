@@ -1,0 +1,31 @@
+{
+  "sourceCommit": "b254ef818965a324fa9a9d7d33f265c702921a9c",
+  "runId": "43696406873",
+  "scope": "Exact stdout copied from real CI evidence; verbose id was the original command. Strict numeric id -u input in unit tests is derived, not claimed as a new device execution.",
+  "files": {
+    "api26-package.stdout.txt": {
+      "api": 26,
+      "sourcePath": "docs/device-evidence/current-source-b254ef8/system-recovery/api-26/run-43696406873-attempt1/host/source-b254ef818965a324fa9a9d7d33f265c702921a9c/apk-7e554a5b6d5865d9f395f6f894919a8c7a49f552f4056b777a2c657f7a6c6c88-test-16aaa2690be3cbd944cbdc6b30e401334d335ae254691678be5eaa305c8b9f06/run-bd6f2e2f81d7470aae9c256e628dda58/setup/00015-initial-package.stdout.txt",
+      "bytes": 7610,
+      "sha256": "8df7e37811e424ad862216b64cb7af81d49219d71ee76749c638bb1d025f61ab"
+    },
+    "api26-run-as-id.stdout.txt": {
+      "api": 26,
+      "sourcePath": "docs/device-evidence/current-source-b254ef8/system-recovery/api-26/run-43696406873-attempt1/host/source-b254ef818965a324fa9a9d7d33f265c702921a9c/apk-7e554a5b6d5865d9f395f6f894919a8c7a49f552f4056b777a2c657f7a6c6c88-test-16aaa2690be3cbd944cbdc6b30e401334d335ae254691678be5eaa305c8b9f06/run-bd6f2e2f81d7470aae9c256e628dda58/setup/00014-probe-run-as-capability.stdout.txt",
+      "bytes": 96,
+      "sha256": "6edb37661e0c1d33e49cc105f53cb4d7c35e737f9b42cf99fe600b963687bc11"
+    },
+    "api35-package.stdout.txt": {
+      "api": 35,
+      "sourcePath": "docs/device-evidence/current-source-b254ef8/system-recovery/api-35/run-43696406873-attempt1/host/source-b254ef818965a324fa9a9d7d33f265c702921a9c/apk-c4f3894c7901b3394102a3865c68b7be3e820898ff63ce44b0c8c8ebe2028a3c-test-dbbd036bafbff7f58ae3b14713dbdb72ed83e874d573988064146a9ec4ad7c81/run-ed1faef00dcc41aa836caa6c39040d51/setup/00015-initial-package.stdout.txt",
+      "bytes": 8396,
+      "sha256": "24d7e5ce2392d686964ce84e81cf7935b6cd62c9003f49dba66f81aa5e3e1785"
+    },
+    "api35-run-as-id.stdout.txt": {
+      "api": 35,
+      "sourcePath": "docs/device-evidence/current-source-b254ef8/system-recovery/api-35/run-43696406873-attempt1/host/source-b254ef818965a324fa9a9d7d33f265c702921a9c/apk-c4f3894c7901b3394102a3865c68b7be3e820898ff63ce44b0c8c8ebe2028a3c-test-dbbd036bafbff7f58ae3b14713dbdb72ed83e874d573988064146a9ec4ad7c81/run-ed1faef00dcc41aa836caa6c39040d51/setup/00014-probe-run-as-capability.stdout.txt",
+      "bytes": 325,
+      "sha256": "9533357ced0b22d21f51d91c535fbc1078a6e9b00c726474973bf37b7fe54ab5"
+    }
+  }
+}

@@ -17,12 +17,8 @@ on:
       baseline_sha256:
         description: SHA-256 required when baseline_url is supplied
         required: false
-  push:
-    branches: [main]
-    paths:
-      - 'scripts/ui-validation-request.json'
 permissions:
-  contents: write
+  contents: read
 concurrency:
   group: cutedog-published-apk-ui-evidence
   cancel-in-progress: false
@@ -48,13 +44,7 @@ jobs:
           INPUT_SOURCE_COMMIT: ${{ inputs.source_commit }}
           INPUT_BASELINE_URL: ${{ inputs.baseline_url }}
           INPUT_BASELINE_SHA256: ${{ inputs.baseline_sha256 }}
-          REQUEST_EVENT: ${{ github.event_name }}
-        run: |
-          request=()
-          if [[ "$REQUEST_EVENT" == push ]]; then
-            request=(--request scripts/ui-validation-request.json)
-          fi
-          python3 scripts/prepare-ui-validation.py prepare "${request[@]}" --apk-dir "$RUNNER_TEMP/published-apk" --output "$RUNNER_TEMP/ui-evidence"
+        run: python3 scripts/prepare-ui-validation.py prepare --apk-dir "$RUNNER_TEMP/published-apk" --output "$RUNNER_TEMP/ui-evidence"
       - name: Enable and verify hardware virtualization with retained diagnostics
         run: |
           mkdir -p "$RUNNER_TEMP/ui-evidence/kvm"
@@ -76,23 +66,3 @@ jobs:
           name: published-apk-ui-evidence-${{ github.run_id }}
           path: ${{ runner.temp }}/ui-evidence/
           if-no-files-found: warn
-      - name: Retain evidence on a dedicated branch
-        if: always()
-        env:
-          EVIDENCE_PATH: runs/${{ github.run_id }}-${{ github.run_attempt }}
-        run: |
-          test -f "$RUNNER_TEMP/ui-evidence/release-input.json" || exit 0
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          if git ls-remote --exit-code --heads origin refs/heads/codex/device-evidence >/dev/null; then
-            git fetch origin codex/device-evidence
-            git switch --detach FETCH_HEAD
-            git switch -C codex/device-evidence
-          else
-            git switch --orphan codex/device-evidence
-          fi
-          mkdir -p "$EVIDENCE_PATH"
-          cp -R "$RUNNER_TEMP/ui-evidence/." "$EVIDENCE_PATH/"
-          git add "$EVIDENCE_PATH"
-          git commit -m "[skip ci] Record published APK device evidence for run $GITHUB_RUN_ID"
-          git push origin HEAD:refs/heads/codex/device-evidence

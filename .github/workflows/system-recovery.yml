@@ -283,50 +283,13 @@ jobs:
           print(json.dumps({'api':value['requestedApi'],'status':value['overallStatus'],'bindingErrors':problems,
                             'scenarios':{name:result.get('status') for name,result in value['scenarios'].items()}},indent=2))
           PY
-      - name: Always retain original setup logs and device evidence
+      - name: Verify evidence hashes and source binding before upload
         if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: system-recovery-api-${{ matrix.api-level }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/system-recovery-evidence/
-          if-no-files-found: error
-          retention-days: 90
-  retain:
-    if: ${{ always() }}
-    needs: recover
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    permissions:
-      contents: write
-      actions: read
-    strategy:
-      fail-fast: false
-      matrix:
-        api-level: [26, 35]
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          ref: ${{ github.sha }}
-          sparse-checkout: .github/workflows/system-recovery.yml
-          sparse-checkout-cone-mode: false
-      - uses: actions/download-artifact@v4
-        with:
-          name: system-recovery-api-${{ matrix.api-level }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/retained-system-recovery
-      - name: Append this exact run to its fixed evidence branch
-        env:
-          REQUESTED_API: ${{ matrix.api-level }}
-          SOURCE_COMMIT: ${{ github.sha }}
-          EVIDENCE_BRANCH: codex/system-recovery-evidence-api${{ matrix.api-level }}
-          EVIDENCE_PATH: runs/${{ github.run_id }}-${{ github.run_attempt }}/source-${{ github.sha }}/api-${{ matrix.api-level }}
         run: |
-          set -euo pipefail
-          test -f "$RUNNER_TEMP/retained-system-recovery/ci-summary.json"
-          test -f "$RUNNER_TEMP/retained-system-recovery/CI-EVIDENCE-SHA256.json"
           python3 - <<'PY'
           import hashlib,json,os
           from pathlib import Path
-          root=Path(os.environ['RUNNER_TEMP'])/'retained-system-recovery'
+          root=Path(os.environ['EVIDENCE_ROOT'])
           index=json.loads((root/'CI-EVIDENCE-SHA256.json').read_text())
           summary=json.loads((root/'ci-summary.json').read_text())
           for value in (index,summary):
@@ -343,36 +306,11 @@ jobs:
                   for block in iter(lambda:stream.read(1024*1024),b''):digest.update(block)
               assert path.stat().st_size==expected['bytes'] and digest.hexdigest()==expected['sha256'],name
           PY
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          # Materialize only this new run's path, not all application assets or old raw evidence.
-          git sparse-checkout set --no-cone "/$EVIDENCE_PATH/"
-          # No workflow concurrency queue: GitHub can drop older pending jobs in such a queue.
-          # Retry from the current remote head so every attempt can append without force-push.
-          for attempt in 1 2 3 4 5; do
-            set +e
-            git ls-remote --exit-code --heads origin "refs/heads/$EVIDENCE_BRANCH" > "$RUNNER_TEMP/system-recovery-remote-ref.txt"
-            remote_status=$?
-            set -e
-            if [ "$remote_status" -eq 0 ]; then
-              git fetch --no-tags origin "$EVIDENCE_BRANCH"
-              git switch --detach FETCH_HEAD
-            elif [ "$remote_status" -eq 2 ]; then
-              git switch --orphan "pending-system-recovery-$GITHUB_RUN_ID-$attempt"
-            else
-              echo 'Cannot determine evidence branch state; refusing to create a replacement history.' >&2
-              exit "$remote_status"
-            fi
-            if [ -e "$EVIDENCE_PATH" ]; then
-              # A push may have succeeded even if its network acknowledgement was lost.
-              diff --brief --recursive "$RUNNER_TEMP/retained-system-recovery" "$EVIDENCE_PATH"
-              exit 0
-            fi
-            mkdir -p "$EVIDENCE_PATH"
-            cp -R "$RUNNER_TEMP/retained-system-recovery/." "$EVIDENCE_PATH/"
-            git add -- "$EVIDENCE_PATH"
-            git commit -m "[skip ci] Record API ${{ matrix.api-level }} system recovery for run $GITHUB_RUN_ID attempt $GITHUB_RUN_ATTEMPT"
-            if git push origin "HEAD:refs/heads/$EVIDENCE_BRANCH"; then exit 0; fi
-            if [ "$attempt" -eq 5 ]; then exit 1; fi
-            sleep 2
-          done
+      - name: Always retain original setup logs and device evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: system-recovery-api-${{ matrix.api-level }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/system-recovery-evidence/
+          if-no-files-found: error
+          retention-days: 90

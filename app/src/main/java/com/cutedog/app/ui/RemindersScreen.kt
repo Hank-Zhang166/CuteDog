@@ -2,6 +2,11 @@ package com.cutedog.app.ui
 
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
+import androidx.compose.foundation.focusable
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalView
+import android.view.inputmethod.InputMethodManager
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -40,6 +45,8 @@ internal fun RemindersScreen(reminders: List<Reminder>, onAdd: () -> Unit, onEdi
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
+    val hostView = LocalView.current
+    val resultsFocus = remember { FocusRequester() }
     var search by rememberSaveable { mutableStateOf("") }
     var filter by rememberSaveable { mutableIntStateOf(0) }
     var prioritySort by rememberSaveable { mutableStateOf(false) }
@@ -57,14 +64,21 @@ internal fun RemindersScreen(reminders: List<Reminder>, onAdd: () -> Unit, onEdi
     Column(Modifier.fillMaxSize().padding(horizontal = 24.dp).testTag("reminders_screen")) {
         Spacer(Modifier.height(18.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("把小事记好", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.weight(1f))
+            Text("把小事记好", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.weight(1f).focusRequester(resultsFocus).focusable())
             FilledTonalButton(onClick = onAdd, contentPadding = PaddingValues(horizontal = 16.dp), modifier = Modifier.testTag("reminder_new")) { Text("＋ 新建") }
         }
         LazyColumn(Modifier.weight(1f).testTag("reminders_list"), contentPadding = PaddingValues(top = 14.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             item {
                 OutlinedTextField(search, { search = it }, modifier = Modifier.fillMaxWidth().testTag("reminder_search"), singleLine = true,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                    keyboardActions = KeyboardActions(onSearch = { keyboard?.hide(); focusManager.clearFocus() }),
+                    keyboardActions = KeyboardActions(onSearch = {
+                        // Give keyboard-navigation mode a concrete non-editor destination. On
+                        // Android 8 a cleared focus owner can immediately reselect the text field.
+                        focusManager.clearFocus(force = true)
+                        resultsFocus.requestFocus()
+                        keyboard?.hide()
+                        context.getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(hostView.windowToken, 0)
+                    }),
                     label = { Text("搜索标题或内容") }, shape = RoundedCornerShape(18.dp))
             }
             item {

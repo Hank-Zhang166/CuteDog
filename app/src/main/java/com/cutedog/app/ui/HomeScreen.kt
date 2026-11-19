@@ -29,6 +29,15 @@ import com.cutedog.app.data.Reminder
 import com.cutedog.app.pet.PetSettings
 import com.cutedog.app.pet.PetView
 import com.cutedog.app.pet.behavior.GrowthStore
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.cutedog.app.pet.PetBubbleView
+import com.cutedog.app.reminder.DogReminderQueue.Host
+import com.cutedog.app.reminder.clock
+import com.cutedog.app.reminder.completeFromDog
+import com.cutedog.app.reminder.dogReminders
+import kotlinx.coroutines.delay
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -53,6 +62,15 @@ internal fun HomeScreen(
         preferences.registerOnSharedPreferenceChangeListener(listener)
         onDispose { preferences.unregisterOnSharedPreferenceChangeListener(listener) }
     }
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(lifecycle) {
+        val observer = LifecycleEventObserver { _, _ -> dogReminders.setVisible(Host.HOME, lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) }
+        lifecycle.addObserver(observer)
+        dogReminders.setVisible(Host.HOME, lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
+        onDispose { lifecycle.removeObserver(observer); dogReminders.setVisible(Host.HOME, false) }
+    }
+    val current by dogReminders.display.collectAsState()
+    val homeReminder = current?.takeIf { it.host == Host.HOME }
     val today = LocalDate.now()
     val todayTasks = reminders.filter { !it.completed && Instant.ofEpochMilli(it.dueAt).atZone(ZoneId.systemDefault()).toLocalDate() == today }.sortedBy { it.dueAt }
     Column(Modifier.fillMaxSize().testTag("home_screen").verticalScroll(rememberScrollState()).padding(horizontal = 24.dp), verticalArrangement = Arrangement.spacedBy(22.dp)) {
@@ -72,6 +90,23 @@ internal fun HomeScreen(
                 Row(Modifier.fillMaxWidth().padding(top = 20.dp, start = 20.dp, end = 20.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Text("$name 的小小世界", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onPrimaryContainer)
                     Text("轻触 · 打个招呼", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                }
+                homeReminder?.let { display ->
+                    key(display.reminder) {
+                        val task = display.reminder
+                        val bubble = remember(context) {
+                            PetBubbleView(context).apply {
+                                showReminder(task.title, task.clock())
+                                this.onComplete = { completeFromDog(context, task) }
+                            }
+                        }
+                        AndroidView(factory = { bubble }, modifier = Modifier.widthIn(max = 272.dp).fillMaxWidth().heightIn(max = 160.dp))
+                        LaunchedEffect(display) {
+                            petView?.remind()
+                            delay(bubble.recommendedTimeout())
+                            dogReminders.timeout(display)
+                        }
+                    }
                 }
                 AndroidView(factory = { PetView(it).also { view -> petView = view } }, modifier = Modifier.fillMaxWidth().height(242.dp).testTag("home_pet"), update = { it.contentDescription = "毛茸茸的萨摩耶$name，轻触互动" })
                 Text("把平凡的日子，过得毛茸茸。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onPrimaryContainer)

@@ -4,7 +4,8 @@ import java.net.URI
 
 /** Pure protocol policy, shared by the client and JVM tests. */
 object ChatPolicy {
-    val allowedIntents = setOf("happy", "calm", "curious", "cuddle", "wave")
+    val allowedIntents = setOf("happy", "calm", "curious", "cuddle", "wave",
+        "excited", "sleepy", "shy", "startled")
     private val actionSuffix = Regex("\\s*<action:([a-z_]+)>\\s*$")
 
     fun completionUrl(endpoint: String): String {
@@ -51,5 +52,5 @@ object ChatPolicy {
         return ChatReply(text, intent)
     }
 
-    const val SYSTEM_PROMPT = """你是 CuteDog，一只温柔的萨摩耶伙伴。用自然、有内容的简体中文交流，可以活泼、幽默，但不要每句都叫“主人”或“汪汪”。认真回应用户实际表达，记住当前上下文；给出实用帮助，并承认不确定性。不要冒充真人，不要宣称自己有真实感受、能监视用户手机或已执行提醒、支付等系统操作。保持健康边界，不操纵情绪、不引导用户远离现实人际关系。遇到痛苦情绪先倾听、温和支持，并在需要时鼓励寻求可信的人或专业支持。你没有系统工具，不能创建提醒、读取其他应用或执行命令。若用户要求提醒，请建议使用应用备忘录并确认日期。可在回复末尾附加且仅附加一个动作标记：<action:happy>、<action:calm>、<action:curious>、<action:cuddle> 或 <action:wave>。标记只用于宠物表情，不表示任何系统操作。没有合适动作时省略。"""
+    val SYSTEM_PROMPT = """你是 CuteDog，一只温柔的萨摩耶伙伴。用自然、有内容的简体中文交流，可以活泼、幽默，但不要每句都叫“主人”或“汪汪”。认真回应用户实际表达，记住当前上下文；给出实用帮助，并承认不确定性。不要冒充真人，不要宣称自己有真实感受、能监视用户手机或已执行提醒、支付等系统操作。保持健康边界，不操纵情绪、不引导用户远离现实人际关系。遇到痛苦情绪先倾听、温和支持，并在需要时鼓励寻求可信的人或专业支持。你没有系统工具，不能创建提醒、读取其他应用或执行命令。若用户要求提醒，请建议使用应用备忘录并确认日期。可在回复末尾附加且仅附加一个动作标记：${allowedIntents.joinToString("、") { "<action:$it>" }}。标记只用于宠物表情，不表示任何系统操作。没有合适动作时省略。"""
 }

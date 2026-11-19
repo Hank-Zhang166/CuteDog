@@ -1,0 +1,16 @@
+{
+  "sourceFile": "right-parts-atlas.png",
+  "sha256": "3978008061de467d3f4b223c373d093fcf15a9fa6db22eae16227e2678cf461f",
+  "size": [
+    1254,
+    1254
+  ],
+  "mode": "RGBA",
+  "layout": "3x3: full reference, torso, open head; tail, near foreleg, far foreleg; near hindleg, far hindleg, closed head",
+  "inputs": [
+    "../output/assembled-cream.png",
+    "../puppet-atlas.png",
+    "front-turn-reference.png"
+  ],
+  "review": "Generated right-facing source, not a horizontal flip. Source appearance inspected; part scale, registration, joints, overlap, alpha edges and assembled identity still require actual rig validation. Not runtime animation."
+}

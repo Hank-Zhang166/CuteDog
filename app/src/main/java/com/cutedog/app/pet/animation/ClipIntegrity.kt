@@ -25,7 +25,12 @@ object ClipIntegrity {
     const val MAX_REPORT_BYTES = 512 * 1024
     const val MAX_FRAME_BYTES = 16 * 1024 * 1024
 
-    fun sha256(bytes: ByteArray): String = hex(MessageDigest.getInstance("SHA-256").digest(bytes))
+    fun sha256(bytes: ByteArray): String = sha256(bytes, bytes.size)
+    fun sha256(bytes: ByteArray, count: Int): String {
+        val hash = MessageDigest.getInstance("SHA-256")
+        hash.update(bytes, 0, count)
+        return hex(hash.digest())
+    }
     private fun hex(bytes: ByteArray): String = buildString(bytes.size * 2) {
         val digits = "0123456789abcdef"
         for (byte in bytes) { val value = byte.toInt() and 255; append(digits[value ushr 4]); append(digits[value and 15]) }
@@ -73,7 +78,8 @@ object ClipIntegrity {
             "entryStateSha256" to clip.entryStateSha256, "exitStateSha256" to clip.exitStateSha256,
             "terminalProof" to clip.terminalProof?.let { mapOf("path" to it.path, "sha256" to it.sha256, "stateSha256" to it.stateSha256) },
         )
-        return sha256(canonicalJson(record).toByteArray(Charsets.UTF_8))
+        val signed = if (clip.backwardTravel) record + ("backwardTravel" to true) else record
+        return sha256(canonicalJson(signed).toByteArray(Charsets.UTF_8))
     }
 
     fun readLimited(input: InputStream, limit: Int): ByteArray = input.use {

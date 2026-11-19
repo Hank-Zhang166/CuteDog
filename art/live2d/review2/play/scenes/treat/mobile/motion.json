@@ -1,0 +1,246 @@
+{
+  "sourceScene": "treat",
+  "appAction": "treat",
+  "fps": 24,
+  "intervals": 120,
+  "terminalSample": true,
+  "sourceSceneStart": 0,
+  "sourceIntervals": 120,
+  "sourceTemplate": "%05d.webp",
+  "width": 512,
+  "height": 512,
+  "orientation": "left",
+  "entry": "Stand",
+  "exit": "Stand",
+  "appRootTravel": 0,
+  "clippedDogFrames": 0,
+  "camera": "x = rounded tracked dog root x; y = 0, preserving lift and contact trajectories",
+  "propVisibilityBySourceFrame": {
+    "spoon": {
+      "offscreen": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        49,
+        50,
+        51,
+        52,
+        53,
+        54,
+        55,
+        56,
+        57,
+        58,
+        59
+      ],
+      "partial": [
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41,
+        42,
+        43,
+        44,
+        45,
+        46,
+        47,
+        48
+      ]
+    },
+    "biscuit": {
+      "offscreen": [
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14
+      ],
+      "partial": [
+        15,
+        16
+      ],
+      "whole": [
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41,
+        42,
+        43,
+        44,
+        45,
+        46,
+        47,
+        48,
+        49,
+        50,
+        51,
+        52,
+        53,
+        54,
+        55,
+        56,
+        57,
+        58,
+        59,
+        60,
+        61,
+        62,
+        63,
+        64,
+        65,
+        66,
+        67,
+        68,
+        69,
+        70,
+        71,
+        72,
+        73,
+        74,
+        75,
+        76,
+        77,
+        78,
+        79,
+        80,
+        81,
+        82,
+        83,
+        84,
+        85,
+        86,
+        87,
+        88,
+        89,
+        90,
+        91,
+        92,
+        93,
+        94,
+        95,
+        96,
+        97,
+        98,
+        99
+      ]
+    }
+  },
+  "events": [
+    {
+      "frame": 0,
+      "id": "notice_spoon"
+    },
+    {
+      "frame": 15,
+      "id": "approach"
+    },
+    {
+      "frame": 23,
+      "id": "first_sniff"
+    },
+    {
+      "frame": 31,
+      "id": "second_sniff"
+    },
+    {
+      "frame": 39,
+      "id": "watch_spoon"
+    },
+    {
+      "frame": 43,
+      "id": "toss"
+    },
+    {
+      "frame": 46,
+      "id": "takeoff"
+    },
+    {
+      "frame": 56,
+      "id": "catch"
+    },
+    {
+      "frame": 65,
+      "id": "landing"
+    },
+    {
+      "frame": 71,
+      "id": "chew_1"
+    },
+    {
+      "frame": 80,
+      "id": "chew_2"
+    },
+    {
+      "frame": 89,
+      "id": "chew_3"
+    },
+    {
+      "frame": 98,
+      "id": "swallow"
+    },
+    {
+      "frame": 106,
+      "id": "ask_again"
+    }
+  ]
+}

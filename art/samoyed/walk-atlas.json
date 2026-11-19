@@ -1,0 +1,15 @@
+{
+  "runtimeImage": "app/src/main/assets/pet/walk.png",
+  "sourceImage": "art/samoyed/walk-source.png",
+  "width": 2048,
+  "height": 512,
+  "columns": 4,
+  "rows": 1,
+  "cellWidth": 512,
+  "cellHeight": 512,
+  "direction": "left",
+  "groundY": 429,
+  "phaseDurationMs": 180,
+  "frames": ["contact", "passing", "opposite_contact", "opposite_passing"],
+  "limitations": "Four generated keyframes, not a skeletal rig; phase leg separation and exact gait remain approximate. Blend adjacent frames and preserve world movement continuity."
+}

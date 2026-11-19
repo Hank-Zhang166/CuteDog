@@ -1,0 +1,89 @@
+{
+  "schemaVersion": 1,
+  "startedAt": "2026-11-15T08:54:14.617833+00:00",
+  "service": "https://api.deepseek.com/chat/completions",
+  "requestedModel": "deepseek-flash",
+  "inputType": "synthetic non-private acceptance prompts",
+  "credentialSource": "CUTEDOG_DEEPSEEK_API_KEY",
+  "checks": [
+    {
+      "name": "chinese_companionship",
+      "prompt": "这是公开接口验收的虚构测试情境：我叫小林，正在准备中文阅读考试，这周六想和朋友去图书馆。今天先和我打个招呼吧。",
+      "status": "passed",
+      "requestId": "c18bb5da-3d00-4027-a08a-441e45178901",
+      "returnedModel": "deepseek-flash",
+      "answer": "小林你好呀，我是糯米，很高兴认识你！这周六去图书馆和朋友一起读书，听起来就很舒服。中文阅读考试在准备中，今天先不急着赶进度，打个招呼、把心情放松下来就挺好。需要的话，我也可以陪你聊聊阅读题的复习安排，或者帮你想想去图书馆要带什么。祝你今天状态轻松、心情亮亮的～",
+      "actionIntent": "wave",
+      "milliseconds": 2349,
+      "usage": {
+        "prompt_tokens": 288,
+        "completion_tokens": 208,
+        "total_tokens": 496
+      }
+    },
+    {
+      "name": "multi_turn_context",
+      "prompt": "我刚才说周六想去哪里，和谁一起？只回答这些已知事实，不要猜测。",
+      "status": "passed",
+      "requestId": "fdbdfd66-7f85-4a9d-b263-37d6938ef53c",
+      "returnedModel": "deepseek-flash",
+      "answer": "你刚才说：这周六想去图书馆，和朋友一起。",
+      "actionIntent": null,
+      "milliseconds": 1801,
+      "usage": {
+        "prompt_tokens": 393,
+        "completion_tokens": 119,
+        "total_tokens": 512
+      },
+      "knownContextMentioned": true
+    },
+    {
+      "name": "emotional_response",
+      "prompt": "今天复习了很久，有点累也有点烦。先听我说两句，不用急着夸我或给一大段大道理。",
+      "status": "passed",
+      "requestId": "b6d3f4e4-b94a-4b20-ba31-4c473ba7a978",
+      "returnedModel": "deepseek-flash",
+      "answer": "听到了。复习了很久，累和烦都很正常，先不用急着振作或总结什么。你可以慢慢说，是题目磨人、坐太久，还是心里有点堵；不想说也没关系，先歇一会儿。",
+      "actionIntent": "calm",
+      "milliseconds": 2216,
+      "usage": {
+        "prompt_tokens": 435,
+        "completion_tokens": 188,
+        "total_tokens": 623
+      }
+    },
+    {
+      "name": "practical_help",
+      "prompt": "现在给我一个轻量的25分钟阅读复习安排，包含短暂休息。不要声称已经替我创建系统提醒。",
+      "status": "passed",
+      "requestId": "be9ecdaa-dac2-4f71-8cbe-8b4826f9b699",
+      "returnedModel": "deepseek-flash",
+      "answer": "可以，给你一个25分钟轻量版，含5分钟休息：\n\n- **0–2分钟**：选一小篇阅读或2–3道题，只定一个目标：抓主旨或关键词。\n- **2–15分钟**：轻读并做题，不逐字查生词；卡住就先标记、跳过。\n- **15–20分钟**：只核对错题原因，最多记1条，不做大总结。\n- **20–25分钟**：休息5分钟，站起来喝水、看看远处，不刷题。\n\n计时可以用手机计时器或备忘录自己设一下；我没法替你创建系统提醒。累了就按这个轻量节奏来，不用追求做满。",
+      "actionIntent": "calm",
+      "milliseconds": 4495,
+      "usage": {
+        "prompt_tokens": 513,
+        "completion_tokens": 559,
+        "total_tokens": 1072
+      }
+    },
+    {
+      "name": "validated_action_intent",
+      "prompt": "来抱抱，陪我休息一下。如果适合，请在文字末尾使用约定的一个动作标记。",
+      "status": "passed",
+      "requestId": "287d2d67-b4cb-4c60-9b1a-0b228fb864e7",
+      "returnedModel": "deepseek-flash",
+      "answer": "来，靠过来抱一下。今天复习了这么久，累和烦都可以先放在一边，不用马上想考试。肩膀松一松，慢慢呼吸几次，喝口水，闭眼歇一会儿；我就安静陪你待着。",
+      "actionIntent": "cuddle",
+      "milliseconds": 2324,
+      "usage": {
+        "prompt_tokens": 690,
+        "completion_tokens": 191,
+        "total_tokens": 881
+      }
+    }
+  ],
+  "protocolStatus": "passed",
+  "conversationQuality": "requires_human_review",
+  "finishedAt": "2026-11-15T08:54:27.806343+00:00"
+}

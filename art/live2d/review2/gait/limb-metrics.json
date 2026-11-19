@@ -1,0 +1,3777 @@
+{
+ "fps": 24,
+ "units": "source 512 \u00d7 512 pixels",
+ "procedure": "Length is measured on all three solved segments. Material statistics come from the renderer\u2019s final deformed UV mesh after body relaxation, on original visible opaque texels (alpha > 180). The reference row\u2019s silhouette endpoints verify full fur width. Individual UV edge scale measures redistribution within that row. The measured fur-centerline arc follows the same painted points after deformation. The signed determinant of the actual mesh measures local area; aggregated determinant across the whole marked patch measures apparent size independent of occlusion. Paw singular values measure shape and scale. The exact right-facing reflection has identical lengths, areas and singular values.",
+ "clips": {
+  "walk": {
+   "frames": 25,
+   "supportCountRange": [
+    2,
+    3
+   ],
+   "flightFrames": 0,
+   "legs": {
+    "fn": {
+     "maxBoneLengthErrorPx": 0.0,
+     "rigidAnkleAreaRange": [
+      1.0,
+      1.0
+     ],
+     "rigidAnkleSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "distalIndividualUVEdgeScale": [
+      0.83468,
+      1.2321
+     ],
+     "distalFullSilhouetteWidthRatio": [
+      0.99992,
+      1.00032
+     ],
+     "distalFurCenterlineArcLengthRatio": [
+      0.99989,
+      1.00001
+     ],
+     "materialJointChordMin": [
+      0.86711,
+      0.9906,
+      1.0
+     ],
+     "materialJointChordMax": [
+      1.07507,
+      1.00317,
+      1.0
+     ],
+     "materialPatchAreaFractionRange": [
+      0.9879,
+      0.9998
+     ],
+     "distalTriangleAreaMinMax": [
+      0.87013,
+      1.1731
+     ],
+     "distalTriangleAreaP02P98": [
+      0.9561,
+      1.03686
+     ],
+     "shaftSingularMinMax": [
+      0.64489,
+      1.75399
+     ],
+     "shaftCoreTriangleAreaRange": [
+      0.87013,
+      1.1731
+     ],
+     "pawAreaRange": [
+      1.0,
+      1.0
+     ],
+     "pawSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "foreAftToeRangePx": [
+      -31.05052,
+      24.43988
+     ],
+     "stifleOrElbowXRangePx": [
+      -15.64563,
+      19.8998
+     ],
+     "maxHipOrScapulaGlidePx": 3.105
+    },
+    "ff": {
+     "maxBoneLengthErrorPx": 0.0,
+     "rigidAnkleAreaRange": [
+      1.0,
+      1.0
+     ],
+     "rigidAnkleSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "distalIndividualUVEdgeScale": [
+      0.86919,
+      1.18705
+     ],
+     "distalFullSilhouetteWidthRatio": [
+      0.99993,
+      1.00033
+     ],
+     "distalFurCenterlineArcLengthRatio": [
+      0.99991,
+      1.00005
+     ],
+     "materialJointChordMin": [
+      0.92053,
+      0.9847,
+      1.0
+     ],
+     "materialJointChordMax": [
+      1.0576,
+      1.02312,
+      1.0
+     ],
+     "materialPatchAreaFractionRange": [
+      0.98768,
+      1.00139
+     ],
+     "distalTriangleAreaMinMax": [
+      0.90825,
+      1.10083
+     ],
+     "distalTriangleAreaP02P98": [
+      0.96613,
+      1.02474
+     ],
+     "shaftSingularMinMax": [
+      0.78379,
+      1.29315
+     ],
+     "shaftCoreTriangleAreaRange": [
+      0.90825,
+      1.10083
+     ],
+     "pawAreaRange": [
+      1.0,
+      1.0
+     ],
+     "pawSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "foreAftToeRangePx": [
+      -22.05052,
+      33.43988
+     ],
+     "stifleOrElbowXRangePx": [
+      -15.40048,
+      30.19215
+     ],
+     "maxHipOrScapulaGlidePx": 3.344
+    },
+    "hn": {
+     "maxBoneLengthErrorPx": 0.0,
+     "rigidAnkleAreaRange": [
+      1.0,
+      1.0
+     ],
+     "rigidAnkleSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "distalIndividualUVEdgeScale": [
+      0.82811,
+      1.25791
+     ],
+     "distalFullSilhouetteWidthRatio": [
+      0.99993,
+      1.00027
+     ],
+     "distalFurCenterlineArcLengthRatio": [
+      0.99993,
+      1.00001
+     ],
+     "materialJointChordMin": [
+      0.93373,
+      0.88233,
+      1.0
+     ],
+     "materialJointChordMax": [
+      1.02713,
+      1.06279,
+      1.0
+     ],
+     "materialPatchAreaFractionRange": [
+      0.98568,
+      1.00186
+     ],
+     "distalTriangleAreaMinMax": [
+      0.8697,
+      1.10222
+     ],
+     "distalTriangleAreaP02P98": [
+      0.95327,
+      1.02589
+     ],
+     "shaftSingularMinMax": [
+      0.57406,
+      1.515
+     ],
+     "shaftCoreTriangleAreaRange": [
+      0.8697,
+      1.10222
+     ],
+     "pawAreaRange": [
+      1.0,
+      1.0
+     ],
+     "pawSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "foreAftToeRangePx": [
+      -34.95613,
+      18.96
+     ],
+     "stifleOrElbowXRangePx": [
+      -26.13002,
+      15.36059
+     ],
+     "maxHipOrScapulaGlidePx": 3.496
+    },
+    "hf": {
+     "maxBoneLengthErrorPx": 0.0,
+     "rigidAnkleAreaRange": [
+      1.0,
+      1.0
+     ],
+     "rigidAnkleSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "distalIndividualUVEdgeScale": [
+      0.87617,
+      1.1598
+     ],
+     "distalFullSilhouetteWidthRatio": [
+      0.9999,
+      1.00029
+     ],
+     "distalFurCenterlineArcLengthRatio": [
+      0.99987,
+      1.00009
+     ],
+     "materialJointChordMin": [
+      0.88768,
+      0.99152,
+      0.99997
+     ],
+     "materialJointChordMax": [
+      1.11486,
+      1.00163,
+      1.00001
+     ],
+     "materialPatchAreaFractionRange": [
+      0.98733,
+      1.00544
+     ],
+     "distalTriangleAreaMinMax": [
+      0.91714,
+      1.05989
+     ],
+     "distalTriangleAreaP02P98": [
+      0.95884,
+      1.02615
+     ],
+     "shaftSingularMinMax": [
+      0.7749,
+      1.23757
+     ],
+     "shaftCoreTriangleAreaRange": [
+      0.91714,
+      1.05989
+     ],
+     "pawAreaRange": [
+      1.0,
+      1.0
+     ],
+     "pawSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "foreAftToeRangePx": [
+      -32.95613,
+      20.96
+     ],
+     "stifleOrElbowXRangePx": [
+      -21.8655,
+      15.07071
+     ],
+     "maxHipOrScapulaGlidePx": 3.296
+    }
+   }
+  },
+  "trot": {
+   "frames": 17,
+   "supportCountRange": [
+    2,
+    4
+   ],
+   "flightFrames": 0,
+   "legs": {
+    "fn": {
+     "maxBoneLengthErrorPx": 0.0,
+     "rigidAnkleAreaRange": [
+      1.0,
+      1.0
+     ],
+     "rigidAnkleSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "distalIndividualUVEdgeScale": [
+      0.8346,
+      1.23219
+     ],
+     "distalFullSilhouetteWidthRatio": [
+      0.99992,
+      1.00032
+     ],
+     "distalFurCenterlineArcLengthRatio": [
+      0.99989,
+      1.0
+     ],
+     "materialJointChordMin": [
+      0.83895,
+      0.99104,
+      1.0
+     ],
+     "materialJointChordMax": [
+      1.08411,
+      1.003,
+      1.0
+     ],
+     "materialPatchAreaFractionRange": [
+      0.98732,
+      1.00019
+     ],
+     "distalTriangleAreaMinMax": [
+      0.86217,
+      1.1761
+     ],
+     "distalTriangleAreaP02P98": [
+      0.9578,
+      1.03533
+     ],
+     "shaftSingularMinMax": [
+      0.63284,
+      1.69373
+     ],
+     "shaftCoreTriangleAreaRange": [
+      0.86217,
+      1.1761
+     ],
+     "pawAreaRange": [
+      1.0,
+      1.0
+     ],
+     "pawSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "foreAftToeRangePx": [
+      -31.16176,
+      24.45019
+     ],
+     "stifleOrElbowXRangePx": [
+      -12.90543,
+      19.72983
+     ],
+     "maxHipOrScapulaGlidePx": 3.116
+    },
+    "ff": {
+     "maxBoneLengthErrorPx": 0.0,
+     "rigidAnkleAreaRange": [
+      1.0,
+      1.0
+     ],
+     "rigidAnkleSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "distalIndividualUVEdgeScale": [
+      0.86919,
+      1.18705
+     ],
+     "distalFullSilhouetteWidthRatio": [
+      0.99993,
+      1.00033
+     ],
+     "distalFurCenterlineArcLengthRatio": [
+      0.99993,
+      1.00004
+     ],
+     "materialJointChordMin": [
+      0.89297,
+      0.98183,
+      1.0
+     ],
+     "materialJointChordMax": [
+      1.0669,
+      1.02312,
+      1.0
+     ],
+     "materialPatchAreaFractionRange": [
+      0.98768,
+      1.00085
+     ],
+     "distalTriangleAreaMinMax": [
+      0.89542,
+      1.12099
+     ],
+     "distalTriangleAreaP02P98": [
+      0.967,
+      1.02428
+     ],
+     "shaftSingularMinMax": [
+      0.75622,
+      1.40412
+     ],
+     "shaftCoreTriangleAreaRange": [
+      0.89542,
+      1.12099
+     ],
+     "pawAreaRange": [
+      1.0,
+      1.0
+     ],
+     "pawSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "foreAftToeRangePx": [
+      -22.16176,
+      33.45019
+     ],
+     "stifleOrElbowXRangePx": [
+      -10.35852,
+      29.73391
+     ],
+     "maxHipOrScapulaGlidePx": 3.345
+    },
+    "hn": {
+     "maxBoneLengthErrorPx": 0.0,
+     "rigidAnkleAreaRange": [
+      1.0,
+      1.0
+     ],
+     "rigidAnkleSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "distalIndividualUVEdgeScale": [
+      0.82811,
+      1.25791
+     ],
+     "distalFullSilhouetteWidthRatio": [
+      0.99993,
+      1.00027
+     ],
+     "distalFurCenterlineArcLengthRatio": [
+      0.99992,
+      1.0
+     ],
+     "materialJointChordMin": [
+      0.92419,
+      0.88172,
+      1.0
+     ],
+     "materialJointChordMax": [
+      1.02512,
+      1.05927,
+      1.0
+     ],
+     "materialPatchAreaFractionRange": [
+      0.98568,
+      1.00189
+     ],
+     "distalTriangleAreaMinMax": [
+      0.8795,
+      1.07552
+     ],
+     "distalTriangleAreaP02P98": [
+      0.95192,
+      1.02655
+     ],
+     "shaftSingularMinMax": [
+      0.672,
+      1.35253
+     ],
+     "shaftCoreTriangleAreaRange": [
+      0.8795,
+      1.06841
+     ],
+     "pawAreaRange": [
+      1.0,
+      1.0
+     ],
+     "pawSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "foreAftToeRangePx": [
+      -35.36932,
+      19.09572
+     ],
+     "stifleOrElbowXRangePx": [
+      -25.84304,
+      15.03418
+     ],
+     "maxHipOrScapulaGlidePx": 3.537
+    },
+    "hf": {
+     "maxBoneLengthErrorPx": 0.0,
+     "rigidAnkleAreaRange": [
+      1.0,
+      1.0
+     ],
+     "rigidAnkleSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "distalIndividualUVEdgeScale": [
+      0.87617,
+      1.1598
+     ],
+     "distalFullSilhouetteWidthRatio": [
+      0.9999,
+      1.00029
+     ],
+     "distalFurCenterlineArcLengthRatio": [
+      0.99985,
+      1.0001
+     ],
+     "materialJointChordMin": [
+      0.8715,
+      0.99112,
+      0.99997
+     ],
+     "materialJointChordMax": [
+      1.10776,
+      1.00151,
+      1.00001
+     ],
+     "materialPatchAreaFractionRange": [
+      0.98733,
+      1.00539
+     ],
+     "distalTriangleAreaMinMax": [
+      0.91765,
+      1.06957
+     ],
+     "distalTriangleAreaP02P98": [
+      0.95772,
+      1.02696
+     ],
+     "shaftSingularMinMax": [
+      0.75211,
+      1.22546
+     ],
+     "shaftCoreTriangleAreaRange": [
+      0.91765,
+      1.06957
+     ],
+     "pawAreaRange": [
+      1.0,
+      1.0
+     ],
+     "pawSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "foreAftToeRangePx": [
+      -33.36932,
+      21.09572
+     ],
+     "stifleOrElbowXRangePx": [
+      -21.9342,
+      14.59814
+     ],
+     "maxHipOrScapulaGlidePx": 3.337
+    }
+   }
+  },
+  "chase": {
+   "frames": 31,
+   "supportCountRange": [
+    2,
+    4
+   ],
+   "flightFrames": 0,
+   "legs": {
+    "fn": {
+     "maxBoneLengthErrorPx": 0.0,
+     "rigidAnkleAreaRange": [
+      1.0,
+      1.0
+     ],
+     "rigidAnkleSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "distalIndividualUVEdgeScale": [
+      0.83511,
+      1.23052
+     ],
+     "distalFullSilhouetteWidthRatio": [
+      0.99992,
+      1.00032
+     ],
+     "distalFurCenterlineArcLengthRatio": [
+      0.99992,
+      1.00001
+     ],
+     "materialJointChordMin": [
+      0.87283,
+      0.99249,
+      1.0
+     ],
+     "materialJointChordMax": [
+      1.05097,
+      1.00334,
+      1.0
+     ],
+     "materialPatchAreaFractionRange": [
+      0.99169,
+      1.0
+     ],
+     "distalTriangleAreaMinMax": [
+      0.85876,
+      1.17473
+     ],
+     "distalTriangleAreaP02P98": [
+      0.95911,
+      1.03416
+     ],
+     "shaftSingularMinMax": [
+      0.64323,
+      1.74859
+     ],
+     "shaftCoreTriangleAreaRange": [
+      0.85876,
+      1.17473
+     ],
+     "pawAreaRange": [
+      1.0,
+      1.0
+     ],
+     "pawSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "foreAftToeRangePx": [
+      -18.20255,
+      17.75046
+     ],
+     "stifleOrElbowXRangePx": [
+      -8.74858,
+      18.55785
+     ],
+     "maxHipOrScapulaGlidePx": 1.82
+    },
+    "ff": {
+     "maxBoneLengthErrorPx": 0.0,
+     "rigidAnkleAreaRange": [
+      1.0,
+      1.0
+     ],
+     "rigidAnkleSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "distalIndividualUVEdgeScale": [
+      0.86919,
+      1.18705
+     ],
+     "distalFullSilhouetteWidthRatio": [
+      0.99993,
+      1.00033
+     ],
+     "distalFurCenterlineArcLengthRatio": [
+      0.99996,
+      1.00005
+     ],
+     "materialJointChordMin": [
+      0.87168,
+      0.98318,
+      1.0
+     ],
+     "materialJointChordMax": [
+      1.0199,
+      1.01635,
+      1.0
+     ],
+     "materialPatchAreaFractionRange": [
+      0.9929,
+      1.00082
+     ],
+     "distalTriangleAreaMinMax": [
+      0.88634,
+      1.12794
+     ],
+     "distalTriangleAreaP02P98": [
+      0.96701,
+      1.0223
+     ],
+     "shaftSingularMinMax": [
+      0.779,
+      1.38209
+     ],
+     "shaftCoreTriangleAreaRange": [
+      0.88634,
+      1.12794
+     ],
+     "pawAreaRange": [
+      1.0,
+      1.0
+     ],
+     "pawSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "foreAftToeRangePx": [
+      -19.52311,
+      19.28034
+     ],
+     "stifleOrElbowXRangePx": [
+      -9.7925,
+      26.59655
+     ],
+     "maxHipOrScapulaGlidePx": 1.952
+    },
+    "hn": {
+     "maxBoneLengthErrorPx": 0.0,
+     "rigidAnkleAreaRange": [
+      1.0,
+      1.0
+     ],
+     "rigidAnkleSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "distalIndividualUVEdgeScale": [
+      0.82811,
+      1.22601
+     ],
+     "distalFullSilhouetteWidthRatio": [
+      0.99993,
+      1.00027
+     ],
+     "distalFurCenterlineArcLengthRatio": [
+      0.99997,
+      1.00001
+     ],
+     "materialJointChordMin": [
+      0.90668,
+      0.92773,
+      1.0
+     ],
+     "materialJointChordMax": [
+      1.00571,
+      1.06247,
+      1.0
+     ],
+     "materialPatchAreaFractionRange": [
+      0.98568,
+      1.00169
+     ],
+     "distalTriangleAreaMinMax": [
+      0.89042,
+      1.07552
+     ],
+     "distalTriangleAreaP02P98": [
+      0.95153,
+      1.01299
+     ],
+     "shaftSingularMinMax": [
+      0.6953,
+      1.28062
+     ],
+     "shaftCoreTriangleAreaRange": [
+      0.89042,
+      1.04003
+     ],
+     "pawAreaRange": [
+      1.0,
+      1.0
+     ],
+     "pawSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "foreAftToeRangePx": [
+      -18.8813,
+      17.89898
+     ],
+     "stifleOrElbowXRangePx": [
+      -15.1735,
+      14.78527
+     ],
+     "maxHipOrScapulaGlidePx": 1.888
+    },
+    "hf": {
+     "maxBoneLengthErrorPx": 0.0,
+     "rigidAnkleAreaRange": [
+      1.0,
+      1.0
+     ],
+     "rigidAnkleSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "distalIndividualUVEdgeScale": [
+      0.87617,
+      1.15783
+     ],
+     "distalFullSilhouetteWidthRatio": [
+      0.99993,
+      1.00029
+     ],
+     "distalFurCenterlineArcLengthRatio": [
+      0.99984,
+      1.00009
+     ],
+     "materialJointChordMin": [
+      0.86403,
+      0.99508,
+      0.99997
+     ],
+     "materialJointChordMax": [
+      1.03678,
+      1.00154,
+      1.00001
+     ],
+     "materialPatchAreaFractionRange": [
+      0.98733,
+      1.00475
+     ],
+     "distalTriangleAreaMinMax": [
+      0.91393,
+      1.06495
+     ],
+     "distalTriangleAreaP02P98": [
+      0.95831,
+      1.02515
+     ],
+     "shaftSingularMinMax": [
+      0.75519,
+      1.24457
+     ],
+     "shaftCoreTriangleAreaRange": [
+      0.91393,
+      1.06495
+     ],
+     "pawAreaRange": [
+      1.0,
+      1.0
+     ],
+     "pawSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "foreAftToeRangePx": [
+      -18.84733,
+      19.26813
+     ],
+     "stifleOrElbowXRangePx": [
+      -13.28384,
+      13.28856
+     ],
+     "maxHipOrScapulaGlidePx": 1.927
+    }
+   }
+  },
+  "walk_start": {
+   "frames": 18,
+   "supportCountRange": [
+    2,
+    4
+   ],
+   "flightFrames": 0,
+   "legs": {
+    "fn": {
+     "maxBoneLengthErrorPx": 0.0,
+     "rigidAnkleAreaRange": [
+      1.0,
+      1.0
+     ],
+     "rigidAnkleSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "distalIndividualUVEdgeScale": [
+      0.83782,
+      1.23183
+     ],
+     "distalFullSilhouetteWidthRatio": [
+      0.99996,
+      1.00032
+     ],
+     "distalFurCenterlineArcLengthRatio": [
+      0.9999,
+      1.0
+     ],
+     "materialJointChordMin": [
+      0.99972,
+      0.9906,
+      1.0
+     ],
+     "materialJointChordMax": [
+      1.05947,
+      1.0,
+      1.0
+     ],
+     "materialPatchAreaFractionRange": [
+      0.98904,
+      1.0
+     ],
+     "distalTriangleAreaMinMax": [
+      0.88036,
+      1.06637
+     ],
+     "distalTriangleAreaP02P98": [
+      0.96064,
+      1.01447
+     ],
+     "shaftSingularMinMax": [
+      0.69372,
+      1.29883
+     ],
+     "shaftCoreTriangleAreaRange": [
+      0.88036,
+      1.06637
+     ],
+     "pawAreaRange": [
+      1.0,
+      1.0
+     ],
+     "pawSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "foreAftToeRangePx": [
+      0.0,
+      23.20186
+     ],
+     "stifleOrElbowXRangePx": [
+      0.0,
+      19.8998
+     ],
+     "maxHipOrScapulaGlidePx": 2.32
+    },
+    "ff": {
+     "maxBoneLengthErrorPx": 0.0,
+     "rigidAnkleAreaRange": [
+      1.0,
+      1.0
+     ],
+     "rigidAnkleSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "distalIndividualUVEdgeScale": [
+      0.87751,
+      1.16871
+     ],
+     "distalFullSilhouetteWidthRatio": [
+      0.99993,
+      1.00026
+     ],
+     "distalFurCenterlineArcLengthRatio": [
+      0.99998,
+      1.00001
+     ],
+     "materialJointChordMin": [
+      0.96135,
+      0.9882,
+      1.0
+     ],
+     "materialJointChordMax": [
+      1.00123,
+      1.00686,
+      1.0
+     ],
+     "materialPatchAreaFractionRange": [
+      0.99573,
+      1.00123
+     ],
+     "distalTriangleAreaMinMax": [
+      0.92027,
+      1.0886
+     ],
+     "distalTriangleAreaP02P98": [
+      0.97632,
+      1.02649
+     ],
+     "shaftSingularMinMax": [
+      0.82906,
+      1.28786
+     ],
+     "shaftCoreTriangleAreaRange": [
+      0.92027,
+      1.0886
+     ],
+     "pawAreaRange": [
+      1.0,
+      1.0
+     ],
+     "pawSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "foreAftToeRangePx": [
+      -17.23112,
+      1.71
+     ],
+     "stifleOrElbowXRangePx": [
+      -12.44435,
+      6.20391
+     ],
+     "maxHipOrScapulaGlidePx": 1.723
+    },
+    "hn": {
+     "maxBoneLengthErrorPx": 0.0,
+     "rigidAnkleAreaRange": [
+      1.0,
+      1.0
+     ],
+     "rigidAnkleSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "distalIndividualUVEdgeScale": [
+      0.8363,
+      1.25791
+     ],
+     "distalFullSilhouetteWidthRatio": [
+      0.99993,
+      1.00027
+     ],
+     "distalFurCenterlineArcLengthRatio": [
+      0.99993,
+      1.0
+     ],
+     "materialJointChordMin": [
+      0.95307,
+      0.88438,
+      1.0
+     ],
+     "materialJointChordMax": [
+      1.02713,
+      1.02286,
+      1.0
+     ],
+     "materialPatchAreaFractionRange": [
+      0.98616,
+      1.00151
+     ],
+     "distalTriangleAreaMinMax": [
+      0.88809,
+      1.07552
+     ],
+     "distalTriangleAreaP02P98": [
+      0.95805,
+      1.01484
+     ],
+     "shaftSingularMinMax": [
+      0.62648,
+      1.41758
+     ],
+     "shaftCoreTriangleAreaRange": [
+      0.88809,
+      1.06516
+     ],
+     "pawAreaRange": [
+      1.0,
+      1.0
+     ],
+     "pawSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "foreAftToeRangePx": [
+      -34.82416,
+      8.05138
+     ],
+     "stifleOrElbowXRangePx": [
+      -25.72077,
+      5.8742
+     ],
+     "maxHipOrScapulaGlidePx": 3.482
+    },
+    "hf": {
+     "maxBoneLengthErrorPx": 0.0,
+     "rigidAnkleAreaRange": [
+      1.0,
+      1.0
+     ],
+     "rigidAnkleSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "distalIndividualUVEdgeScale": [
+      0.88375,
+      1.15388
+     ],
+     "distalFullSilhouetteWidthRatio": [
+      0.99991,
+      1.00025
+     ],
+     "distalFurCenterlineArcLengthRatio": [
+      0.99987,
+      1.0001
+     ],
+     "materialJointChordMin": [
+      0.98053,
+      0.99519,
+      0.99997
+     ],
+     "materialJointChordMax": [
+      1.0465,
+      1.00038,
+      1.00001
+     ],
+     "materialPatchAreaFractionRange": [
+      0.99509,
+      1.00508
+     ],
+     "distalTriangleAreaMinMax": [
+      0.92726,
+      1.05702
+     ],
+     "distalTriangleAreaP02P98": [
+      0.97696,
+      1.02896
+     ],
+     "shaftSingularMinMax": [
+      0.80377,
+      1.22729
+     ],
+     "shaftCoreTriangleAreaRange": [
+      0.96336,
+      1.05702
+     ],
+     "pawAreaRange": [
+      1.0,
+      1.0
+     ],
+     "pawSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "foreAftToeRangePx": [
+      -18.93275,
+      8.04
+     ],
+     "stifleOrElbowXRangePx": [
+      -11.753,
+      4.29917
+     ],
+     "maxHipOrScapulaGlidePx": 1.893
+    }
+   }
+  },
+  "walk_stop": {
+   "frames": 18,
+   "supportCountRange": [
+    2,
+    4
+   ],
+   "flightFrames": 0,
+   "legs": {
+    "fn": {
+     "maxBoneLengthErrorPx": 0.0,
+     "rigidAnkleAreaRange": [
+      1.0,
+      1.0
+     ],
+     "rigidAnkleSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "distalIndividualUVEdgeScale": [
+      0.83511,
+      1.22758
+     ],
+     "distalFullSilhouetteWidthRatio": [
+      0.99992,
+      1.00032
+     ],
+     "distalFurCenterlineArcLengthRatio": [
+      0.99995,
+      1.0
+     ],
+     "materialJointChordMin": [
+      0.88548,
+      0.9906,
+      1.0
+     ],
+     "materialJointChordMax": [
+      1.00045,
+      1.00334,
+      1.0
+     ],
+     "materialPatchAreaFractionRange": [
+      0.9917,
+      1.00002
+     ],
+     "distalTriangleAreaMinMax": [
+      0.86865,
+      1.17083
+     ],
+     "distalTriangleAreaP02P98": [
+      0.96002,
+      1.03501
+     ],
+     "shaftSingularMinMax": [
+      0.64104,
+      1.74346
+     ],
+     "shaftCoreTriangleAreaRange": [
+      0.86865,
+      1.17083
+     ],
+     "pawAreaRange": [
+      1.0,
+      1.0
+     ],
+     "pawSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "foreAftToeRangePx": [
+      -21.73013,
+      15.71401
+     ],
+     "stifleOrElbowXRangePx": [
+      -8.26277,
+      19.8998
+     ],
+     "maxHipOrScapulaGlidePx": 2.173
+    },
+    "ff": {
+     "maxBoneLengthErrorPx": 0.0,
+     "rigidAnkleAreaRange": [
+      1.0,
+      1.0
+     ],
+     "rigidAnkleSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "distalIndividualUVEdgeScale": [
+      0.87315,
+      1.15493
+     ],
+     "distalFullSilhouetteWidthRatio": [
+      0.99995,
+      1.00025
+     ],
+     "distalFurCenterlineArcLengthRatio": [
+      0.99991,
+      1.0
+     ],
+     "materialJointChordMin": [
+      0.98726,
+      1.0,
+      1.0
+     ],
+     "materialJointChordMax": [
+      1.05149,
+      1.01617,
+      1.0
+     ],
+     "materialPatchAreaFractionRange": [
+      0.9919,
+      1.0
+     ],
+     "distalTriangleAreaMinMax": [
+      0.90727,
+      1.06701
+     ],
+     "distalTriangleAreaP02P98": [
+      0.967,
+      1.01789
+     ],
+     "shaftSingularMinMax": [
+      0.79317,
+      1.18368
+     ],
+     "shaftCoreTriangleAreaRange": [
+      0.90727,
+      1.06701
+     ],
+     "pawAreaRange": [
+      1.0,
+      1.0
+     ],
+     "pawSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "foreAftToeRangePx": [
+      -0.02155,
+      27.8895
+     ],
+     "stifleOrElbowXRangePx": [
+      0.0,
+      15.90256
+     ],
+     "maxHipOrScapulaGlidePx": 2.789
+    },
+    "hn": {
+     "maxBoneLengthErrorPx": 0.0,
+     "rigidAnkleAreaRange": [
+      1.0,
+      1.0
+     ],
+     "rigidAnkleSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "distalIndividualUVEdgeScale": [
+      0.83779,
+      1.25791
+     ],
+     "distalFullSilhouetteWidthRatio": [
+      0.99993,
+      1.00025
+     ],
+     "distalFurCenterlineArcLengthRatio": [
+      0.99995,
+      1.0
+     ],
+     "materialJointChordMin": [
+      0.99788,
+      0.89858,
+      1.0
+     ],
+     "materialJointChordMax": [
+      1.02713,
+      1.0,
+      1.0
+     ],
+     "materialPatchAreaFractionRange": [
+      1.0,
+      1.00188
+     ],
+     "distalTriangleAreaMinMax": [
+      0.93703,
+      1.07552
+     ],
+     "distalTriangleAreaP02P98": [
+      0.98863,
+      1.02297
+     ],
+     "shaftSingularMinMax": [
+      0.76777,
+      1.39214
+     ],
+     "shaftCoreTriangleAreaRange": [
+      0.93703,
+      1.06884
+     ],
+     "pawAreaRange": [
+      1.0,
+      1.0
+     ],
+     "pawSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "foreAftToeRangePx": [
+      -32.96,
+      0.0
+     ],
+     "stifleOrElbowXRangePx": [
+      -23.12497,
+      0.0
+     ],
+     "maxHipOrScapulaGlidePx": 3.296
+    },
+    "hf": {
+     "maxBoneLengthErrorPx": 0.0,
+     "rigidAnkleAreaRange": [
+      1.0,
+      1.0
+     ],
+     "rigidAnkleSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "distalIndividualUVEdgeScale": [
+      0.8787,
+      1.15371
+     ],
+     "distalFullSilhouetteWidthRatio": [
+      0.99997,
+      1.00029
+     ],
+     "distalFurCenterlineArcLengthRatio": [
+      0.99987,
+      1.00001
+     ],
+     "materialJointChordMin": [
+      0.9265,
+      0.99871,
+      0.99998
+     ],
+     "materialJointChordMax": [
+      1.00022,
+      1.00159,
+      1.00001
+     ],
+     "materialPatchAreaFractionRange": [
+      0.98735,
+      1.00077
+     ],
+     "distalTriangleAreaMinMax": [
+      0.89911,
+      1.04352
+     ],
+     "distalTriangleAreaP02P98": [
+      0.95764,
+      1.01038
+     ],
+     "shaftSingularMinMax": [
+      0.75396,
+      1.19253
+     ],
+     "shaftCoreTriangleAreaRange": [
+      0.89911,
+      1.04352
+     ],
+     "pawAreaRange": [
+      1.0,
+      1.0
+     ],
+     "pawSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "foreAftToeRangePx": [
+      -5.71322,
+      19.92796
+     ],
+     "stifleOrElbowXRangePx": [
+      -5.47739,
+      14.66907
+     ],
+     "maxHipOrScapulaGlidePx": 1.993
+    }
+   }
+  },
+  "walk_to_trot": {
+   "frames": 19,
+   "supportCountRange": [
+    1,
+    3
+   ],
+   "flightFrames": 0,
+   "legs": {
+    "fn": {
+     "maxBoneLengthErrorPx": 0.0,
+     "rigidAnkleAreaRange": [
+      1.0,
+      1.0
+     ],
+     "rigidAnkleSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "distalIndividualUVEdgeScale": [
+      0.83469,
+      1.22769
+     ],
+     "distalFullSilhouetteWidthRatio": [
+      0.99992,
+      1.00032
+     ],
+     "distalFurCenterlineArcLengthRatio": [
+      0.99995,
+      1.00001
+     ],
+     "materialJointChordMin": [
+      0.87664,
+      0.9906,
+      1.0
+     ],
+     "materialJointChordMax": [
+      1.02977,
+      1.003,
+      1.0
+     ],
+     "materialPatchAreaFractionRange": [
+      0.9917,
+      1.00019
+     ],
+     "distalTriangleAreaMinMax": [
+      0.85773,
+      1.17503
+     ],
+     "distalTriangleAreaP02P98": [
+      0.95904,
+      1.03686
+     ],
+     "shaftSingularMinMax": [
+      0.67766,
+      1.67792
+     ],
+     "shaftCoreTriangleAreaRange": [
+      0.85773,
+      1.17503
+     ],
+     "pawAreaRange": [
+      1.0,
+      1.0
+     ],
+     "pawSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "foreAftToeRangePx": [
+      -30.79157,
+      15.71401
+     ],
+     "stifleOrElbowXRangePx": [
+      -12.48384,
+      19.8998
+     ],
+     "maxHipOrScapulaGlidePx": 3.079
+    },
+    "ff": {
+     "maxBoneLengthErrorPx": 0.0,
+     "rigidAnkleAreaRange": [
+      1.0,
+      1.0
+     ],
+     "rigidAnkleSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "distalIndividualUVEdgeScale": [
+      0.86919,
+      1.18705
+     ],
+     "distalFullSilhouetteWidthRatio": [
+      0.99993,
+      1.00033
+     ],
+     "distalFurCenterlineArcLengthRatio": [
+      0.99991,
+      1.00005
+     ],
+     "materialJointChordMin": [
+      0.89663,
+      0.98237,
+      1.0
+     ],
+     "materialJointChordMax": [
+      1.0599,
+      1.02403,
+      1.0
+     ],
+     "materialPatchAreaFractionRange": [
+      0.98874,
+      0.99995
+     ],
+     "distalTriangleAreaMinMax": [
+      0.89211,
+      1.11383
+     ],
+     "distalTriangleAreaP02P98": [
+      0.96435,
+      1.023
+     ],
+     "shaftSingularMinMax": [
+      0.76805,
+      1.37945
+     ],
+     "shaftCoreTriangleAreaRange": [
+      0.89211,
+      1.11383
+     ],
+     "pawAreaRange": [
+      1.0,
+      1.0
+     ],
+     "pawSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "foreAftToeRangePx": [
+      -21.71526,
+      34.64615
+     ],
+     "stifleOrElbowXRangePx": [
+      -10.35852,
+      27.27046
+     ],
+     "maxHipOrScapulaGlidePx": 3.465
+    },
+    "hn": {
+     "maxBoneLengthErrorPx": 0.0,
+     "rigidAnkleAreaRange": [
+      1.0,
+      1.0
+     ],
+     "rigidAnkleSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "distalIndividualUVEdgeScale": [
+      0.82811,
+      1.25791
+     ],
+     "distalFullSilhouetteWidthRatio": [
+      0.99993,
+      1.00027
+     ],
+     "distalFurCenterlineArcLengthRatio": [
+      0.99992,
+      1.0
+     ],
+     "materialJointChordMin": [
+      0.9283,
+      0.88063,
+      1.0
+     ],
+     "materialJointChordMax": [
+      1.02713,
+      1.04867,
+      1.0
+     ],
+     "materialPatchAreaFractionRange": [
+      0.98568,
+      1.00185
+     ],
+     "distalTriangleAreaMinMax": [
+      0.87821,
+      1.07552
+     ],
+     "distalTriangleAreaP02P98": [
+      0.95437,
+      1.02591
+     ],
+     "shaftSingularMinMax": [
+      0.65899,
+      1.34373
+     ],
+     "shaftCoreTriangleAreaRange": [
+      0.87821,
+      1.06004
+     ],
+     "pawAreaRange": [
+      1.0,
+      1.0
+     ],
+     "pawSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "foreAftToeRangePx": [
+      -35.53756,
+      16.02628
+     ],
+     "stifleOrElbowXRangePx": [
+      -25.92838,
+      12.38695
+     ],
+     "maxHipOrScapulaGlidePx": 3.554
+    },
+    "hf": {
+     "maxBoneLengthErrorPx": 0.0,
+     "rigidAnkleAreaRange": [
+      1.0,
+      1.0
+     ],
+     "rigidAnkleSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "distalIndividualUVEdgeScale": [
+      0.87617,
+      1.1598
+     ],
+     "distalFullSilhouetteWidthRatio": [
+      0.9999,
+      1.00029
+     ],
+     "distalFurCenterlineArcLengthRatio": [
+      0.99984,
+      1.0001
+     ],
+     "materialJointChordMin": [
+      0.88951,
+      0.99161,
+      0.99997
+     ],
+     "materialJointChordMax": [
+      1.10737,
+      1.0015,
+      1.00001
+     ],
+     "materialPatchAreaFractionRange": [
+      0.98733,
+      1.00543
+     ],
+     "distalTriangleAreaMinMax": [
+      0.92112,
+      1.05205
+     ],
+     "distalTriangleAreaP02P98": [
+      0.95786,
+      1.0258
+     ],
+     "shaftSingularMinMax": [
+      0.78933,
+      1.21211
+     ],
+     "shaftCoreTriangleAreaRange": [
+      0.92891,
+      1.05205
+     ],
+     "pawAreaRange": [
+      1.0,
+      1.0
+     ],
+     "pawSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "foreAftToeRangePx": [
+      -32.45267,
+      20.39243
+     ],
+     "stifleOrElbowXRangePx": [
+      -21.57339,
+      14.49376
+     ],
+     "maxHipOrScapulaGlidePx": 3.245
+    }
+   }
+  },
+  "trot_to_walk": {
+   "frames": 19,
+   "supportCountRange": [
+    1,
+    4
+   ],
+   "flightFrames": 0,
+   "legs": {
+    "fn": {
+     "maxBoneLengthErrorPx": 0.0,
+     "rigidAnkleAreaRange": [
+      1.0,
+      1.0
+     ],
+     "rigidAnkleSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "distalIndividualUVEdgeScale": [
+      0.83518,
+      1.2321
+     ],
+     "distalFullSilhouetteWidthRatio": [
+      0.99992,
+      1.00032
+     ],
+     "distalFurCenterlineArcLengthRatio": [
+      0.99989,
+      1.0
+     ],
+     "materialJointChordMin": [
+      0.88326,
+      0.9906,
+      1.0
+     ],
+     "materialJointChordMax": [
+      1.07744,
+      1.00291,
+      1.0
+     ],
+     "materialPatchAreaFractionRange": [
+      0.98797,
+      1.00005
+     ],
+     "distalTriangleAreaMinMax": [
+      0.88748,
+      1.13475
+     ],
+     "distalTriangleAreaP02P98": [
+      0.95402,
+      1.03415
+     ],
+     "shaftSingularMinMax": [
+      0.67844,
+      1.63703
+     ],
+     "shaftCoreTriangleAreaRange": [
+      0.88748,
+      1.13475
+     ],
+     "pawAreaRange": [
+      1.0,
+      1.0
+     ],
+     "pawSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "foreAftToeRangePx": [
+      -18.90499,
+      23.49777
+     ],
+     "stifleOrElbowXRangePx": [
+      -4.01358,
+      19.8998
+     ],
+     "maxHipOrScapulaGlidePx": 2.35
+    },
+    "ff": {
+     "maxBoneLengthErrorPx": 0.0,
+     "rigidAnkleAreaRange": [
+      1.0,
+      1.0
+     ],
+     "rigidAnkleSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "distalIndividualUVEdgeScale": [
+      0.86919,
+      1.18705
+     ],
+     "distalFullSilhouetteWidthRatio": [
+      0.99993,
+      1.00033
+     ],
+     "distalFurCenterlineArcLengthRatio": [
+      0.99999,
+      1.0
+     ],
+     "materialJointChordMin": [
+      0.96027,
+      0.98637,
+      1.0
+     ],
+     "materialJointChordMax": [
+      1.00652,
+      1.01748,
+      1.0
+     ],
+     "materialPatchAreaFractionRange": [
+      0.99254,
+      1.00073
+     ],
+     "distalTriangleAreaMinMax": [
+      0.92747,
+      1.07207
+     ],
+     "distalTriangleAreaP02P98": [
+      0.96884,
+      1.02649
+     ],
+     "shaftSingularMinMax": [
+      0.81214,
+      1.24099
+     ],
+     "shaftCoreTriangleAreaRange": [
+      0.92747,
+      1.07207
+     ],
+     "pawAreaRange": [
+      1.0,
+      1.0
+     ],
+     "pawSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "foreAftToeRangePx": [
+      -20.22972,
+      20.50928
+     ],
+     "stifleOrElbowXRangePx": [
+      -10.35852,
+      20.87548
+     ],
+     "maxHipOrScapulaGlidePx": 2.051
+    },
+    "hn": {
+     "maxBoneLengthErrorPx": 0.0,
+     "rigidAnkleAreaRange": [
+      1.0,
+      1.0
+     ],
+     "rigidAnkleSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "distalIndividualUVEdgeScale": [
+      0.82811,
+      1.25791
+     ],
+     "distalFullSilhouetteWidthRatio": [
+      0.99993,
+      1.00027
+     ],
+     "distalFurCenterlineArcLengthRatio": [
+      0.99995,
+      1.0
+     ],
+     "materialJointChordMin": [
+      0.93847,
+      0.88319,
+      1.0
+     ],
+     "materialJointChordMax": [
+      1.02713,
+      1.06686,
+      1.0
+     ],
+     "materialPatchAreaFractionRange": [
+      0.98568,
+      1.00189
+     ],
+     "distalTriangleAreaMinMax": [
+      0.91361,
+      1.07552
+     ],
+     "distalTriangleAreaP02P98": [
+      0.95234,
+      1.02477
+     ],
+     "shaftSingularMinMax": [
+      0.7388,
+      1.33322
+     ],
+     "shaftCoreTriangleAreaRange": [
+      0.93631,
+      1.05561
+     ],
+     "pawAreaRange": [
+      1.0,
+      1.0
+     ],
+     "pawSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "foreAftToeRangePx": [
+      -34.88398,
+      20.36327
+     ],
+     "stifleOrElbowXRangePx": [
+      -25.86786,
+      16.68826
+     ],
+     "maxHipOrScapulaGlidePx": 3.488
+    },
+    "hf": {
+     "maxBoneLengthErrorPx": 0.0,
+     "rigidAnkleAreaRange": [
+      1.0,
+      1.0
+     ],
+     "rigidAnkleSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "distalIndividualUVEdgeScale": [
+      0.87617,
+      1.1598
+     ],
+     "distalFullSilhouetteWidthRatio": [
+      0.9999,
+      1.00029
+     ],
+     "distalFurCenterlineArcLengthRatio": [
+      0.99987,
+      1.00009
+     ],
+     "materialJointChordMin": [
+      0.8743,
+      0.99077,
+      0.99997
+     ],
+     "materialJointChordMax": [
+      1.12408,
+      1.00151,
+      1.00001
+     ],
+     "materialPatchAreaFractionRange": [
+      0.98733,
+      1.00545
+     ],
+     "distalTriangleAreaMinMax": [
+      0.91044,
+      1.05773
+     ],
+     "distalTriangleAreaP02P98": [
+      0.95874,
+      1.02626
+     ],
+     "shaftSingularMinMax": [
+      0.77459,
+      1.22551
+     ],
+     "shaftCoreTriangleAreaRange": [
+      0.91044,
+      1.05773
+     ],
+     "pawAreaRange": [
+      1.0,
+      1.0
+     ],
+     "pawSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "foreAftToeRangePx": [
+      -34.55728,
+      20.98014
+     ],
+     "stifleOrElbowXRangePx": [
+      -22.07341,
+      14.53384
+     ],
+     "maxHipOrScapulaGlidePx": 3.456
+    }
+   }
+  },
+  "backstep": {
+   "frames": 23,
+   "supportCountRange": [
+    2,
+    4
+   ],
+   "flightFrames": 0,
+   "legs": {
+    "fn": {
+     "maxBoneLengthErrorPx": 0.0,
+     "rigidAnkleAreaRange": [
+      1.0,
+      1.0
+     ],
+     "rigidAnkleSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "distalIndividualUVEdgeScale": [
+      0.83469,
+      1.2242
+     ],
+     "distalFullSilhouetteWidthRatio": [
+      0.99992,
+      1.00029
+     ],
+     "distalFurCenterlineArcLengthRatio": [
+      0.99999,
+      1.00001
+     ],
+     "materialJointChordMin": [
+      0.89128,
+      0.9981,
+      1.0
+     ],
+     "materialJointChordMax": [
+      1.0,
+      1.00332,
+      1.0
+     ],
+     "materialPatchAreaFractionRange": [
+      0.99647,
+      1.00015
+     ],
+     "distalTriangleAreaMinMax": [
+      0.86227,
+      1.1739
+     ],
+     "distalTriangleAreaP02P98": [
+      0.96275,
+      1.03554
+     ],
+     "shaftSingularMinMax": [
+      0.65698,
+      1.72615
+     ],
+     "shaftCoreTriangleAreaRange": [
+      0.86227,
+      1.1739
+     ],
+     "pawAreaRange": [
+      1.0,
+      1.0
+     ],
+     "pawSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "foreAftToeRangePx": [
+      -34.06185,
+      0.1147
+     ],
+     "stifleOrElbowXRangePx": [
+      -16.77348,
+      5.0877
+     ],
+     "maxHipOrScapulaGlidePx": 3.406
+    },
+    "ff": {
+     "maxBoneLengthErrorPx": 0.0,
+     "rigidAnkleAreaRange": [
+      1.0,
+      1.0
+     ],
+     "rigidAnkleSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "distalIndividualUVEdgeScale": [
+      0.86919,
+      1.18705
+     ],
+     "distalFullSilhouetteWidthRatio": [
+      0.99997,
+      1.00033
+     ],
+     "distalFurCenterlineArcLengthRatio": [
+      0.99994,
+      1.0
+     ],
+     "materialJointChordMin": [
+      0.97197,
+      0.99865,
+      1.0
+     ],
+     "materialJointChordMax": [
+      1.03645,
+      1.01781,
+      1.0
+     ],
+     "materialPatchAreaFractionRange": [
+      0.99272,
+      1.00035
+     ],
+     "distalTriangleAreaMinMax": [
+      0.919,
+      1.05481
+     ],
+     "distalTriangleAreaP02P98": [
+      0.9685,
+      1.01736
+     ],
+     "shaftSingularMinMax": [
+      0.81214,
+      1.18747
+     ],
+     "shaftCoreTriangleAreaRange": [
+      0.919,
+      1.05481
+     ],
+     "pawAreaRange": [
+      1.0,
+      1.0
+     ],
+     "pawSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "foreAftToeRangePx": [
+      -2.99524,
+      27.55095
+     ],
+     "stifleOrElbowXRangePx": [
+      -1.64783,
+      25.47735
+     ],
+     "maxHipOrScapulaGlidePx": 2.755
+    },
+    "hn": {
+     "maxBoneLengthErrorPx": 0.0,
+     "rigidAnkleAreaRange": [
+      1.0,
+      1.0
+     ],
+     "rigidAnkleSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "distalIndividualUVEdgeScale": [
+      0.82811,
+      1.22601
+     ],
+     "distalFullSilhouetteWidthRatio": [
+      0.99999,
+      1.00027
+     ],
+     "distalFurCenterlineArcLengthRatio": [
+      0.99999,
+      1.00001
+     ],
+     "materialJointChordMin": [
+      0.9075,
+      0.99791,
+      1.0
+     ],
+     "materialJointChordMax": [
+      1.00816,
+      1.11972,
+      1.0
+     ],
+     "materialPatchAreaFractionRange": [
+      0.98568,
+      1.0
+     ],
+     "distalTriangleAreaMinMax": [
+      0.89974,
+      1.0456
+     ],
+     "distalTriangleAreaP02P98": [
+      0.94937,
+      1.01056
+     ],
+     "shaftSingularMinMax": [
+      0.71246,
+      1.27654
+     ],
+     "shaftCoreTriangleAreaRange": [
+      0.93297,
+      1.02483
+     ],
+     "pawAreaRange": [
+      1.0,
+      1.0
+     ],
+     "pawSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "foreAftToeRangePx": [
+      -0.12478,
+      33.38323
+     ],
+     "stifleOrElbowXRangePx": [
+      -0.36583,
+      28.41354
+     ],
+     "maxHipOrScapulaGlidePx": 3.338
+    },
+    "hf": {
+     "maxBoneLengthErrorPx": 0.0,
+     "rigidAnkleAreaRange": [
+      1.0,
+      1.0
+     ],
+     "rigidAnkleSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "distalIndividualUVEdgeScale": [
+      0.87702,
+      1.15979
+     ],
+     "distalFullSilhouetteWidthRatio": [
+      0.9999,
+      1.00025
+     ],
+     "distalFurCenterlineArcLengthRatio": [
+      0.99983,
+      1.00009
+     ],
+     "materialJointChordMin": [
+      0.93901,
+      0.99261,
+      0.99997
+     ],
+     "materialJointChordMax": [
+      1.08605,
+      1.00024,
+      1.00001
+     ],
+     "materialPatchAreaFractionRange": [
+      0.9911,
+      1.00549
+     ],
+     "distalTriangleAreaMinMax": [
+      0.89822,
+      1.08431
+     ],
+     "distalTriangleAreaP02P98": [
+      0.96508,
+      1.02626
+     ],
+     "shaftSingularMinMax": [
+      0.70682,
+      1.27078
+     ],
+     "shaftCoreTriangleAreaRange": [
+      0.89822,
+      1.08431
+     ],
+     "pawAreaRange": [
+      1.0,
+      1.0
+     ],
+     "pawSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "foreAftToeRangePx": [
+      -28.73297,
+      2.55248
+     ],
+     "stifleOrElbowXRangePx": [
+      -18.24678,
+      1.23997
+     ],
+     "maxHipOrScapulaGlidePx": 2.873
+    }
+   }
+  },
+  "slip_recover": {
+   "frames": 29,
+   "supportCountRange": [
+    2,
+    4
+   ],
+   "flightFrames": 0,
+   "legs": {
+    "fn": {
+     "maxBoneLengthErrorPx": 0.0,
+     "rigidAnkleAreaRange": [
+      1.0,
+      1.0
+     ],
+     "rigidAnkleSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "distalIndividualUVEdgeScale": [
+      0.83752,
+      1.2321
+     ],
+     "distalFullSilhouetteWidthRatio": [
+      0.99992,
+      1.00032
+     ],
+     "distalFurCenterlineArcLengthRatio": [
+      0.99989,
+      1.0
+     ],
+     "materialJointChordMin": [
+      0.95614,
+      0.98443,
+      1.0
+     ],
+     "materialJointChordMax": [
+      1.05544,
+      1.0018,
+      1.0
+     ],
+     "materialPatchAreaFractionRange": [
+      0.98708,
+      1.0
+     ],
+     "distalTriangleAreaMinMax": [
+      0.90066,
+      1.07207
+     ],
+     "distalTriangleAreaP02P98": [
+      0.95961,
+      1.02155
+     ],
+     "shaftSingularMinMax": [
+      0.74733,
+      1.30771
+     ],
+     "shaftCoreTriangleAreaRange": [
+      0.90066,
+      1.07207
+     ],
+     "pawAreaRange": [
+      1.0,
+      1.0
+     ],
+     "pawSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "foreAftToeRangePx": [
+      0.0,
+      27.0
+     ],
+     "stifleOrElbowXRangePx": [
+      0.0,
+      20.75934
+     ],
+     "maxHipOrScapulaGlidePx": 2.7
+    },
+    "ff": {
+     "maxBoneLengthErrorPx": 0.0,
+     "rigidAnkleAreaRange": [
+      1.0,
+      1.0
+     ],
+     "rigidAnkleSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "distalIndividualUVEdgeScale": [
+      0.86919,
+      1.18705
+     ],
+     "distalFullSilhouetteWidthRatio": [
+      0.99997,
+      1.00033
+     ],
+     "distalFurCenterlineArcLengthRatio": [
+      0.99998,
+      1.0
+     ],
+     "materialJointChordMin": [
+      0.96981,
+      1.0,
+      1.0
+     ],
+     "materialJointChordMax": [
+      1.0,
+      1.01848,
+      1.0
+     ],
+     "materialPatchAreaFractionRange": [
+      0.99225,
+      1.0
+     ],
+     "distalTriangleAreaMinMax": [
+      0.93645,
+      1.06093
+     ],
+     "distalTriangleAreaP02P98": [
+      0.96727,
+      1.02435
+     ],
+     "shaftSingularMinMax": [
+      0.81214,
+      1.19045
+     ],
+     "shaftCoreTriangleAreaRange": [
+      0.93645,
+      1.06093
+     ],
+     "pawAreaRange": [
+      1.0,
+      1.0
+     ],
+     "pawSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "foreAftToeRangePx": [
+      0.0,
+      21.06
+     ],
+     "stifleOrElbowXRangePx": [
+      0.0,
+      24.31312
+     ],
+     "maxHipOrScapulaGlidePx": 2.106
+    },
+    "hn": {
+     "maxBoneLengthErrorPx": 0.0,
+     "rigidAnkleAreaRange": [
+      1.0,
+      1.0
+     ],
+     "rigidAnkleSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "distalIndividualUVEdgeScale": [
+      0.82811,
+      1.22601
+     ],
+     "distalFullSilhouetteWidthRatio": [
+      0.99993,
+      1.00027
+     ],
+     "distalFurCenterlineArcLengthRatio": [
+      0.99996,
+      1.0
+     ],
+     "materialJointChordMin": [
+      0.93162,
+      0.92934,
+      1.0
+     ],
+     "materialJointChordMax": [
+      1.0,
+      1.0,
+      1.0
+     ],
+     "materialPatchAreaFractionRange": [
+      0.98568,
+      1.00166
+     ],
+     "distalTriangleAreaMinMax": [
+      0.86185,
+      1.07552
+     ],
+     "distalTriangleAreaP02P98": [
+      0.95904,
+      1.01432
+     ],
+     "shaftSingularMinMax": [
+      0.62826,
+      1.37181
+     ],
+     "shaftCoreTriangleAreaRange": [
+      0.86185,
+      1.06054
+     ],
+     "pawAreaRange": [
+      1.0,
+      1.0
+     ],
+     "pawSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "foreAftToeRangePx": [
+      -22.0,
+      0.0
+     ],
+     "stifleOrElbowXRangePx": [
+      -21.14653,
+      0.0
+     ],
+     "maxHipOrScapulaGlidePx": 2.2
+    },
+    "hf": {
+     "maxBoneLengthErrorPx": 0.0,
+     "rigidAnkleAreaRange": [
+      1.0,
+      1.0
+     ],
+     "rigidAnkleSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "distalIndividualUVEdgeScale": [
+      0.87617,
+      1.15783
+     ],
+     "distalFullSilhouetteWidthRatio": [
+      0.99996,
+      1.00029
+     ],
+     "distalFurCenterlineArcLengthRatio": [
+      0.99986,
+      1.0
+     ],
+     "materialJointChordMin": [
+      0.8189,
+      0.99455,
+      1.0
+     ],
+     "materialJointChordMax": [
+      1.0,
+      1.00001,
+      1.00001
+     ],
+     "materialPatchAreaFractionRange": [
+      0.98733,
+      1.00007
+     ],
+     "distalTriangleAreaMinMax": [
+      0.91692,
+      1.06144
+     ],
+     "distalTriangleAreaP02P98": [
+      0.96269,
+      1.01161
+     ],
+     "shaftSingularMinMax": [
+      0.75025,
+      1.22215
+     ],
+     "shaftCoreTriangleAreaRange": [
+      0.91692,
+      1.06144
+     ],
+     "pawAreaRange": [
+      1.0,
+      1.0
+     ],
+     "pawSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "foreAftToeRangePx": [
+      -17.16,
+      0.0
+     ],
+     "stifleOrElbowXRangePx": [
+      -18.08994,
+      0.0
+     ],
+     "maxHipOrScapulaGlidePx": 1.716
+    }
+   }
+  },
+  "forward_hop": {
+   "frames": 31,
+   "supportCountRange": [
+    0,
+    4
+   ],
+   "flightFrames": 11,
+   "legs": {
+    "fn": {
+     "maxBoneLengthErrorPx": 0.0,
+     "rigidAnkleAreaRange": [
+      1.0,
+      1.0
+     ],
+     "rigidAnkleSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "distalIndividualUVEdgeScale": [
+      0.83752,
+      1.23053
+     ],
+     "distalFullSilhouetteWidthRatio": [
+      0.99992,
+      1.00032
+     ],
+     "distalFurCenterlineArcLengthRatio": [
+      0.9999,
+      1.0
+     ],
+     "materialJointChordMin": [
+      0.91935,
+      0.9952,
+      1.0
+     ],
+     "materialJointChordMax": [
+      1.01447,
+      1.00269,
+      1.0
+     ],
+     "materialPatchAreaFractionRange": [
+      0.9865,
+      1.0
+     ],
+     "distalTriangleAreaMinMax": [
+      0.8674,
+      1.15657
+     ],
+     "distalTriangleAreaP02P98": [
+      0.95875,
+      1.02816
+     ],
+     "shaftSingularMinMax": [
+      0.70162,
+      1.60353
+     ],
+     "shaftCoreTriangleAreaRange": [
+      0.8674,
+      1.15657
+     ],
+     "pawAreaRange": [
+      1.0,
+      1.0
+     ],
+     "pawSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "foreAftToeRangePx": [
+      -19.0,
+      0.0
+     ],
+     "stifleOrElbowXRangePx": [
+      -2.97733,
+      11.31995
+     ],
+     "maxHipOrScapulaGlidePx": 1.9
+    },
+    "ff": {
+     "maxBoneLengthErrorPx": 0.0,
+     "rigidAnkleAreaRange": [
+      1.0,
+      1.0
+     ],
+     "rigidAnkleSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "distalIndividualUVEdgeScale": [
+      0.86919,
+      1.18705
+     ],
+     "distalFullSilhouetteWidthRatio": [
+      0.99991,
+      1.00033
+     ],
+     "distalFurCenterlineArcLengthRatio": [
+      0.99994,
+      1.00004
+     ],
+     "materialJointChordMin": [
+      0.91468,
+      0.99328,
+      1.0
+     ],
+     "materialJointChordMax": [
+      1.01937,
+      1.02312,
+      1.0
+     ],
+     "materialPatchAreaFractionRange": [
+      0.98768,
+      1.0
+     ],
+     "distalTriangleAreaMinMax": [
+      0.89294,
+      1.12308
+     ],
+     "distalTriangleAreaP02P98": [
+      0.967,
+      1.02432
+     ],
+     "shaftSingularMinMax": [
+      0.77801,
+      1.37707
+     ],
+     "shaftCoreTriangleAreaRange": [
+      0.89294,
+      1.12308
+     ],
+     "pawAreaRange": [
+      1.0,
+      1.0
+     ],
+     "pawSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "foreAftToeRangePx": [
+      -19.0,
+      0.0
+     ],
+     "stifleOrElbowXRangePx": [
+      -7.14013,
+      15.09027
+     ],
+     "maxHipOrScapulaGlidePx": 1.9
+    },
+    "hn": {
+     "maxBoneLengthErrorPx": 0.0,
+     "rigidAnkleAreaRange": [
+      1.0,
+      1.0
+     ],
+     "rigidAnkleSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "distalIndividualUVEdgeScale": [
+      0.82811,
+      1.22601
+     ],
+     "distalFullSilhouetteWidthRatio": [
+      0.99996,
+      1.00027
+     ],
+     "distalFurCenterlineArcLengthRatio": [
+      0.99993,
+      1.00001
+     ],
+     "materialJointChordMin": [
+      0.83975,
+      0.96964,
+      1.0
+     ],
+     "materialJointChordMax": [
+      1.01392,
+      1.08821,
+      1.0
+     ],
+     "materialPatchAreaFractionRange": [
+      0.98568,
+      1.00093
+     ],
+     "distalTriangleAreaMinMax": [
+      0.89524,
+      1.09109
+     ],
+     "distalTriangleAreaP02P98": [
+      0.94897,
+      1.01379
+     ],
+     "shaftSingularMinMax": [
+      0.5998,
+      1.49255
+     ],
+     "shaftCoreTriangleAreaRange": [
+      0.89524,
+      1.09109
+     ],
+     "pawAreaRange": [
+      1.0,
+      1.0
+     ],
+     "pawSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "foreAftToeRangePx": [
+      0.0,
+      13.0
+     ],
+     "stifleOrElbowXRangePx": [
+      -5.8302,
+      29.44706
+     ],
+     "maxHipOrScapulaGlidePx": 1.3
+    },
+    "hf": {
+     "maxBoneLengthErrorPx": 0.0,
+     "rigidAnkleAreaRange": [
+      1.0,
+      1.0
+     ],
+     "rigidAnkleSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "distalIndividualUVEdgeScale": [
+      0.87617,
+      1.15783
+     ],
+     "distalFullSilhouetteWidthRatio": [
+      0.99996,
+      1.00029
+     ],
+     "distalFurCenterlineArcLengthRatio": [
+      0.99985,
+      1.00006
+     ],
+     "materialJointChordMin": [
+      0.79675,
+      0.99769,
+      0.99997
+     ],
+     "materialJointChordMax": [
+      1.00899,
+      1.0008,
+      1.00001
+     ],
+     "materialPatchAreaFractionRange": [
+      0.98733,
+      1.00084
+     ],
+     "distalTriangleAreaMinMax": [
+      0.91771,
+      1.0719
+     ],
+     "distalTriangleAreaP02P98": [
+      0.95738,
+      1.015
+     ],
+     "shaftSingularMinMax": [
+      0.73874,
+      1.25843
+     ],
+     "shaftCoreTriangleAreaRange": [
+      0.92097,
+      1.0719
+     ],
+     "pawAreaRange": [
+      1.0,
+      1.0
+     ],
+     "pawSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "foreAftToeRangePx": [
+      0.0,
+      13.0
+     ],
+     "stifleOrElbowXRangePx": [
+      -6.42235,
+      25.10136
+     ],
+     "maxHipOrScapulaGlidePx": 1.3
+    }
+   }
+  },
+  "pause": {
+   "frames": 27,
+   "supportCountRange": [
+    3,
+    4
+   ],
+   "flightFrames": 0,
+   "legs": {
+    "fn": {
+     "maxBoneLengthErrorPx": 0.0,
+     "rigidAnkleAreaRange": [
+      1.0,
+      1.0
+     ],
+     "rigidAnkleSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "distalIndividualUVEdgeScale": [
+      0.83752,
+      1.22425
+     ],
+     "distalFullSilhouetteWidthRatio": [
+      0.99995,
+      1.00029
+     ],
+     "distalFurCenterlineArcLengthRatio": [
+      0.99997,
+      1.0
+     ],
+     "materialJointChordMin": [
+      0.96558,
+      0.99694,
+      1.0
+     ],
+     "materialJointChordMax": [
+      1.0,
+      1.00134,
+      1.0
+     ],
+     "materialPatchAreaFractionRange": [
+      0.99469,
+      1.0
+     ],
+     "distalTriangleAreaMinMax": [
+      0.95478,
+      1.04821
+     ],
+     "distalTriangleAreaP02P98": [
+      0.96553,
+      1.01215
+     ],
+     "shaftSingularMinMax": [
+      0.78241,
+      1.23168
+     ],
+     "shaftCoreTriangleAreaRange": [
+      0.95478,
+      1.04447
+     ],
+     "pawAreaRange": [
+      1.0,
+      1.0
+     ],
+     "pawSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "foreAftToeRangePx": [
+      -4.45808,
+      0.0
+     ],
+     "stifleOrElbowXRangePx": [
+      0.0,
+      10.53277
+     ],
+     "maxHipOrScapulaGlidePx": 0.446
+    },
+    "ff": {
+     "maxBoneLengthErrorPx": 0.0,
+     "rigidAnkleAreaRange": [
+      1.0,
+      1.0
+     ],
+     "rigidAnkleSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "distalIndividualUVEdgeScale": [
+      0.88842,
+      1.12547
+     ],
+     "distalFullSilhouetteWidthRatio": [
+      0.99998,
+      1.00025
+     ],
+     "distalFurCenterlineArcLengthRatio": [
+      0.99999,
+      1.0
+     ],
+     "materialJointChordMin": [
+      0.98056,
+      1.0,
+      1.0
+     ],
+     "materialJointChordMax": [
+      1.0,
+      1.00608,
+      1.0
+     ],
+     "materialPatchAreaFractionRange": [
+      0.99708,
+      1.0
+     ],
+     "distalTriangleAreaMinMax": [
+      0.94188,
+      1.05669
+     ],
+     "distalTriangleAreaP02P98": [
+      0.98231,
+      1.02041
+     ],
+     "shaftSingularMinMax": [
+      0.84405,
+      1.18625
+     ],
+     "shaftCoreTriangleAreaRange": [
+      0.94188,
+      1.05669
+     ],
+     "pawAreaRange": [
+      1.0,
+      1.0
+     ],
+     "pawSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "foreAftToeRangePx": [
+      0.0,
+      0.0
+     ],
+     "stifleOrElbowXRangePx": [
+      0.0,
+      4.01337
+     ],
+     "maxHipOrScapulaGlidePx": 0.0
+    },
+    "hn": {
+     "maxBoneLengthErrorPx": 0.0,
+     "rigidAnkleAreaRange": [
+      1.0,
+      1.0
+     ],
+     "rigidAnkleSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "distalIndividualUVEdgeScale": [
+      0.93088,
+      1.07102
+     ],
+     "distalFullSilhouetteWidthRatio": [
+      1.0,
+      1.00009
+     ],
+     "distalFurCenterlineArcLengthRatio": [
+      0.99999,
+      1.0
+     ],
+     "materialJointChordMin": [
+      0.99709,
+      1.0,
+      1.0
+     ],
+     "materialJointChordMax": [
+      1.00149,
+      1.00716,
+      1.0
+     ],
+     "materialPatchAreaFractionRange": [
+      0.99882,
+      1.0
+     ],
+     "distalTriangleAreaMinMax": [
+      0.97041,
+      1.01559
+     ],
+     "distalTriangleAreaP02P98": [
+      0.9913,
+      1.00239
+     ],
+     "shaftSingularMinMax": [
+      0.87217,
+      1.11264
+     ],
+     "shaftCoreTriangleAreaRange": [
+      0.99597,
+      1.00236
+     ],
+     "pawAreaRange": [
+      1.0,
+      1.0
+     ],
+     "pawSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "foreAftToeRangePx": [
+      0.0,
+      0.0
+     ],
+     "stifleOrElbowXRangePx": [
+      -1.09908,
+      0.0
+     ],
+     "maxHipOrScapulaGlidePx": 0.0
+    },
+    "hf": {
+     "maxBoneLengthErrorPx": 0.0,
+     "rigidAnkleAreaRange": [
+      1.0,
+      1.0
+     ],
+     "rigidAnkleSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "distalIndividualUVEdgeScale": [
+      0.94414,
+      1.05906
+     ],
+     "distalFullSilhouetteWidthRatio": [
+      0.99998,
+      1.00004
+     ],
+     "distalFurCenterlineArcLengthRatio": [
+      0.99994,
+      1.0
+     ],
+     "materialJointChordMin": [
+      0.99431,
+      1.0,
+      1.0
+     ],
+     "materialJointChordMax": [
+      1.00001,
+      1.00029,
+      1.00001
+     ],
+     "materialPatchAreaFractionRange": [
+      0.99839,
+      1.0
+     ],
+     "distalTriangleAreaMinMax": [
+      0.95714,
+      1.03192
+     ],
+     "distalTriangleAreaP02P98": [
+      0.98168,
+      1.00317
+     ],
+     "shaftSingularMinMax": [
+      0.90413,
+      1.07881
+     ],
+     "shaftCoreTriangleAreaRange": [
+      0.99655,
+      1.00325
+     ],
+     "pawAreaRange": [
+      1.0,
+      1.0
+     ],
+     "pawSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "foreAftToeRangePx": [
+      0.0,
+      0.0
+     ],
+     "stifleOrElbowXRangePx": [
+      -1.54645,
+      0.0
+     ],
+     "maxHipOrScapulaGlidePx": 0.0
+    }
+   }
+  },
+  "land": {
+   "frames": 15,
+   "supportCountRange": [
+    0,
+    4
+   ],
+   "flightFrames": 5,
+   "legs": {
+    "fn": {
+     "maxBoneLengthErrorPx": 0.0,
+     "rigidAnkleAreaRange": [
+      1.0,
+      1.0
+     ],
+     "rigidAnkleSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "distalIndividualUVEdgeScale": [
+      0.83752,
+      1.23053
+     ],
+     "distalFullSilhouetteWidthRatio": [
+      0.99992,
+      1.00032
+     ],
+     "distalFurCenterlineArcLengthRatio": [
+      0.9999,
+      1.0
+     ],
+     "materialJointChordMin": [
+      0.91935,
+      0.99555,
+      1.0
+     ],
+     "materialJointChordMax": [
+      1.01447,
+      1.00217,
+      1.0
+     ],
+     "materialPatchAreaFractionRange": [
+      0.9865,
+      1.0
+     ],
+     "distalTriangleAreaMinMax": [
+      0.8674,
+      1.15657
+     ],
+     "distalTriangleAreaP02P98": [
+      0.95783,
+      1.03348
+     ],
+     "shaftSingularMinMax": [
+      0.70162,
+      1.60353
+     ],
+     "shaftCoreTriangleAreaRange": [
+      0.8674,
+      1.15657
+     ],
+     "pawAreaRange": [
+      1.0,
+      1.0
+     ],
+     "pawSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "foreAftToeRangePx": [
+      -17.72724,
+      0.0
+     ],
+     "stifleOrElbowXRangePx": [
+      -2.97733,
+      11.31995
+     ],
+     "maxHipOrScapulaGlidePx": 1.773
+    },
+    "ff": {
+     "maxBoneLengthErrorPx": 0.0,
+     "rigidAnkleAreaRange": [
+      1.0,
+      1.0
+     ],
+     "rigidAnkleSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "distalIndividualUVEdgeScale": [
+      0.86919,
+      1.18705
+     ],
+     "distalFullSilhouetteWidthRatio": [
+      0.99991,
+      1.00033
+     ],
+     "distalFurCenterlineArcLengthRatio": [
+      0.99994,
+      1.00004
+     ],
+     "materialJointChordMin": [
+      0.91468,
+      0.99328,
+      1.0
+     ],
+     "materialJointChordMax": [
+      1.01937,
+      1.02312,
+      1.0
+     ],
+     "materialPatchAreaFractionRange": [
+      0.98768,
+      1.0
+     ],
+     "distalTriangleAreaMinMax": [
+      0.89294,
+      1.12308
+     ],
+     "distalTriangleAreaP02P98": [
+      0.96672,
+      1.02471
+     ],
+     "shaftSingularMinMax": [
+      0.77801,
+      1.37707
+     ],
+     "shaftCoreTriangleAreaRange": [
+      0.89294,
+      1.12308
+     ],
+     "pawAreaRange": [
+      1.0,
+      1.0
+     ],
+     "pawSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "foreAftToeRangePx": [
+      -17.72724,
+      0.0
+     ],
+     "stifleOrElbowXRangePx": [
+      -7.14013,
+      15.09027
+     ],
+     "maxHipOrScapulaGlidePx": 1.773
+    },
+    "hn": {
+     "maxBoneLengthErrorPx": 0.0,
+     "rigidAnkleAreaRange": [
+      1.0,
+      1.0
+     ],
+     "rigidAnkleSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "distalIndividualUVEdgeScale": [
+      0.82811,
+      1.22601
+     ],
+     "distalFullSilhouetteWidthRatio": [
+      0.99996,
+      1.00027
+     ],
+     "distalFurCenterlineArcLengthRatio": [
+      0.99998,
+      1.00001
+     ],
+     "materialJointChordMin": [
+      0.83975,
+      0.97529,
+      1.0
+     ],
+     "materialJointChordMax": [
+      1.01101,
+      1.08171,
+      1.0
+     ],
+     "materialPatchAreaFractionRange": [
+      0.98568,
+      1.00093
+     ],
+     "distalTriangleAreaMinMax": [
+      0.91641,
+      1.04661
+     ],
+     "distalTriangleAreaP02P98": [
+      0.94998,
+      1.01147
+     ],
+     "shaftSingularMinMax": [
+      0.74855,
+      1.25861
+     ],
+     "shaftCoreTriangleAreaRange": [
+      0.94214,
+      1.0166
+     ],
+     "pawAreaRange": [
+      1.0,
+      1.0
+     ],
+     "pawSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "foreAftToeRangePx": [
+      0.0,
+      12.12917
+     ],
+     "stifleOrElbowXRangePx": [
+      -3.11221,
+      25.50742
+     ],
+     "maxHipOrScapulaGlidePx": 1.213
+    },
+    "hf": {
+     "maxBoneLengthErrorPx": 0.0,
+     "rigidAnkleAreaRange": [
+      1.0,
+      1.0
+     ],
+     "rigidAnkleSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "distalIndividualUVEdgeScale": [
+      0.87617,
+      1.15783
+     ],
+     "distalFullSilhouetteWidthRatio": [
+      0.99996,
+      1.00029
+     ],
+     "distalFurCenterlineArcLengthRatio": [
+      0.99985,
+      1.00006
+     ],
+     "materialJointChordMin": [
+      0.79675,
+      0.99772,
+      0.99997
+     ],
+     "materialJointChordMax": [
+      1.00899,
+      1.0001,
+      1.00001
+     ],
+     "materialPatchAreaFractionRange": [
+      0.98733,
+      1.00084
+     ],
+     "distalTriangleAreaMinMax": [
+      0.9307,
+      1.04565
+     ],
+     "distalTriangleAreaP02P98": [
+      0.95798,
+      1.01328
+     ],
+     "shaftSingularMinMax": [
+      0.79325,
+      1.17328
+     ],
+     "shaftCoreTriangleAreaRange": [
+      0.95161,
+      1.0214
+     ],
+     "pawAreaRange": [
+      1.0,
+      1.0
+     ],
+     "pawSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "foreAftToeRangePx": [
+      0.0,
+      12.12917
+     ],
+     "stifleOrElbowXRangePx": [
+      -4.14889,
+      21.7405
+     ],
+     "maxHipOrScapulaGlidePx": 1.213
+    }
+   }
+  },
+  "rebound": {
+   "frames": 35,
+   "supportCountRange": [
+    0,
+    4
+   ],
+   "flightFrames": 12,
+   "legs": {
+    "fn": {
+     "maxBoneLengthErrorPx": 0.0,
+     "rigidAnkleAreaRange": [
+      1.0,
+      1.0
+     ],
+     "rigidAnkleSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "distalIndividualUVEdgeScale": [
+      0.84036,
+      1.21844
+     ],
+     "distalFullSilhouetteWidthRatio": [
+      0.99992,
+      1.00032
+     ],
+     "distalFurCenterlineArcLengthRatio": [
+      0.99995,
+      1.0
+     ],
+     "materialJointChordMin": [
+      0.93667,
+      0.99805,
+      1.0
+     ],
+     "materialJointChordMax": [
+      1.0,
+      1.00118,
+      1.0
+     ],
+     "materialPatchAreaFractionRange": [
+      0.99148,
+      1.0
+     ],
+     "distalTriangleAreaMinMax": [
+      0.89515,
+      1.10724
+     ],
+     "distalTriangleAreaP02P98": [
+      0.96519,
+      1.02511
+     ],
+     "shaftSingularMinMax": [
+      0.739,
+      1.44704
+     ],
+     "shaftCoreTriangleAreaRange": [
+      0.89515,
+      1.10724
+     ],
+     "pawAreaRange": [
+      1.0,
+      1.0
+     ],
+     "pawSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "foreAftToeRangePx": [
+      -7.0,
+      0.0
+     ],
+     "stifleOrElbowXRangePx": [
+      0.0,
+      9.2162
+     ],
+     "maxHipOrScapulaGlidePx": 0.7
+    },
+    "ff": {
+     "maxBoneLengthErrorPx": 0.0,
+     "rigidAnkleAreaRange": [
+      1.0,
+      1.0
+     ],
+     "rigidAnkleSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "distalIndividualUVEdgeScale": [
+      0.86919,
+      1.18705
+     ],
+     "distalFullSilhouetteWidthRatio": [
+      0.99993,
+      1.00033
+     ],
+     "distalFurCenterlineArcLengthRatio": [
+      0.99999,
+      1.00001
+     ],
+     "materialJointChordMin": [
+      0.94172,
+      1.0,
+      1.0
+     ],
+     "materialJointChordMax": [
+      1.0,
+      1.0189,
+      1.0
+     ],
+     "materialPatchAreaFractionRange": [
+      0.99186,
+      1.0
+     ],
+     "distalTriangleAreaMinMax": [
+      0.89849,
+      1.1178
+     ],
+     "distalTriangleAreaP02P98": [
+      0.96973,
+      1.01964
+     ],
+     "shaftSingularMinMax": [
+      0.79129,
+      1.37267
+     ],
+     "shaftCoreTriangleAreaRange": [
+      0.89849,
+      1.1178
+     ],
+     "pawAreaRange": [
+      1.0,
+      1.0
+     ],
+     "pawSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "foreAftToeRangePx": [
+      -7.0,
+      0.0
+     ],
+     "stifleOrElbowXRangePx": [
+      0.0,
+      11.31738
+     ],
+     "maxHipOrScapulaGlidePx": 0.7
+    },
+    "hn": {
+     "maxBoneLengthErrorPx": 0.0,
+     "rigidAnkleAreaRange": [
+      1.0,
+      1.0
+     ],
+     "rigidAnkleSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "distalIndividualUVEdgeScale": [
+      0.82811,
+      1.22601
+     ],
+     "distalFullSilhouetteWidthRatio": [
+      0.99999,
+      1.00027
+     ],
+     "distalFurCenterlineArcLengthRatio": [
+      0.99993,
+      1.0
+     ],
+     "materialJointChordMin": [
+      0.93172,
+      0.96057,
+      1.0
+     ],
+     "materialJointChordMax": [
+      1.0,
+      1.06599,
+      1.0
+     ],
+     "materialPatchAreaFractionRange": [
+      0.98568,
+      1.0
+     ],
+     "distalTriangleAreaMinMax": [
+      0.85876,
+      1.09605
+     ],
+     "distalTriangleAreaP02P98": [
+      0.94614,
+      1.01313
+     ],
+     "shaftSingularMinMax": [
+      0.58601,
+      1.51151
+     ],
+     "shaftCoreTriangleAreaRange": [
+      0.85876,
+      1.09605
+     ],
+     "pawAreaRange": [
+      1.0,
+      1.0
+     ],
+     "pawSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "foreAftToeRangePx": [
+      0.0,
+      8.0
+     ],
+     "stifleOrElbowXRangePx": [
+      -7.53167,
+      17.72148
+     ],
+     "maxHipOrScapulaGlidePx": 0.8
+    },
+    "hf": {
+     "maxBoneLengthErrorPx": 0.0,
+     "rigidAnkleAreaRange": [
+      1.0,
+      1.0
+     ],
+     "rigidAnkleSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "distalIndividualUVEdgeScale": [
+      0.87617,
+      1.15783
+     ],
+     "distalFullSilhouetteWidthRatio": [
+      0.99996,
+      1.00029
+     ],
+     "distalFurCenterlineArcLengthRatio": [
+      0.99986,
+      1.0
+     ],
+     "materialJointChordMin": [
+      0.88391,
+      0.99756,
+      1.0
+     ],
+     "materialJointChordMax": [
+      1.0,
+      1.00093,
+      1.00001
+     ],
+     "materialPatchAreaFractionRange": [
+      0.98733,
+      1.0
+     ],
+     "distalTriangleAreaMinMax": [
+      0.88912,
+      1.1017
+     ],
+     "distalTriangleAreaP02P98": [
+      0.95686,
+      1.01398
+     ],
+     "shaftSingularMinMax": [
+      0.68633,
+      1.35491
+     ],
+     "shaftCoreTriangleAreaRange": [
+      0.88912,
+      1.1017
+     ],
+     "pawAreaRange": [
+      1.0,
+      1.0
+     ],
+     "pawSingularMinMax": [
+      1.0,
+      1.0
+     ],
+     "foreAftToeRangePx": [
+      0.0,
+      8.0
+     ],
+     "stifleOrElbowXRangePx": [
+      -8.26321,
+      15.27617
+     ],
+     "maxHipOrScapulaGlidePx": 0.8
+    }
+   }
+  }
+ }
+}

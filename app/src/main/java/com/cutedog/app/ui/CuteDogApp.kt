@@ -85,7 +85,12 @@ fun CuteDogApp(initialReminderId: Long = 0L, openDaily: Boolean = false, launchS
     DisposableEffect(lifecycle) {
         val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_RESUME) { restoreRevision++; revision++ } }
         lifecycle.addObserver(observer)
-        onDispose { lifecycle.removeObserver(observer) }
+        val changes = object : android.content.BroadcastReceiver() {
+            override fun onReceive(receiverContext: android.content.Context, intent: android.content.Intent) { revision++ }
+        }
+        androidx.core.content.ContextCompat.registerReceiver(context, changes,
+            android.content.IntentFilter("com.cutedog.app.REMINDERS_CHANGED"), androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED)
+        onDispose { context.unregisterReceiver(changes); lifecycle.removeObserver(observer) }
     }
     LaunchedEffect(restoreRevision) {
         try { withContext(Dispatchers.IO) { scheduler.restoreAll(); DailyScheduler(context).schedule() } }

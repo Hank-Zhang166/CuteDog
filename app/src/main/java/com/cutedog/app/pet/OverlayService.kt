@@ -10,6 +10,12 @@ import android.view.*
 import com.cutedog.app.MainActivity
 import com.cutedog.app.pet.animation.AuthoredStepApproval
 import com.cutedog.app.pet.animation.OverlayTravelPolicy
+import com.cutedog.app.reminder.DogReminderQueue
+import com.cutedog.app.reminder.DogReminderQueue.Host
+import com.cutedog.app.reminder.completeFromDog
+import com.cutedog.app.reminder.dogReminders
+import com.cutedog.app.reminder.clock
+import kotlinx.coroutines.*
 import kotlin.math.*
 
 /** Only the pet's small rectangle and a temporary bubble receive touches. */
@@ -19,6 +25,7 @@ class OverlayService : Service() {
     private lateinit var params: WindowManager.LayoutParams
     private lateinit var prefs: PetSettings
     private val main = Handler(Looper.getMainLooper())
+    private val bubbleScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var attached = false
     private var hidden = false
     private var bubble: PetBubbleView? = null
@@ -54,9 +61,6 @@ class OverlayService : Service() {
         override fun onReceive(context: Context, intent: Intent) {
             when (intent.action) {
                 Intent.ACTION_SCREEN_OFF, Intent.ACTION_USER_PRESENT, Intent.ACTION_SCREEN_ON -> reconcileVisibleState()
-                "com.cutedog.app.REMINDER_EVENT" -> if (!hidden && getSystemService(PowerManager::class.java).isInteractive && !getSystemService(KeyguardManager::class.java).isKeyguardLocked) {
-                    pet.remind(); showBubble(intent.getStringExtra("message") ?: "有一件事等着你", intent.getLongExtra("reminder_id", 0))
-                }
                 PetEvents.MODEL_ACTION -> if (!hidden && spaceAvailable && getSystemService(PowerManager::class.java).isInteractive && !getSystemService(KeyguardManager::class.java).isKeyguardLocked) {
                     PetEvents.action(intent)?.let(pet::react)
                 }
@@ -86,6 +90,13 @@ class OverlayService : Service() {
     private fun moveAuthoredFrames() {
         if (!spaceAvailable) {
             route.clear(); pet.setAuthoredTravelAllowed(false); return
+        }
+        if (pet.authoredGestureTravel && bubble == null) {
+            // One-shot gestures have a signed, measured path. Entry and step approvals
+            // below still check its full stopping envelope and actual window obstacles.
+            route.clear()
+            pet.setAuthoredTravelAllowed(true)
+            return
         }
         if (bubble != null) {
             route.clear()
@@ -238,11 +249,8 @@ class OverlayService : Service() {
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT).apply { gravity = Gravity.TOP or Gravity.LEFT }
         configure()
-        pet.onAction = { action ->
-            when (action) {
-                "menu" -> showQuickMenu()
-                "chat" -> openApp(chat = true)
-            }
+        bubbleScope.launch {
+            dogReminders.display.collect { updateReminder(it) }
         }
         pet.onDrag = { dx, dy, finished ->
             cancelSnap()
@@ -255,12 +263,11 @@ class OverlayService : Service() {
             params.y = (position.y - params.height / 2f).toInt()
             floatingX = params.x.toFloat()
             if (pet.usesAuthoredFrames) pet.spatialDepth = .88f + .2f * (position.y / max(1, screenHeight))
-            dismissBubble()
+            if (bubble != null) dogReminders.display.value?.takeIf { it.host == Host.OVERLAY }?.let(dogReminders::timeout)
             if (finished) snapToEdge() else safelyUpdate()
         }
         val filter = IntentFilter().apply {
             addAction(Intent.ACTION_SCREEN_OFF); addAction(Intent.ACTION_SCREEN_ON); addAction(Intent.ACTION_USER_PRESENT)
-            addAction("com.cutedog.app.REMINDER_EVENT")
             addAction(PetEvents.MODEL_ACTION)
         }
         androidx.core.content.ContextCompat.registerReceiver(this, events, filter, androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED)
@@ -310,9 +317,11 @@ class OverlayService : Service() {
             android.widget.Toast.makeText(this, "活动区没有足够空间，请扩大活动区、缩小桌宠或调整禁区。", android.widget.Toast.LENGTH_LONG).show()
         }
         reconcileVisibleState()
+        if (attached) updateReminder(dogReminders.display.value)
     }
     private fun reconcileVisibleState() {
         val visible = attached && !hidden && spaceAvailable && getSystemService(PowerManager::class.java).isInteractive && !getSystemService(KeyguardManager::class.java).isKeyguardLocked
+        dogReminders.setVisible(Host.OVERLAY, visible)
         pet.visibility = if (visible) View.VISIBLE else View.GONE
         main.removeCallbacks(motion)
         if (visible) { pet.resume(); lastMotion = 0; main.post(motion) }
@@ -329,7 +338,7 @@ class OverlayService : Service() {
         val toggle = PendingIntent.getService(this, 201, Intent(this, OverlayService::class.java).setAction(TOGGLE), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val close = PendingIntent.getService(this, 202, Intent(this, OverlayService::class.java).setAction(STOP), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val notification = Notification.Builder(this, CHANNEL).setSmallIcon(com.cutedog.app.R.drawable.ic_notification)
-            .setContentTitle("${prefs.name}在身边").setContentText("轻抚互动 · 长按拖动 · 点击打开应用")
+            .setContentTitle("${prefs.name}在身边").setContentText("轻抚互动 · 长按拖动 · 点此通知打开应用")
             .setContentIntent(open).setOngoing(true).setCategory(Notification.CATEGORY_SERVICE)
             .addAction(Notification.Action.Builder(null, "显示 / 隐藏", toggle).build())
             .addAction(Notification.Action.Builder(null, "结束陪伴", close).build()).build()
@@ -374,37 +383,20 @@ class OverlayService : Service() {
         prefs.xFraction = params.x.toFloat() / max(1, screenWidth - params.width)
         prefs.yFraction = (params.y - insetTop).toFloat() / max(1, screenHeight - insetTop - insetBottom - params.height)
     }
-    private fun openApp(chat: Boolean = false, reminderId: Long? = null) {
-        startActivity(Intent(this, MainActivity::class.java).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-            if (chat) putExtra("open_chat", true)
-            if (reminderId != null) { putExtra("reminder_id", reminderId); putExtra("show_missed_reminders", reminderId == 0L) }
-        })
-        dismissBubble()
-    }
-    private fun showQuickMenu() {
-        val view = PetBubbleView(this).apply { showMenu(prefs.name) }
-        view.onAction = { action ->
-            when (action) {
-                PetBubbleView.ACTION_CHAT -> openApp(chat = true)
-                PetBubbleView.ACTION_OPEN -> openApp()
-                PetBubbleView.ACTION_PET -> { pet.interact("pet"); dismissBubble() }
-                PetBubbleView.ACTION_HIDE -> { hidden = true; reconcileVisibleState() }
-            }
+    private fun updateReminder(display: DogReminderQueue.Display?) {
+        if (display == null || display.host != Host.OVERLAY) {
+            dismissBubble()
+            return
         }
-        attachBubble(view)
-    }
-    private fun showBubble(message: String, reminderId: Long) {
-        val view = PetBubbleView(this).apply { showReminder(if (reminderId == 0L) "有几件事项需要查看" else "到提醒时间了", message) }
-        view.onAction = { action ->
-            when (action) {
-                PetBubbleView.ACTION_DETAILS -> openApp(reminderId = reminderId)
-                PetBubbleView.ACTION_OPEN -> openApp()
-            }
+        val task = display.reminder
+        val view = PetBubbleView(this).apply {
+            showReminder(task.title, task.clock())
+            onComplete = { completeFromDog(this@OverlayService, task) }
         }
-        attachBubble(view)
+        pet.remind()
+        attachBubble(view, display)
     }
-    private fun attachBubble(view: PetBubbleView) {
+    private fun attachBubble(view: PetBubbleView, display: DogReminderQueue.Display) {
         if (hidden || !spaceAvailable || !getSystemService(PowerManager::class.java).isInteractive || getSystemService(KeyguardManager::class.java).isKeyguardLocked) return
         cancelSnap()
         dismissBubble()
@@ -425,7 +417,7 @@ class OverlayService : Service() {
             PetBubbleView.TailEdge.LEFT to android.graphics.Rect(max(safe.left, petRect.right), safe.top, safe.right, safe.bottom),
         )
         val chosen = areas.filter { it.second.width() >= 120 * dp && it.second.height() >= 100 * dp }
-            .maxByOrNull { min(it.second.width().toFloat(), 304 * dp) * min(it.second.height().toFloat(), 400 * dp) }
+            .maxByOrNull { min(it.second.width().toFloat(), 272 * dp) * min(it.second.height().toFloat(), 400 * dp) }
             ?: (PetBubbleView.TailEdge.BOTTOM to safe)
         val edge = chosen.first; val area = chosen.second
         view.setTail(edge)
@@ -442,12 +434,9 @@ class OverlayService : Service() {
         try {
             wm.addView(view, window); bubble = view; bubbleWindow = window; bubbleTailEdge = edge
             if (!prefs.reducedMotion) { view.alpha = 0f; view.animate().alpha(1f).setDuration(180).start() }
-            val timeout = Runnable { if (bubble === view) dismissBubble(animated = true) }
+            val timeout = Runnable { if (bubble === view) dogReminders.timeout(display) }
             bubbleTimeout = timeout
-            val accessibility = getSystemService(android.view.accessibility.AccessibilityManager::class.java)
-            val duration = if (Build.VERSION.SDK_INT >= 29) accessibility.getRecommendedTimeoutMillis(15_000,
-                android.view.accessibility.AccessibilityManager.FLAG_CONTENT_TEXT or android.view.accessibility.AccessibilityManager.FLAG_CONTENT_CONTROLS) else 15_000
-            main.postDelayed(timeout, duration.toLong())
+            main.postDelayed(timeout, view.recommendedTimeout())
         } catch (_: SecurityException) { stopSelf() }
           catch (_: WindowManager.BadTokenException) { stopSelf() }
           catch (_: WindowManager.InvalidDisplayException) { stopSelf() }
@@ -462,6 +451,8 @@ class OverlayService : Service() {
         else { bubble = null; runCatching { wm.removeView(view) } }
     }
     override fun onDestroy() {
+        bubbleScope.cancel()
+        dogReminders.setVisible(Host.OVERLAY, false)
         main.removeCallbacksAndMessages(null); stepApproval.clear(); cancelSnap(); dismissBubble(); pet.pause()
         if (attached) { savePosition(); runCatching { wm.removeView(pet) }; attached = false }
         unregisterReceiver(events)

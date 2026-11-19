@@ -1,0 +1,62 @@
+{
+  "excited": {
+    "intervals": 44,
+    "unique": 44,
+    "maxMeanAlphaStep": 3.83049,
+    "peakFrame": 11
+  },
+  "cuddle": {
+    "intervals": 52,
+    "unique": 49,
+    "maxMeanAlphaStep": 1.10585,
+    "peakFrame": 23
+  },
+  "sleepy": {
+    "intervals": 65,
+    "unique": 61,
+    "maxMeanAlphaStep": 0.44567,
+    "peakFrame": 29
+  },
+  "shy": {
+    "intervals": 53,
+    "unique": 48,
+    "maxMeanAlphaStep": 0.96111,
+    "peakFrame": 19
+  },
+  "startled": {
+    "intervals": 39,
+    "unique": 30,
+    "maxMeanAlphaStep": 3.21896,
+    "peakFrame": 7
+  },
+  "pet_head": {
+    "intervals": 48,
+    "unique": 44,
+    "maxMeanAlphaStep": 0.91018,
+    "peakFrame": 11
+  },
+  "request_pet": {
+    "intervals": 52,
+    "unique": 52,
+    "maxMeanAlphaStep": 1.34364,
+    "peakFrame": 29
+  },
+  "seek": {
+    "intervals": 64,
+    "unique": 50,
+    "maxMeanAlphaStep": 0.96503,
+    "peakFrame": 33
+  },
+  "call": {
+    "intervals": 45,
+    "unique": 43,
+    "maxMeanAlphaStep": 1.2149,
+    "peakFrame": 14
+  },
+  "follow": {
+    "intervals": 68,
+    "unique": 68,
+    "maxMeanAlphaStep": 0.72883,
+    "peakFrame": 27
+  }
+}

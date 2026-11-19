@@ -29,7 +29,7 @@ class PetBrain(seed: Long = System.nanoTime()) {
     private var knownAvailable: Set<String> = emptySet()
     private var observed = ""
     private var observedSince = 0.0
-    private var nextDecision = 5.0
+    private var nextDecision = 2.5
     private var dwellUntil = 0.0
     private var interactionHoldUntil = 0.0
     private var lastInteractionAt = Double.NEGATIVE_INFINITY
@@ -158,7 +158,7 @@ class PetBrain(seed: Long = System.nanoTime()) {
             policy.autonomous && policy.id in available && policy.id != currentClip &&
                 clock - (lastRequested[policy.id] ?: Double.NEGATIVE_INFINITY) >= policy.cooldown &&
                 !(restful && policy.family in setOf(Family.MOVE, Family.PLAY)) &&
-                !(context.charging && policy.id in setOf("run", "jump", "hop"))
+                !(context.charging && policy.id in setOf("jump", "hop"))
         }.map { it to utility(it, currentClip, context, recentlyInteracting) }.filter { it.second > 0.0 }
         if (candidates.isEmpty()) return null
         var draw = random.nextDouble() * candidates.sumOf { it.second }
@@ -188,7 +188,8 @@ class PetBrain(seed: Long = System.nanoTime()) {
         lastRequested[target] = clock
         recent.addLast(target)
         while (recent.size > 7) recent.removeFirst()
-        nextDecision = clock + max(catalog.getValue(target).dwell, 4.0)
+        val untilDwell = clock + catalog.getValue(target).dwell
+        nextDecision = if (source == null) max(nextDecision, untilDwell) else untilDwell
         return target
     }
 
@@ -212,7 +213,6 @@ class PetBrain(seed: Long = System.nanoTime()) {
                 if (morning) score *= 1.7
                 if (idleAge > 600 || movementSeconds > 35) score *= .2
                 if (context.muted) score *= .8
-                if (policy.id == "run" && context.activity != "lively") score *= .15
             }
             Family.PLAY -> {
                 if (context.activity != "lively" && !recentTouch) score *= .12
@@ -243,9 +243,9 @@ class PetBrain(seed: Long = System.nanoTime()) {
         val base = when {
             context.quiet || context.powerSaving || hour(context) < 7 || hour(context) >= 22 -> 18.0
             context.charging -> 14.0
-            context.activity == "lively" -> 6.0
+            context.activity == "lively" -> 2.4
             context.activity == "quiet" -> 20.0
-            else -> 10.0
+            else -> 4.0
         }
         return base + random.nextDouble() * base * .65
     }
@@ -256,7 +256,8 @@ class PetBrain(seed: Long = System.nanoTime()) {
     private fun normalize(kind: String): String? = when (kind.lowercase()) {
         "pet", "head", "pet_head" -> "head"
         "body", "back" -> "body"
-        "nose", "call", "happy", "calm", "sleep", "curious", "cuddle", "wave", "jump", "treat", "ball", "follow" -> kind.lowercase()
+        in interactions -> kind.lowercase()
+        "run" -> "trot" // Older saved requests use the current jogging gait.
         "toy" -> "ball"
         "soothe", "comfort" -> "calm"
         else -> null
@@ -269,27 +270,30 @@ class PetBrain(seed: Long = System.nanoTime()) {
         val weight: Double, val autonomous: Boolean = true)
 
     companion object {
-        private val locomotion = setOf("walk", "trot", "run")
+        private val locomotion = setOf("walk", "trot")
         private val stableClips = setOf("stand", "sit_idle", "lie_idle", "side_lie_idle", "curl_idle", "back_stand",
-            "sleep", "breathe", "tail_wag", "relax", "walk", "trot", "run")
+            "sleep", "breathe", "tail_wag", "relax", "walk", "trot")
         private fun p(id: String, family: Family, dwell: Double, cooldown: Double, weight: Double, autonomous: Boolean = true) =
             Policy(id, family, dwell, cooldown, weight, autonomous)
         private val catalog = listOf(
-            p("stand", Family.REST, 8.0, 15.0, 1.8), p("sit_idle", Family.REST, 14.0, 35.0, 2.4),
+            p("stand", Family.REST, 4.0, 15.0, 1.8), p("sit_idle", Family.REST, 8.0, 35.0, 2.4),
             p("lie_idle", Family.REST, 20.0, 55.0, 1.6), p("side_lie_idle", Family.REST, 24.0, 150.0, .55),
             p("curl_idle", Family.REST, 50.0, 240.0, .3), p("sleep", Family.REST, 90.0, 360.0, .12),
-            p("relax", Family.REST, 18.0, 65.0, 1.5), p("breathe", Family.REST, 8.0, 25.0, 1.3),
+            p("relax", Family.REST, 9.0, 65.0, 1.5), p("breathe", Family.REST, 5.0, 25.0, 1.3),
             p("walk", Family.MOVE, 7.0, 35.0, 2.0), p("trot", Family.MOVE, 5.0, 65.0, 1.0),
-            p("run", Family.MOVE, 3.0, 150.0, .65), p("back_stand", Family.LOOK, 6.0, 210.0, .25),
+            p("back_stand", Family.LOOK, 6.0, 210.0, .25),
             p("blink", Family.LOOK, 1.5, 18.0, .9), p("look_left", Family.LOOK, 3.0, 35.0, 1.2),
             p("look_right", Family.LOOK, 3.0, 35.0, 1.2), p("tilt", Family.LOOK, 3.0, 60.0, 1.0),
             p("curious", Family.LOOK, 4.0, 70.0, .8), p("focus", Family.LOOK, 4.0, 90.0, .7),
+            p("expect", Family.LOOK, 3.0, 45.0, 1.0),
             p("follow", Family.LOOK, 4.0, 25.0, 1.2), p("scratch", Family.GROOM, 4.0, 180.0, .8),
             p("lick_paw", Family.GROOM, 5.0, 150.0, 1.0), p("groom", Family.GROOM, 5.0, 210.0, .8),
             p("stretch", Family.STRETCH, 5.0, 100.0, 1.2), p("yawn", Family.STRETCH, 4.0, 130.0, .7),
             p("sleepy", Family.REST, 5.0, 160.0, .4), p("tail_wag", Family.AFFECTION, 6.0, 35.0, 1.2),
+            p("backstep", Family.MOVE, 2.0, 165.0, .25), p("pause", Family.REST, 2.0, 75.0, .35),
+            p("slide_correct", Family.MOVE, 2.0, 210.0, .12), p("rebound", Family.PLAY, 2.0, 150.0, .22),
             p("happy", Family.AFFECTION, 4.0, 65.0, .8), p("nuzzle", Family.AFFECTION, 4.0, 80.0, .55),
-            p("tongue", Family.AFFECTION, 3.0, 70.0, .7), p("cuddle", Family.AFFECTION, 5.0, 90.0, .55),
+            p("cuddle", Family.AFFECTION, 5.0, 90.0, .55),
             p("wave", Family.AFFECTION, 4.0, 300.0, .6), p("request_pet", Family.AFFECTION, 5.0, 600.0, .3),
             p("seek", Family.AFFECTION, 5.0, 420.0, .35), p("hop", Family.PLAY, 3.0, 120.0, .6),
             p("jump", Family.PLAY, 3.0, 180.0, .4), p("excited", Family.PLAY, 4.0, 140.0, .4),
@@ -299,6 +303,8 @@ class PetBrain(seed: Long = System.nanoTime()) {
             p("treat", Family.PLAY, 5.0, 8.0, 0.0, false),
             p("play_ball", Family.PLAY, 6.0, 10.0, 0.0, false),
             p("call", Family.LOOK, 4.0, 8.0, 0.0, false),
+            p("shy", Family.AFFECTION, 3.0, 12.0, 0.0, false),
+            p("startled", Family.LOOK, 2.0, 12.0, 0.0, false),
         ).associateBy { it.id }
         private val interactions = mapOf(
             "head" to listOf("pet_head", "nuzzle", "soothe"), "body" to listOf("cuddle", "belly_up", "relax"),
@@ -308,6 +314,11 @@ class PetBrain(seed: Long = System.nanoTime()) {
             "curious" to listOf("curious", "tilt", "focus"), "cuddle" to listOf("cuddle", "nuzzle", "belly_up", "soothe", "relax"),
             "wave" to listOf("wave", "call"), "jump" to listOf("jump", "hop"), "treat" to listOf("treat"),
             "ball" to listOf("play_ball"), "follow" to listOf("follow", "look_left", "look_right"),
+            "finger_follow" to listOf("stand", "breathe"), "trot" to listOf("trot", "walk"),
+            "excited" to listOf("excited", "happy"),
+            "sleepy" to listOf("sleepy", "relax"),
+            "shy" to listOf("shy", "tilt"), "startled" to listOf("startled", "focus"),
+            "seek" to listOf("seek", "look_right"), "request_pet" to listOf("request_pet", "wave"),
         )
         /** All goals are known authored endpoint/actions; transition clips are intentionally excluded. */
         val supportedTargets: Set<String> get() = catalog.keys

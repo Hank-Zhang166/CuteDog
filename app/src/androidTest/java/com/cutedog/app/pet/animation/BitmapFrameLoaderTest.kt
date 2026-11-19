@@ -88,6 +88,7 @@ class BitmapFrameLoaderTest {
                 assertEquals(1L, loader.stats().decodedFrames)
                 assertEquals(64L * 64 * 4, loader.stats().allocatedBytes)
                 assertTrue(opened.any { it.first == "wrong-source-anchor" })
+                assertEquals(1, opened.count { it.first == "good" })
                 assertTrue(opened.all { it.second.name == "CuteDog-frame-decode" && it.second != Looper.getMainLooper().thread })
                 logStats("phase-digest-dependency", loader)
             }

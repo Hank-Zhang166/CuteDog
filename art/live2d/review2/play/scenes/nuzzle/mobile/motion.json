@@ -1,0 +1,45 @@
+{
+  "sourceScene": "nuzzle",
+  "appAction": "nuzzle",
+  "fps": 24,
+  "intervals": 69,
+  "terminalSample": true,
+  "sourceSceneStart": 0,
+  "sourceIntervals": 69,
+  "sourceTemplate": "%05d.webp",
+  "width": 512,
+  "height": 512,
+  "orientation": "left",
+  "entry": "Stand",
+  "exit": "Stand",
+  "appRootTravel": 0,
+  "clippedDogFrames": 0,
+  "camera": "x = rounded tracked dog root x; y = 0, preserving lift and contact trajectories",
+  "propVisibilityBySourceFrame": {},
+  "events": [
+    {
+      "frame": 0,
+      "id": "notice_touch"
+    },
+    {
+      "frame": 11,
+      "id": "approach"
+    },
+    {
+      "frame": 22,
+      "id": "cheek_touch"
+    },
+    {
+      "frame": 31,
+      "id": "rub_up"
+    },
+    {
+      "frame": 43,
+      "id": "rub_back"
+    },
+    {
+      "frame": 55,
+      "id": "release"
+    }
+  ]
+}
