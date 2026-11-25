@@ -287,31 +287,18 @@ class DirectionalClipTest {
         assertThrows(IllegalArgumentException::class.java) { ClipManifest.parse(root.toString(), emptySet()) }
     }
 
-    @Test fun authoredSourceCatalogObeysTheRuntimeDirectionAndMotionContract() {
-        val source = listOf(File("../art/character/motions.json"), File("art/character/motions.json")).firstOrNull { it.isFile }
-            ?: error("The actual authored source catalog must be checked in with its consumer")
-        val authored = JSONObject(source.readText())
-        val clips = authored.getJSONArray("clips")
-        val fixturePaths = JSONArray()
-        for (index in 0 until clips.length()) {
-            val value = JSONObject(clips.getJSONObject(index).toString())
-            val id = value.getString("id")
-            // Pure contract test only: synthetic path names are not asserted to be rendered files.
-            val count = value.getInt("frames")
-            value.put("frames", JSONArray((0 until count).map { "pet3d/$id/$it.png" }))
-            value.put("fps", value.optInt("fps", authored.getInt("fps")))
-            fixturePaths.put(value)
+    @Test fun releasedCatalogObeysTheRuntimeDirectionAndMotionContract() {
+        val assets = listOf(File("src/main/assets"), File("app/src/main/assets")).first { it.isDirectory }
+        val manifest = ClipManifest.parse(File(assets, ClipManifest.ASSET_PATH).readText(), ReleasedArtwork.REQUIRED_ACTIONS)
+        for (canonical in listOf("stand", "walk", "trot", "walk_start", "walk_stop", "walk_to_trot", "trot_to_walk")) {
+            assertEquals(canonical + "_right", manifest.resolveClip(canonical, ClipHeading.RIGHT))
+            assertEquals(canonical, manifest.canonicalClipId(canonical + "_right"))
         }
-        val input = JSONObject().put("version", 1).put("width", 512).put("height", 512).put("initialClip", "stand").put("clips", fixturePaths)
-        val m = ClipManifest.parse(input.toString())
-        for (canonical in listOf("stand", "walk", "trot", "run", "walk_start", "walk_stop", "walk_to_trot", "trot_to_run", "run_to_trot", "trot_to_walk")) {
-            assertEquals(canonical + "_right", m.resolveClip(canonical, ClipHeading.RIGHT))
-            assertEquals(canonical, m.canonicalClipId(canonical + "_right"))
-        }
-        val d = ClipDirector(m)
-        assertTrue(d.requestHeading(1)); assertTrue(d.request("run"))
-        assertTrue(d.queuedClips.contains("turn_to_right"))
-        assertEquals("run_right", d.requestedClip)
+        val director = ClipDirector(manifest)
+        assertTrue(director.requestHeading(1))
+        assertTrue(director.request("trot"))
+        assertTrue("The new heading passes through the authored turn", "turn" in director.queuedClips)
+        assertEquals("trot_right", director.requestedClip)
     }
 
     @Test fun interactionRequestDoesNotEraseMeasuredWalkAndStopSteps() {

@@ -15,7 +15,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-ALLOWED_ACTIONS = {"happy", "calm", "curious", "cuddle", "wave"}
+ALLOWED_ACTIONS = {"happy", "calm", "curious", "cuddle", "wave", "excited", "sleepy", "shy", "startled"}
 SECRET_NAME = "CUTEDOG_DEEPSEEK_API_KEY"
 MAX_RESPONSE = 262_144
 PROMPTS = [
@@ -46,10 +46,10 @@ def safe_identifier(value: object) -> str | None:
 
 def system_prompt() -> str:
     source = Path(__file__).resolve().parent.parent / "app/src/main/java/com/cutedog/app/chat/ChatPolicy.kt"
-    match = re.search(r'const val SYSTEM_PROMPT = """(.*?)"""', source.read_text(), re.S)
+    match = re.search(r'const val PERSONA = """(.*?)"""', source.read_text(encoding="utf-8"), re.S)
     if not match:
         raise ValueError("Cannot locate the app's actual system persona.")
-    return match.group(1) + "\n你的显示名字是糯米。本轮是虚构测试输入，不包含真实用户隐私。"
+    return match.group(1) + "\n可在末尾附一个桌宠动作标记：" + "、".join(f"<action:{a}>" for a in sorted(ALLOWED_ACTIONS)) + "\n你的显示名字是糯米。本轮是虚构测试输入，不包含真实用户隐私。"
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)

@@ -1,0 +1,31 @@
+{
+  "sourceCommit": "b254ef818965a324fa9a9d7d33f265c702921a9c",
+  "environmentRevision": "2",
+  "evidenceSha256": "a94ede414618d6600fcaacdec12255df917fef029d59aea528046d6882aae8a6",
+  "sourceFiles": [
+    {
+      "path": "scripts/verify-live-ai.py",
+      "sha256": "7fac352c0e50fe5115bae1dd36618acc0ce579424271b50105d66d13765989d5"
+    },
+    {
+      "path": "app/src/main/java/com/cutedog/app/chat/ChatPolicy.kt",
+      "sha256": "40a500e8cf1a81573e7cc047eabb822bb154c28b242ec6b8457e37f9b51652a4"
+    }
+  ],
+  "reviewer": "development assistant",
+  "reviewStatus": "synthetic Chinese conversation reviewed",
+  "findings": [
+    "The server returned exactly deepseek-flash for all five requests; no fallback model was used.",
+    "The second turn retained both library and friends from the first turn.",
+    "The emotional response was brief and acknowledged fatigue without diagnosing the speaker.",
+    "The practical plan totaled 25 minutes including a five-minute rest and did not claim to create a device reminder.",
+    "Returned action intents wave, calm and cuddle are within the actual application allowlist."
+  ],
+  "scope": "Actual authorized provider HTTPS protocol using the application system prompt. This is not an Android-device end-to-end test of credentials, UI or animation.",
+  "credentialHandling": "Environment secret only; no auth header or secret value is stored in this evidence or APK.",
+  "totalReportedTokens": 3584,
+  "requestLatencyMs": {
+    "min": 1801,
+    "max": 4495
+  }
+}

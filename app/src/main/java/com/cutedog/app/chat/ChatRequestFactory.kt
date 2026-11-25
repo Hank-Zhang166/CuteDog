@@ -60,7 +60,7 @@ internal object ChatRequestFactory {
         }
         bounded.forEach { messages.put(JSONObject().put("role", it.role).put("content", it.content)) }
         val payload = JSONObject().put("model", model.trim()).put("messages", messages)
-            .put("max_tokens", 1500).put("stream", false).toString().toByteArray(Charsets.UTF_8)
+            .put("max_tokens", 1500).put("stream", java.net.URI(url).host.equals("api.deepseek.com", ignoreCase = true)).toString().toByteArray(Charsets.UTF_8)
         return ChatRequest(url, apiKey, payload, bounded.size < eligible.size)
     }
 }

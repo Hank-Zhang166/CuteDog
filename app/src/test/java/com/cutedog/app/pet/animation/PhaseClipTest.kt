@@ -188,8 +188,10 @@ class PhaseClipTest {
 
     @Test fun v1CannotClaimPhaseSupportAndReleaseScopeIsCompiledNotSelfDeclared() {
         assertThrows(IllegalArgumentException::class.java) { ClipManifest(512, 512, "stand", clips(), emptySet(), 1) }
-        assertEquals(29, ReleasedArtwork.REQUIRED_ACTIONS.size)
-        assertTrue(ReleasedArtwork.REQUIRED_ACTIONS.containsAll(setOf("walk", "trot", "run", "walk_to_trot", "trot_to_walk", "trot_to_run", "run_to_trot", "play_ball", "treat", "hop")))
+        assertEquals(56, ClipManifest.REQUIRED_ACTIONS.size)
+        assertEquals(81, ReleasedArtwork.REQUIRED_ACTIONS.size)
+        assertTrue(ReleasedArtwork.REQUIRED_ACTIONS.containsAll(ClipManifest.REQUIRED_ACTIONS))
+        assertTrue(ReleasedArtwork.REQUIRED_ACTIONS.containsAll(setOf("walk", "trot", "walk_to_trot", "trot_to_walk", "play_ball", "treat", "hop")))
         assertThrows(IllegalArgumentException::class.java) { ClipManifest(512, 512, "stand", clips(), ReleasedArtwork.REQUIRED_ACTIONS, 2) }
     }
 }

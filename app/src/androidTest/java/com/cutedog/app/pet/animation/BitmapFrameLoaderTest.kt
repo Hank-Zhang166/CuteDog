@@ -1,11 +1,13 @@
 package com.cutedog.app.pet.animation
 
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.os.Looper
 import android.os.Debug
 import android.util.Log
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -28,6 +30,51 @@ class BitmapFrameLoaderTest {
         val end = System.nanoTime() + 5_000_000_000L
         while (!condition() && System.nanoTime() < end) Thread.sleep(10)
         assertTrue("Background decode did not complete", condition())
+    }
+
+    @Test fun reflectingAStoredFramePreservesEveryDecodedColorAndAlpha() {
+        val painted = Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888)
+        for (y in 0 until 64) for (x in 0 until 64) {
+            painted.setPixel(x, y, Color.argb((x * 4 + y) % 256, 30 + x * 2, 150, 20 + y))
+        }
+        val bytes = ByteArrayOutputStream().use { output ->
+            painted.compress(Bitmap.CompressFormat.PNG, 100, output)
+            output.toByteArray()
+        }
+        painted.recycle()
+        val reference = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+        BitmapFrameLoader(FrameAssetSource { ByteArrayInputStream(bytes) }, 64, 64,
+            mirroredPaths = setOf("mirror")).use { loader ->
+            loader.prefetch(listOf("mirror"))
+            waitUntil { loader.isReady("mirror") }
+            val mirrored = requireNotNull(loader.ready("mirror"))
+            for (y in 0 until 64) for (x in 0 until 64) {
+                assertEquals(reference.getPixel(63 - x, y), mirrored.getPixel(x, y))
+            }
+        }
+        reference.recycle()
+    }
+
+    @Test fun installedCompactLibrarySupportsRandomAccessAcrossEveryClipAndTerminal() {
+        val assets = InstrumentationRegistry.getInstrumentation().targetContext.assets
+        val bytes = assets.open(ClipManifest.ASSET_PATH).use { it.readBytes() }
+        val clips = ClipManifest.parse(bytes.toString(Charsets.UTF_8), ReleasedArtwork.REQUIRED_ACTIONS)
+        assertTrue(CompactFrameIndex.FILE in assets.list("pet3d").orEmpty())
+        val paths = clips.clips.values.flatMap { clip ->
+            listOfNotNull(clip.frames.last(), clip.frames.first(), clip.frames[clip.frames.size / 2], clip.terminalProof?.path)
+        }.distinct().shuffled(kotlin.random.Random(26))
+        CompactFrameIndex.openLoader(assets, clips, bytes).use { loader ->
+            for (batch in paths.chunked(6)) {
+                loader.prefetch(batch)
+                waitUntil { batch.all { loader.isReady(it) || loader.error(it) != null } }
+                batch.forEach { path ->
+                    assertNull(path, loader.error(path))
+                    assertEquals(512, loader.ready(path)?.width)
+                }
+                loader.cancelPrefetch()
+            }
+            assertTrue(loader.stats().allocatedBytes <= loader.stats().budgetBytes)
+        }
     }
 
     @Test fun decodingIsOffMainThreadCacheIsBoundedAndPinnedFrameIsNotReused() {
@@ -88,6 +135,7 @@ class BitmapFrameLoaderTest {
                 assertEquals(1L, loader.stats().decodedFrames)
                 assertEquals(64L * 64 * 4, loader.stats().allocatedBytes)
                 assertTrue(opened.any { it.first == "wrong-source-anchor" })
+                assertEquals(1, opened.count { it.first == "good" })
                 assertTrue(opened.all { it.second.name == "CuteDog-frame-decode" && it.second != Looper.getMainLooper().thread })
                 logStats("phase-digest-dependency", loader)
             }

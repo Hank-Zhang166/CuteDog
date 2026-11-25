@@ -1,0 +1,60 @@
+{
+  "image": "samoyed-source.png",
+  "width": 1536,
+  "height": 1024,
+  "columns": 3,
+  "rows": 2,
+  "cellWidth": 512,
+  "cellHeight": 512,
+  "poses": [
+    {
+      "name": "stand",
+      "index": 0,
+      "x": 0,
+      "y": 0,
+      "width": 512,
+      "height": 512
+    },
+    {
+      "name": "walk",
+      "index": 1,
+      "x": 512,
+      "y": 0,
+      "width": 512,
+      "height": 512
+    },
+    {
+      "name": "sit",
+      "index": 2,
+      "x": 1024,
+      "y": 0,
+      "width": 512,
+      "height": 512
+    },
+    {
+      "name": "sleep",
+      "index": 3,
+      "x": 0,
+      "y": 512,
+      "width": 512,
+      "height": 512
+    },
+    {
+      "name": "happy",
+      "index": 4,
+      "x": 512,
+      "y": 512,
+      "width": 512,
+      "height": 512
+    },
+    {
+      "name": "jump",
+      "index": 5,
+      "x": 1024,
+      "y": 512,
+      "width": 512,
+      "height": 512
+    }
+  ],
+  "renderingNotes": "Crossfades between static poses; not a complete frame animation or rig."
+}

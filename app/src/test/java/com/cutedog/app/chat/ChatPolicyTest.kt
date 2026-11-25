@@ -4,6 +4,12 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ChatPolicyTest {
+    @Test fun retiredCuesPreserveTheReplyTextWithoutMovingTheDog() {
+        for (id in listOf("tongue", "sad")) {
+            assertEquals(ChatReply("我在。", null), ChatPolicy.parseReply("我在。<action:$id>"))
+        }
+    }
+
     @Test fun apiUrlAcceptsBaseAndCompleteEndpoint() {
         assertEquals("https://api.openai.com/v1/chat/completions", ChatPolicy.completionUrl("https://api.openai.com/v1/"))
         assertEquals("https://example.org/api/chat/completions", ChatPolicy.completionUrl("https://example.org/api/chat/completions"))

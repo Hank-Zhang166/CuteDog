@@ -14,9 +14,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
 import com.cutedog.app.pet.PetSettings
-import com.cutedog.app.pet.PetView
 
 /** No permission request or remote connection happens during introduction. */
 @Composable
@@ -30,7 +28,7 @@ internal fun OnboardingScreen(onFinish: () -> Unit) {
     val descriptions = listOf(
         "一只住在手机里的萨摩耶。你可以轻轻摸摸我，也可以只是让我安静地陪一会儿。",
         "记下一个约定，选好时间，我会用通知提醒你。没有网络时，事项也会留在手机里。",
-        "想让我走出应用时，在「小狗」里召唤我。轻抚是摸摸，长按后拖动是搬家；你也可以圈出活动范围。",
+        "在「小狗」里授权悬浮窗并召唤桌宠。轻抚会得到回应，双击可以选玩球或喂食。要移动桌宠，稍按后开始拖动。",
         "聊天需要你选择并连接模型服务。发送前会说明哪些内容交给服务商；长期记忆默认关闭，只记录你亲自同意的内容。",
         "不用每天打卡，也没有错过互动的惩罚。选择舒服的节奏，然后开始属于我们的普通日子。"
     )
@@ -43,9 +41,6 @@ internal fun OnboardingScreen(onFinish: () -> Unit) {
                 }
                 Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(22.dp)) {
                     Spacer(Modifier.height(8.dp))
-                    Surface(shape = RoundedCornerShape(40.dp), color = MaterialTheme.colorScheme.primaryContainer) {
-                        AndroidView(factory = { PetView(it) }, modifier = Modifier.fillMaxWidth().heightIn(min = 160.dp, max = 230.dp).height(210.dp), update = { it.contentDescription = "萨摩耶${prefs.name}欢迎你" })
-                    }
                     Text(headings[step], style = MaterialTheme.typography.headlineLarge, modifier = Modifier.fillMaxWidth().semantics { heading() })
                     Text(descriptions[step], style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.fillMaxWidth())
                     when (step) {

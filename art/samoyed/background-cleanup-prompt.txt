@@ -1,0 +1,5 @@
+Make a production-ready background-removed transparent sprite atlas from the provided image. Preserve the six dogs in their positions, proportions, expressions, colors and fine fur; preserve 1536x1024 canvas with three columns and two rows of 512x512 cells. Remove all background, floor, haze, ground shadows and alpha residue. Everything outside dog silhouettes must be transparent alpha 0 with feathering only at actual fur edges. No gray rectangle, pale rectangle or white backdrop. Preserve all tails and feet. Background removal only, not restyling. Output RGBA PNG with true transparent background.
+
+Input: samoyed-source.png
+Output: samoyed-transparent.png
+Tool: OpenAI image generation, transparent_background=true

@@ -1,0 +1,13 @@
+def pack = layout.buildDirectory.dir("generated/pet-speech/assets")
+def makeVoice = tasks.register("preparePetSpeech", Exec) {
+    def script = rootProject.file("scripts/prepare-dog-voice.py")
+    inputs.file(script)
+    inputs.dir(rootProject.file("scripts/licenses"))
+    outputs.dir(pack)
+    def python = System.getProperty("os.name").startsWith("Windows") ? "python" : "python3"
+    commandLine(providers.gradleProperty("cuteDogPython").getOrElse(python), script,
+        rootProject.file(".gradle/cutedog-dogvoice"), pack.get().asFile)
+}
+android.sourceSets.getByName("main").assets.srcDir(pack)
+tasks.named("preBuild") { dependsOn(makeVoice) }
+dependencies.add("implementation", "com.microsoft.onnxruntime:onnxruntime-android:1.22.0")

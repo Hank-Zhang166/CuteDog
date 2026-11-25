@@ -2,6 +2,7 @@ package com.cutedog.app.pet.animation
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import java.io.ByteArrayOutputStream
 import java.io.Closeable
 import java.io.InputStream
 import java.util.concurrent.Executors
@@ -31,6 +32,7 @@ class BitmapFrameLoader(
     private val budgetBytes: Long = MAX_BYTES,
     frameDigests: Map<String, String> = emptyMap(),
     verificationDependencies: Map<String, List<AssetDigest>> = emptyMap(),
+    private val mirroredPaths: Set<String> = emptySet(),
 ) : Closeable {
     private class Entry(val bitmap: Bitmap, var everDisplayed: Boolean = false)
     private val lock = Any()
@@ -55,6 +57,9 @@ class BitmapFrameLoader(
     private val frameDigests = frameDigests.toMap()
     private val verificationDependencies = verificationDependencies.mapValues { it.value.toList() }
     private val verifiedDependencies = mutableSetOf<AssetDigest>() // Decoder-thread only; APK assets are immutable.
+    private val encoded = EncodedFrame()
+    // Scratch is decoder-owned, at most 64 KiB at the released 512px resolution.
+    private val mirrorRows by lazy { IntArray(width * minOf(height, 32)) }
 
     init {
         require(width in 16..1024 && height in 16..1024)
@@ -150,13 +155,9 @@ class BitmapFrameLoader(
                     ClipIntegrity.verifyWhileReading(source.open(dependency.path), dependency.sha256) { }
                     verifiedDependencies += dependency
                 }
-                fun <T> readFrame(consume: (InputStream) -> T): T {
-                    val digest = frameDigests[path]
-                    return if (digest == null) source.open(path).use(consume)
-                        else ClipIntegrity.verifyWhileReading(source.open(path), digest, consume = consume)
-                }
+                encoded.load(source.open(path), frameDigests[path])
                 val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                readFrame { BitmapFactory.decodeStream(it, null, bounds) }
+                encoded.decode(bounds)
                 require(bounds.outWidth == width && bounds.outHeight == height) { "角色帧尺寸与清单不符" }
                 val options = BitmapFactory.Options().apply {
                     inPreferredConfig = Bitmap.Config.ARGB_8888
@@ -164,10 +165,11 @@ class BitmapFrameLoader(
                     inScaled = false
                     if (reuse != null) inBitmap = reuse.bitmap
                 }
-                readFrame { bitmap = BitmapFactory.decodeStream(it, null, options) }
+                bitmap = encoded.decode(options)
                 requireNotNull(bitmap) { "角色帧无法解码" }
                 require(reuse == null || bitmap === reuse.bitmap) { "平台未复用约定的角色帧缓冲" }
                 require(bitmap!!.width == width && bitmap!!.height == height && bitmap!!.allocationByteCount <= frameBytes) { "角色帧内存超出预算" }
+                if (path in mirroredPaths) reflect(bitmap!!)
             } catch (error: Exception) {
                 failure = "角色资源不可用：$path（${if (error is java.io.IOException) "读取失败" else "帧数据无效"}）"
             }
@@ -190,6 +192,25 @@ class BitmapFrameLoader(
         }
     }
 
+    private fun reflect(bitmap: Bitmap) {
+        val pixels = mirrorRows
+        val rows = pixels.size / width
+        for (y in 0 until height step rows) {
+            val count = minOf(rows, height - y)
+            bitmap.getPixels(pixels, 0, width, 0, y, width, count)
+            for (row in 0 until count) {
+                var left = row * width
+                var right = left + width - 1
+                while (left < right) {
+                    val value = pixels[left]
+                    pixels[left++] = pixels[right]
+                    pixels[right--] = value
+                }
+            }
+            bitmap.setPixels(pixels, 0, width, 0, y, width, count)
+        }
+    }
+
     private fun release(entry: Entry) {
         // Previously displayed frames may still be referenced by a GPU display list. Drop our
         // strong reference and let Android reclaim them; managed-byte reduction is not RSS proof.
@@ -205,5 +226,28 @@ class BitmapFrameLoader(
         }
         worker.shutdownNow()
     }
+    // The decoder owns one reusable compressed buffer. Bounds and pixels always
+    // come from the very same verified bytes, including when inBitmap is reused.
+    private class EncodedFrame : ByteArrayOutputStream(64 * 1024) {
+        private val block = ByteArray(8192)
+
+        fun load(input: InputStream, expected: String?) {
+            reset()
+            input.use { stream ->
+                while (true) {
+                    val n = stream.read(block)
+                    if (n < 0) break
+                    if (n == 0) continue
+                    require(count <= ClipIntegrity.MAX_FRAME_BYTES - n)
+                    write(block, 0, n)
+                }
+            }
+            if (expected != null) require(ClipIntegrity.sha256(buf, count) == expected) { "角色资源摘要不符" }
+        }
+
+        fun decode(options: BitmapFactory.Options): Bitmap? =
+            BitmapFactory.decodeByteArray(buf, 0, count, options)
+    }
+
     companion object { const val MAX_BYTES: Long = 24L * 1024 * 1024 }
 }

@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
@@ -15,6 +17,12 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <activity android:name=".PetChatActivity" android:exported="false" android:excludeFromRecents="true"
+            android:taskAffinity="${applicationId}.petChat" android:launchMode="singleTop"
+            android:theme="@style/Theme.CuteDog.PetChat" android:windowSoftInputMode="stateAlwaysHidden|adjustResize" />
+        <activity android:name=".pet.PetMenuActivity" android:exported="false" android:excludeFromRecents="true"
+            android:taskAffinity="${applicationId}.petmenu" android:launchMode="singleTop"
+            android:theme="@style/Theme.CuteDog.PetMenu" android:windowSoftInputMode="stateAlwaysHidden" />
         <service android:name=".pet.OverlayService" android:exported="false" android:foregroundServiceType="specialUse">
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="User-started interactive companion pet in a small overlay window with persistent notification and explicit stop control" />
         </service>

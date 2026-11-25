@@ -358,6 +358,10 @@ class BackupSafFlowTest {
             .put("pointerToolType", MotionEvent.TOOL_TYPE_FINGER).put("touchDurationMs", 100)
             .put("elapsedMs", SystemClock.elapsedRealtime()))
         capture("$label-before-document-touch")
+        touchBounds(bounds)
+    }
+
+    private fun touchBounds(bounds: Rect) {
         // API 26's RecyclerView handles touch while every file-title ancestor reports
         // clickable=false. Touch the observed title, away from API 35's preview-icon button.
         // Android 15 DocumentsUI configures SelectionTracker for FINGER/STYLUS. The short
@@ -433,15 +437,19 @@ class BackupSafFlowTest {
 
     private fun click(node: AccessibilityNodeInfo) {
         var current: AccessibilityNodeInfo? = node
-        repeat(10) {
-            val value = current ?: error("No actual clickable ancestor for document UI node")
-            if (value.isClickable && value.isEnabled) {
-                assertTrue("Actual system document control click", value.performAction(AccessibilityNodeInfo.ACTION_CLICK))
-                return
-            }
+        while (current != null) {
+            val value = current
+            if (value.isClickable && value.isEnabled && value.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return
             current = value.parent
         }
-        error("No clickable document UI control")
+        // Android 15 has also exposed a visible Downloads root title without any
+        // clickable ancestor. Exercise that exact row through the real picker.
+        check(node.refresh() && node.isVisibleToUser && node.isEnabled)
+        val window = automation.windows.single { it.id == node.windowId && it.isActive && it.root?.packageName?.toString() in pickerPackages }
+        val bounds = Rect().also(node::getBoundsInScreen)
+        val available = Rect().also(window::getBoundsInScreen)
+        check(!bounds.isEmpty && available.contains(bounds.centerX(), bounds.centerY()))
+        touchBounds(bounds)
     }
 
     private fun awaitCondition(description: String, timeoutMs: Long = 15_000, condition: () -> Boolean) {

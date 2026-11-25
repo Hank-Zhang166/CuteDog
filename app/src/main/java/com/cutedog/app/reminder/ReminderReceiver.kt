@@ -1,6 +1,5 @@
 package com.cutedog.app.reminder
 
-import android.app.NotificationManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -23,13 +22,16 @@ class ReminderReceiver : BroadcastReceiver() {
     private fun handle(context: Context, intent: Intent, id: Long) {
         val repository = ReminderRepository(context)
         val scheduler = ReminderScheduler(context)
-        val manager = context.getSystemService(NotificationManager::class.java)
         val item = repository.get(id) ?: return
         val occurrence = intent.getLongExtra(ReminderScheduler.EXTRA_OCCURRENCE, item.dueAt)
         val token = intent.getStringExtra(ReminderScheduler.EXTRA_TOKEN) ?: ReminderScheduler.normalToken(occurrence)
         when (intent.action) {
             ReminderScheduler.ACTION_COMPLETE -> {
-                scheduler.completeOccurrence(id, occurrence)
+                // A recurring task was already advanced on its original alarm. A snooze
+                // acknowledgement must never consume the next scheduled occurrence.
+                if (item.repeat != "none" && token.startsWith("snooze:")) {
+                    scheduler.dismissNotification(id, token)
+                } else scheduler.completeOccurrence(id, occurrence, token)
                 repository.acknowledgeDelivery(id, token)
             }
             ReminderScheduler.ACTION_SNOOZE -> {
@@ -38,11 +40,11 @@ class ReminderReceiver : BroadcastReceiver() {
                     repository.acknowledgeDelivery(id, token)
                     repository.get(id)?.let(scheduler::schedule)
                 }
-                manager.cancel(id.toString(), NOTIFICATION_ID)
+                scheduler.dismissNotification(id, token)
             }
             ReminderScheduler.ACTION_DISMISS -> {
                 repository.acknowledgeDelivery(id, token)
-                manager.cancel(id.toString(), NOTIFICATION_ID)
+                scheduler.dismissNotification(id, token)
             }
             ReminderScheduler.ACTION_FIRE -> {
                 if (item.completed || item.dueAt != occurrence) return
@@ -59,6 +61,9 @@ class ReminderReceiver : BroadcastReceiver() {
                 repository.setSnooze(id, 0)
                 scheduler.retryPending()
             }
+        }
+        if (intent.action in setOf(ReminderScheduler.ACTION_COMPLETE, ReminderScheduler.ACTION_SNOOZE, ReminderScheduler.ACTION_DISMISS)) {
+            dogReminders.removeToken(id, token)
         }
         context.sendBroadcast(Intent("com.cutedog.app.REMINDERS_CHANGED").setPackage(context.packageName))
     }

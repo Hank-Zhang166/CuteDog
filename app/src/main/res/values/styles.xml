@@ -8,4 +8,12 @@
         <item name="android:windowActionModeOverlay">true</item>
         <item name="android:colorAccent">#4D6B57</item>
     </style>
+    <style name="Theme.CuteDog.PetChat" parent="android:style/Theme.Material.Light.Dialog.NoActionBar">
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowCloseOnTouchOutside">true</item>
+        <item name="android:backgroundDimAmount">0.18</item>
+        <item name="android:windowMinWidthMajor">0dp</item>
+        <item name="android:windowMinWidthMinor">0dp</item>
+        <item name="android:colorAccent">#4D6B57</item>
+    </style>
 </resources>

@@ -57,7 +57,8 @@ class FrameClipPlayer(context: Context) : Closeable {
     val requiredTickRate: Int get() = currentClip?.let { manifest?.clips?.get(it)?.fps } ?: 24
     fun nextFrameDelayMillis(elapsedSinceVsyncNanos: Long = 0L): Long {
         val retry = when {
-            loaded.get() == null || snapshot.error != null || snapshot.travelBlocked -> 250L
+            startupError.get() != null || snapshot.error != null || snapshot.travelBlocked -> 250L
+            loaded.get() == null -> 32L
             snapshot.loading -> 16L // A lightweight cache check at the next vsync; decoding remains off-thread.
             else -> return cadence.delayUntilNextFrameMillis(requiredTickRate, elapsedSinceVsyncNanos)
         }
@@ -68,17 +69,10 @@ class FrameClipPlayer(context: Context) : Closeable {
         val assets = context.applicationContext.assets
         initWorker.execute {
             try {
-                val json = ClipIntegrity.readLimited(assets.open(ClipManifest.ASSET_PATH), ClipIntegrity.MAX_MANIFEST_BYTES).toString(Charsets.UTF_8)
-                val manifest = ClipManifest.parse(json, requiredClipIds = ReleasedArtwork.REQUIRED_ACTIONS)
-                val source = FrameAssetSource { assets.open(it) }
-                PhaseProofVerifier.verify(manifest, source)
-                // Validate all declared filenames once, on the loader thread, before claiming readiness.
-                for (clip in manifest.clips.values) {
-                    val files = assets.list("pet3d/${clip.id}").orEmpty().toSet()
-                    require(clip.frames.all { it.substringAfterLast('/') in files }) { "${clip.id} 缺少清单声明的实际动画帧" }
-                }
-                val loader = BitmapFrameLoader(source, manifest.width, manifest.height,
-                    frameDigests = manifest.frameDigests, verificationDependencies = manifest.verificationDependencies)
+                val bytes = ClipIntegrity.readLimited(assets.open(ClipManifest.ASSET_PATH), ClipIntegrity.MAX_MANIFEST_BYTES)
+                val manifest = ClipManifest.parse(bytes.toString(Charsets.UTF_8), requiredClipIds = ReleasedArtwork.REQUIRED_ACTIONS)
+                PhaseProofVerifier.verify(manifest, FrameAssetSource { assets.open(it) })
+                val loader = CompactFrameIndex.openLoader(assets, manifest, bytes)
                 if (memoryPressure) loader.trimMemory()
                 if (closed) loader.close() else {
                     loaded.set(Loaded(manifest, loader))
@@ -96,7 +90,8 @@ class FrameClipPlayer(context: Context) : Closeable {
         if (closed) return false
         val control = director
         if (control == null) {
-            if (loaded.get()?.manifest?.requestableClipIds?.contains(clipId) == false) return false
+            val manifest = loaded.get()?.manifest
+            if (manifest != null && manifest.requestableName(clipId) == null) return false
             pendingRequest = clipId; headingAfterRequest = false
             return true
         }

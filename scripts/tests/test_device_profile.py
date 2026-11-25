@@ -24,19 +24,29 @@ class OfflineProfileRegression(unittest.TestCase):
         # Android 15 rejects `dumpsys activity activity <component>`; observed in run43705660323.
         with tempfile.TemporaryDirectory() as folder:
             device = p.Device('offline-fixture', Path(folder))
-            metric = {'scope': 'activity', 'renderMode': 'authored_frames', 'actualFrameChanges': 42}
+            emitted = ['[]']
             def fake_run(*args, **kwargs):
                 if args == ('shell', 'dumpsys', 'activity', p.ACTIVITY):
-                    return '  CUTEDOG_VIEW_METRICS_JSON:' + json.dumps([metric])
+                    return '  CUTEDOG_VIEW_METRICS_JSON:' + emitted[0]
                 if args[:3] == ('shell', 'dumpsys', 'activity'):
                     return 'Unknown command: activity\nBad activity command, or no activities match: activity\n'
                 return ''
             device.run = fake_run
             device.screen_state = lambda: {'interactive': True}
             actual = device.snapshot('foreground-before', 'activity')
-            self.assertEqual([metric], actual['pet'])
+            self.assertEqual([], actual['pet'])
+            self.assertTrue(actual['empty_activity_pet_registry'])
+            emitted[0] = 'invalid'
+            self.assertFalse(device.snapshot('invalid-probe', 'activity')['empty_activity_pet_registry'])
             self.assertIn('CUTEDOG_VIEW_METRICS_JSON',
                           (Path(folder) / actual['evidence']['diagnostics']).read_text())
+
+    def test_controls_behind_desktop_pet_are_scrolled_instead_of_tapped(self):
+        dump = f"Window #1 Window{{a u0 {p.PACKAGE}}}:\n  ty=APPLICATION_OVERLAY mHasSurface=true\n  Frames: frame=[581,1279][977,1675] last=[100,100][200,200]"
+        pets = p.visible_pet_rectangles(dump)
+        self.assertEqual([(581,1279,977,1675)], pets)
+        self.assertIsNone(p.uncovered_point((728,1595,880,1650), pets))
+        self.assertEqual((555,1622), p.uncovered_point((470,1595,640,1650), pets))
 
     def test_actual_apk_manifest_enables_strict_binding_without_using_source_tree(self):
         with tempfile.TemporaryDirectory() as folder:

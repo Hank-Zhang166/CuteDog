@@ -38,6 +38,7 @@ data class FrameClip(
     val exitStateSha256: String? = null,
     val phaseEntry: PhaseEntry? = null,
     val terminalProof: ClipTerminalProof? = null,
+    val backwardTravel: Boolean = false,
 )
 
 /** Only authored, independently rendered clips are accepted; an alias is not a motion. */
@@ -52,6 +53,10 @@ class ClipManifest(
     val clips: Map<String, FrameClip> = clips.associateBy { it.id }
     val frameBytes: Int get() = width * height * 4
     private val stoppingTravel = mutableMapOf<String, DoubleArray>()
+    // Prefetch and playback consult the same phase-to-goal routes every frame.
+    private val routeCache = object : LinkedHashMap<Pair<String, String>, List<String>>(32, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Pair<String, String>, List<String>>?): Boolean = size > 256
+    }
     private val phaseIndex = clips.filter { it.phaseEntry != null }.groupBy { it.phaseEntry!!.sourceClip }
         .mapValues { (_, values) -> values.sortedBy { it.phaseEntry!!.atFrame } }
     val requestableClipIds: Set<String> = clips.filter { it.phaseEntry == null }.mapTo(linkedSetOf()) { it.id }
@@ -91,6 +96,7 @@ class ClipManifest(
                 (clip.projectedTravel.size == clip.frames.size && clip.travelUnits == "canvas_width_fraction")) { "${clip.id} 位移必须逐帧声明，单位只能为画幅宽度比例" }
             require(clip.projectedTravel.all { it.isFinite() && it in 0.0..1.0 }) { "${clip.id} 包含无效逐帧位移" }
             require(!clip.travelEnabled || clip.projectedTravel.any { it > 0.0 }) { "${clip.id} 未提供实测位移，不能启用平移" }
+            require(!clip.backwardTravel || (clip.travelEnabled && clip.heading == clip.exitHeading)) { "${clip.id} 后退需要同朝向实测步幅" }
             require(!clip.travelEnabled || clip.interrupt != ClipInterrupt.IMMEDIATE) { "${clip.id} 的实测步幅不能经近姿态出口提前切走" }
             if (clip.projectedTravel.any { it > 0.0 }) {
                 require(clip.heading != null && clip.heading == clip.exitHeading) { "${clip.id} 的位移需要已完成换向的真实朝向" }
@@ -205,6 +211,17 @@ class ClipManifest(
     /** Canonical identity is metadata, never inferred by stripping a name suffix. */
     fun canonicalClipId(id: String): String? = clips[id]?.let { it.variantOf ?: it.id }
 
+    /** Migrate persisted movement requests without advertising retired IDs as available actions. */
+    fun requestableName(id: String): String? {
+        if (id in requestableClipIds) return id
+        val jogging = when (id) {
+            "run", "trot_to_run", "run_to_trot" -> "trot"
+            "run_right", "trot_to_run_right", "run_to_trot_right" -> "trot_right"
+            else -> return null
+        }
+        return jogging.takeIf { it in requestableClipIds }
+    }
+
     /** Explicit variant IDs remain exact requests; a canonical family resolves to authored pixels. */
     fun resolveClip(id: String, heading: ClipHeading?): String? {
         val clip = clips[id] ?: return null
@@ -221,10 +238,18 @@ class ClipManifest(
     }
 
     /** Returns the shortest authored route excluding [from], or null when unavailable. */
-    fun route(from: String, to: String): List<String>? {
+    @Synchronized fun route(from: String, to: String): List<String>? {
         if (from !in clips || to !in clips) return null
         if (clips.getValue(to).phaseEntry != null) return null
         if (from == to) return emptyList()
+        val key = Pair(from, to)
+        routeCache[key]?.let { return it }
+        val found = shortestRoute(from, to) ?: return null
+        routeCache[key] = found
+        return found
+    }
+
+    private fun shortestRoute(from: String, to: String): List<String>? {
         val queue = java.util.ArrayDeque<String>()
         val previous = mutableMapOf<String, String?>()
         queue.add(from); previous[from] = null
@@ -237,7 +262,7 @@ class ClipManifest(
                     val path = mutableListOf(next)
                     var cursor = previous[next]
                     while (cursor != null && cursor != from) { path += cursor; cursor = previous[cursor] }
-                    return path.asReversed()
+                    return java.util.Collections.unmodifiableList(path.asReversed())
                 }
                 queue.add(next)
             }
@@ -252,7 +277,7 @@ class ClipManifest(
         private val PROOF_FRAME_PATH = Regex("pet3d/proofs/[a-zA-Z0-9_-]+\\.(png|webp)")
         const val ASSET_PATH = "pet3d/manifest.json"
         val REQUIRED_ACTIONS = setOf(
-            "stand", "sit", "sit_idle", "stand_up", "lie", "lie_idle", "lie_to_stand", "side_lie", "curl", "sleep", "fall_asleep", "wake", "stretch", "yawn", "tail_wag", "breathe", "blink", "look_left", "look_right", "tilt", "scratch", "lick_paw", "groom", "walk", "trot", "run", "walk_start", "walk_stop", "hop", "jump", "turn", "backstep", "pause", "slide_correct", "land", "rebound", "happy", "tongue", "excited", "cuddle", "curious", "sleepy", "sad", "shy", "expect", "relax", "startled", "soothe", "focus", "pet_head", "nuzzle", "follow", "wave", "belly_up", "request_pet", "treat", "play_ball", "seek", "call",
+            "stand", "sit", "sit_idle", "stand_up", "lie", "lie_idle", "lie_to_stand", "side_lie", "curl", "sleep", "fall_asleep", "wake", "stretch", "yawn", "tail_wag", "breathe", "blink", "look_left", "look_right", "tilt", "scratch", "lick_paw", "groom", "walk", "trot", "walk_start", "walk_stop", "hop", "jump", "turn", "backstep", "pause", "slide_correct", "land", "rebound", "happy", "excited", "cuddle", "curious", "sleepy", "shy", "expect", "relax", "startled", "soothe", "focus", "pet_head", "nuzzle", "follow", "wave", "belly_up", "request_pet", "treat", "play_ball", "seek", "call",
         )
         fun parse(json: String, requiredClipIds: Set<String> = REQUIRED_ACTIONS): ClipManifest {
             require(json.length <= 2_000_000) { "角色清单过大" }
@@ -309,7 +334,11 @@ class ClipManifest(
                     if (safe == null) emptySet() else (0 until safe.length()).map(safe::getInt).toSet(),
                     optionalString("variantOf"), heading, optionalString("exitHeading")?.let { ClipHeading.parse(it) } ?: heading,
                     travel, optionalString("travelUnits"), travelEnabled, optionalString("sampling") ?: "inclusive_endpoints",
-                    hashes, optionalString("entryStateSha256"), optionalString("exitStateSha256"), phase, terminal)
+                    hashes, optionalString("entryStateSha256"), optionalString("exitStateSha256"), phase, terminal,
+                    if (item.has("backwardTravel")) {
+                        require(item.get("backwardTravel") is Boolean)
+                        item.getBoolean("backwardTravel")
+                    } else false)
             }
             return ClipManifest(root.getInt("width"), root.getInt("height"), root.getString("initialClip"), clips, requiredClipIds, version)
         }

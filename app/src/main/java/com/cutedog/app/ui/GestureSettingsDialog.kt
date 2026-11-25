@@ -23,7 +23,6 @@ internal fun GestureSettingsDialog(onDismiss: () -> Unit) {
     val context = LocalContext.current
     val prefs = remember { PetSettings(context) }
     var tap by rememberSaveable { mutableStateOf(prefs.tapAction) }
-    var doubleTap by rememberSaveable { mutableStateOf(prefs.doubleTapAction) }
     var petting by rememberSaveable { mutableStateOf(prefs.pettingEnabled) }
     var hold by rememberSaveable { mutableFloatStateOf(prefs.dragHoldMs.toFloat()) }
     var x by rememberSaveable { mutableFloatStateOf(prefs.defaultX) }
@@ -33,12 +32,12 @@ internal fun GestureSettingsDialog(onDismiss: () -> Unit) {
             Column(Modifier.padding(22.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(18.dp)) {
                 Text("用你习惯的方式互动", style = MaterialTheme.typography.titleLarge)
                 Text("单击小狗", style = MaterialTheme.typography.titleMedium)
-                GestureOptions(tap, listOf("menu" to "快捷菜单", "chat" to "打开聊天", "wave" to "打个招呼")) { tap = it }
+                GestureOptions(tap, listOf("pet" to "摸摸", "wave" to "打招呼", "cuddle" to "抱抱")) { tap = it }
                 Text("双击小狗", style = MaterialTheme.typography.titleMedium)
-                GestureOptions(doubleTap, listOf("cuddle" to "抱抱", "jump" to "蹦一下", "wave" to "打招呼", "none" to "无动作")) { doubleTap = it }
+                Text("双击打开互动菜单，锁定位置时也可以使用。", style = MaterialTheme.typography.bodyMedium)
                 Row { Text("识别轻抚动作", modifier = Modifier.weight(1f)); Switch(petting, { petting = it }) }
                 Text("长按多久开始拖动", style = MaterialTheme.typography.titleMedium)
-                Text("${hold.toInt()} 毫秒 · 按住后再拖动，避免和轻抚混淆。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("${hold.toInt()} 毫秒后可以拖动。轻抚时直接移动手指即可。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Slider(hold, { hold = it }, valueRange = 300f..900f, steps = 11, modifier = Modifier.semantics { contentDescription = "长按拖动等待时间" })
                 HorizontalDivider()
                 Text("默认出现位置", style = MaterialTheme.typography.titleMedium)
@@ -47,7 +46,7 @@ internal fun GestureSettingsDialog(onDismiss: () -> Unit) {
                 Text("屏幕纵向 · ${(y * 100).toInt()}%", style = MaterialTheme.typography.labelLarge)
                 Slider(y, { y = it }, valueRange = 0f..1f, modifier = Modifier.semantics { contentDescription = "默认位置纵向" })
                 TextButton(onClick = { x = prefs.xFraction; y = prefs.yFraction }) { Text("使用小狗当前的位置") }
-                Button(onClick = { prefs.tapAction = tap; prefs.doubleTapAction = doubleTap; prefs.pettingEnabled = petting; prefs.dragHoldMs = hold.toInt(); prefs.defaultX = x; prefs.defaultY = y; context.message("互动方式已保存。"); onDismiss() }, modifier = Modifier.fillMaxWidth()) { Text("保存设置") }
+                Button(onClick = { prefs.tapAction = tap; prefs.pettingEnabled = petting; prefs.dragHoldMs = hold.toInt(); prefs.defaultX = x; prefs.defaultY = y; context.message("互动方式已保存。"); onDismiss() }, modifier = Modifier.fillMaxWidth()) { Text("保存设置") }
                 OutlinedButton(onClick = { prefs.defaultX = x; prefs.defaultY = y; OverlayService.resetPosition(context); context.message("已恢复到默认位置。") }, modifier = Modifier.fillMaxWidth()) { Text("立即恢复默认位置") }
                 TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text("取消") }
             }

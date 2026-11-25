@@ -1,0 +1,154 @@
+{
+  "play_ball": {
+    "intervals": 146,
+    "terminalIncluded": true,
+    "files": {
+      "dog": 147,
+      "stage": 147
+    },
+    "decodedMp4Frames": 146,
+    "firstAndLastDrawingVisiblePixelDifferences": [
+      0,
+      0
+    ],
+    "minAdjacentDogSilhouetteIoU": 0.8972,
+    "multiComponentOpaqueFramesAt6px": 0,
+    "halfAlphaBallContact": {
+      "25": {
+        "distancePx": 11.045,
+        "maskOverlapPx": 0
+      },
+      "26": {
+        "distancePx": 0.0,
+        "maskOverlapPx": 33
+      },
+      "27": {
+        "distancePx": 2.828,
+        "maskOverlapPx": 0
+      },
+      "63": {
+        "distancePx": 0.0,
+        "maskOverlapPx": 57
+      },
+      "66": {
+        "distancePx": 0.0,
+        "maskOverlapPx": 306
+      },
+      "109": {
+        "distancePx": 14.0,
+        "maskOverlapPx": 0
+      },
+      "110": {
+        "distancePx": 0.0,
+        "maskOverlapPx": 45
+      },
+      "111": {
+        "distancePx": 0.0,
+        "maskOverlapPx": 253
+      },
+      "112": {
+        "distancePx": 0.0,
+        "maskOverlapPx": 60
+      },
+      "113": {
+        "distancePx": 4.0,
+        "maskOverlapPx": 0
+      }
+    },
+    "chaseDistancePx": 150.0,
+    "chaseSourceMatchedSamples": 31,
+    "wholeBallVisibleAtMobileContacts": [
+      26,
+      66,
+      94,
+      111
+    ]
+  },
+  "treat": {
+    "intervals": 120,
+    "terminalIncluded": true,
+    "files": {
+      "dog": 121,
+      "stage": 121
+    },
+    "decodedMp4Frames": 120,
+    "firstAndLastDrawingVisiblePixelDifferences": [
+      0,
+      0
+    ],
+    "minAdjacentDogSilhouetteIoU": 0.9472,
+    "multiComponentOpaqueFramesAt6px": 0,
+    "biscuitsWhileEating": "Stage-front tracked biscuit with progressive occlusion at the lips."
+  },
+  "nuzzle": {
+    "intervals": 69,
+    "terminalIncluded": true,
+    "files": {
+      "dog": 70,
+      "stage": 70
+    },
+    "decodedMp4Frames": 69,
+    "firstAndLastDrawingVisiblePixelDifferences": [
+      0,
+      0
+    ],
+    "minAdjacentDogSilhouetteIoU": 0.9852,
+    "multiComponentOpaqueFramesAt6px": 0
+  },
+  "paw_lick": {
+    "intervals": 72,
+    "terminalIncluded": true,
+    "files": {
+      "dog": 73,
+      "stage": 73
+    },
+    "decodedMp4Frames": 72,
+    "firstAndLastDrawingVisiblePixelDifferences": [
+      0,
+      0
+    ],
+    "minAdjacentDogSilhouetteIoU": 0.9947,
+    "multiComponentOpaqueFramesAt6px": 0
+  },
+  "groom": {
+    "intervals": 81,
+    "terminalIncluded": true,
+    "files": {
+      "dog": 82,
+      "stage": 82
+    },
+    "decodedMp4Frames": 81,
+    "firstAndLastDrawingVisiblePixelDifferences": [
+      0,
+      0
+    ],
+    "minAdjacentDogSilhouetteIoU": 0.943,
+    "multiComponentOpaqueFramesAt6px": 0,
+    "contactFramesInclusive": [
+      27,
+      60
+    ],
+    "maxLipToShoulderMarkerPx": 2.915,
+    "measuredStrokeDisplacementsPx": [
+      23.835,
+      21.894
+    ],
+    "fixedPixelsFromY": 338,
+    "shoulderContours": [
+      {
+        "frame": 21,
+        "xFirst": 308,
+        "xLast": 331,
+        "maxVerticalStepPx": 1,
+        "maxSoftFurWidthAtAlpha25To230Px": 6
+      },
+      {
+        "frame": 35,
+        "xFirst": 332,
+        "xLast": 352,
+        "maxVerticalStepPx": 1,
+        "maxSoftFurWidthAtAlpha25To230Px": 7
+      }
+    ]
+  }
+}

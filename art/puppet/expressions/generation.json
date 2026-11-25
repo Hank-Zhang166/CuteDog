@@ -1,0 +1,39 @@
+{
+  "tool": "image_gen.imagegen",
+  "createdUtcDate": "2026-11-15",
+  "transparent_background": true,
+  "referenceFiles": [
+    {
+      "path": "art/puppet/output/assembled-cream.png",
+      "sha256": "9ad18c091587ede742b15458f0b9f95226b19fe0c881b859cb071683147add4b"
+    },
+    {
+      "path": "art/puppet/puppet-atlas.png",
+      "sha256": "0384ec64dce622ad86e49c271b949305c2f8d779178129bff2fdcbc52ffb3473"
+    }
+  ],
+  "source": "head-expressions.png",
+  "sourceSha256": "df7f0d67c5faaf93755ceb6f1fcf305ba94f7e71d0ea39ab5c76e2282197be72",
+  "actualSize": [
+    1254,
+    1254
+  ],
+  "mode": "RGBA",
+  "requestedGrid": [
+    3,
+    3
+  ],
+  "requestedExpressions": [
+    "neutral",
+    "happy",
+    "blink",
+    "sleepy",
+    "yawn",
+    "disappointed",
+    "curious",
+    "startled",
+    "lick"
+  ],
+  "status": "source_candidate_requires_registration_and_transition_review",
+  "notes": "Nine painted key expressions are not nine finished animations. Preserve skull/neck identity when integrating; actual expression and grid must be reviewed independently."
+}

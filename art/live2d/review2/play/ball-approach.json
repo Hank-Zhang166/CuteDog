@@ -1,0 +1,10 @@
+{
+  "clip": "play_ball",
+  "fps": 24,
+  "intervals": 146,
+  "revisedRangeInclusive": [
+    62,
+    98
+  ],
+  "approvedOutsideContactFrameDigest": "92998cf981bda68939132d82824bf1f989025e147f6cad9d81ee611f71a56dcc"
+}

@@ -22,6 +22,7 @@ class ReminderScheduler(context: Context) {
         require(item.id > 0) { "Save the reminder before scheduling it" }
         cancelAlarms(item.id)
         if (item.completed) {
+            dogReminders.remove(item.id)
             dismissNotification(item.id)
             return
         }
@@ -34,6 +35,7 @@ class ReminderScheduler(context: Context) {
     }
 
     fun cancel(id: Long) {
+        dogReminders.remove(id)
         cancelAlarms(id)
         dismissNotification(id)
     }
@@ -43,8 +45,15 @@ class ReminderScheduler(context: Context) {
         alarms.cancel(operation(id, ACTION_SNOOZE_FIRE, 0))
     }
 
-    private fun dismissNotification(id: Long) {
-        context.getSystemService(NotificationManager::class.java).cancel(id.toString(), ReminderReceiver.NOTIFICATION_ID)
+    internal fun dismissNotification(id: Long, token: String? = null) {
+        val manager = context.getSystemService(NotificationManager::class.java)
+        val tag = id.toString()
+        if (token != null) {
+            val card = manager.activeNotifications.firstOrNull { it.tag == tag && it.id == ReminderReceiver.NOTIFICATION_ID }
+            val activeToken = card?.notification?.extras?.getString(EXTRA_TOKEN)
+            if (activeToken != null && activeToken != token) return
+        }
+        manager.cancel(tag, ReminderReceiver.NOTIFICATION_ID)
     }
 
     fun restoreAll() {
@@ -72,7 +81,7 @@ class ReminderScheduler(context: Context) {
 
     fun retryPending(): Int = ReminderOutbox(context).retryPending()
 
-    fun completeOccurrence(id: Long, occurrenceAt: Long? = null) {
+    fun completeOccurrence(id: Long, occurrenceAt: Long? = null, deliveryToken: String? = null) {
         val db = repository.database
         db.beginTransaction()
         try {
@@ -87,12 +96,13 @@ class ReminderScheduler(context: Context) {
                 }
                 // Capture and acknowledge atomically: a concurrent retry cannot see a future occurrence as pending.
                 repository.acknowledgeDelivery(id, normalToken(occurrence))
-                repository.setSnooze(id, 0)
+                if (item.dueAt == occurrence) repository.setSnooze(id, 0)
             }
             db.setTransactionSuccessful()
         } finally { db.endTransaction() }
+        dogReminders.remove(id, occurrenceAt)
         repository.get(id)?.let(::schedule)
-        dismissNotification(id)
+        dismissNotification(id, deliveryToken)
     }
 
     private fun scheduleAlarm(timestamp: Long, operation: PendingIntent) {
@@ -121,7 +131,6 @@ class ReminderScheduler(context: Context) {
         const val EXTRA_ID = "reminder_id"
         const val EXTRA_OCCURRENCE = "occurrence_at"
         const val EXTRA_TOKEN = "delivery_token"
-        const val EVENT_REMINDER = "com.cutedog.app.REMINDER_EVENT"
         internal fun normalToken(due: Long) = "due:$due"
         internal fun intent(context: Context, id: Long, action: String) = Intent(context, ReminderReceiver::class.java)
             .setAction(action).setData(Uri.parse("cutedog://reminder/$id/${action.substringAfterLast('.')}"))

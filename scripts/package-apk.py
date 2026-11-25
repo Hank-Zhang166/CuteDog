@@ -20,6 +20,10 @@ APK_FIELDS = {"file", "bytes", "sha256", "applicationId", "versionName", "versio
               "minimumSdk", "targetSdk", "debuggable", "signerCertificateSha256"}
 PROVENANCE_NOTE = ("sourceCommit identifies the declared source checkout. APK metadata and "
                    "signature verification do not prove reproducible correspondence to that source.")
+# This reviewed init script appends .motionpreview only to debug and inherits all
+# defaultConfig version/SDK values. Recheck those rules if its Git blob changes.
+MOTION_PREVIEW_SCRIPT = "tools/preview/motion-preview.gradle"
+MOTION_PREVIEW_BLOB = "b62bdee2122fcb3d066681c922fa980a3c262924"
 
 
 def run(args, cwd=None):
@@ -80,11 +84,13 @@ def inspect_apk(source, tool_directory=None):
     if not source.is_file() or source.stat().st_size == 0:
         raise ValueError(f"APK is missing or empty: {source}")
     directory = build_tools(tool_directory)
-    for name in ("aapt", "apksigner"):
-        if not (directory / name).is_file():
-            raise ValueError(f"Missing Android tool: {directory / name}")
-    verification = run([directory / "apksigner", "verify", "--verbose", "--print-certs", source])
-    badging = run([directory / "aapt", "dump", "badging", source])
+    aapt = directory / ("aapt.exe" if os.name == "nt" else "aapt")
+    signer = directory / ("apksigner.bat" if os.name == "nt" else "apksigner")
+    for tool in (aapt, signer):
+        if not tool.is_file():
+            raise ValueError(f"Missing Android tool: {tool}")
+    verification = run([signer, "verify", "--verbose", "--print-certs", source])
+    badging = run([aapt, "dump", "badging", source])
     metadata = parse_metadata(badging, verification)
     metadata.update(bytes=source.stat().st_size, sha256=sha256(source))
     return metadata, badging, verification
@@ -127,7 +133,13 @@ def source_metadata(repo, commit):
 
 
 def check_source_metadata(metadata, repo, commit):
-    for key, value in source_metadata(repo, commit).items():
+    expected = source_metadata(repo, commit)
+    preview_id = expected["applicationId"] + ".motionpreview"
+    if metadata["applicationId"] == preview_id and metadata.get("debuggable") is True:
+        entry = run(["git", "ls-tree", commit, "--", MOTION_PREVIEW_SCRIPT], repo).strip()
+        if entry == f"100644 blob {MOTION_PREVIEW_BLOB}\t{MOTION_PREVIEW_SCRIPT}":
+            expected = {**expected, "applicationId": preview_id}
+    for key, value in expected.items():
         if metadata[key] != value:
             raise ValueError(f"APK {key} does not match source commit {commit}")
 

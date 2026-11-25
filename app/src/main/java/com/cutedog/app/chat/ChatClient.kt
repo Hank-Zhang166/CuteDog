@@ -10,7 +10,7 @@ class ChatClient(context: Context) {
     private val app = context.applicationContext
     private val transport = ChatTransport()
 
-    suspend fun reply(history: List<ChatMessage>, userMessageId: Long? = null): ChatReply {
+    suspend fun reply(history: List<ChatMessage>, userMessageId: Long? = null, onText: (String) -> Unit = {}): ChatReply {
         val request = withContext(Dispatchers.IO) {
             val settings = AiSettings(app)
             val key = try { settings.apiKey } catch (e: IllegalStateException) {
@@ -25,6 +25,6 @@ class ChatClient(context: Context) {
                 userMessageId = userMessageId,
             )
         }
-        return transport.execute(request)
+        return transport.execute(request, onText)
     }
 }

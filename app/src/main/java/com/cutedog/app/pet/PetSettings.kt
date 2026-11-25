@@ -39,12 +39,10 @@ class PetSettings(context: Context) {
     var yFraction: Float
         get() = p.getFloat("y", .72f)
         set(v) { p.edit().putFloat("y", v.coerceIn(0f, 1f)).apply() }
+    private val tapGestures = setOf("pet", "wave", "cuddle")
     var tapAction: String
-        get() = p.getString("tapAction", "menu")!!
-        set(v) { require(v in listOf("menu", "chat", "wave")); p.edit().putString("tapAction", v).apply() }
-    var doubleTapAction: String
-        get() = p.getString("doubleTapAction", "cuddle")!!
-        set(v) { require(v in listOf("cuddle", "jump", "wave", "none")); p.edit().putString("doubleTapAction", v).apply() }
+        get() = p.getString("tapAction", "pet")?.takeIf { it in tapGestures } ?: "pet"
+        set(v) { require(v in tapGestures); p.edit().putString("tapAction", v).apply() }
     var pettingEnabled: Boolean
         get() = p.getBoolean("pettingEnabled", true)
         set(v) { p.edit().putBoolean("pettingEnabled", v).apply() }

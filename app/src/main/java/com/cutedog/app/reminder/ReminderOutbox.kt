@@ -23,6 +23,13 @@ internal class ReminderOutbox(private val context: Context) {
     private fun retryPendingLocked(): Int {
         val records = repository.retryableDeliveries()
         if (records.isEmpty()) return 0
+        // Surface new occurrences in a visible dog even if notification permission is off.
+        // Reconciliation of an already blocked/failed record must not repeat a dog prompt.
+        records.asReversed().filter { it.status == "pending" }.forEach { task ->
+            if (repository.get(task.reminderId)?.completed == false) {
+                dogReminders.offer(DogReminder(task.reminderId, task.dueAt, task.token, task.title))
+            }
+        }
         manager.createNotificationChannel(NotificationChannel(ReminderReceiver.CHANNEL_ID, "事项提醒", NotificationManager.IMPORTANCE_HIGH).apply {
             description = "备忘事项到期、提前与稍后提醒"; lockscreenVisibility = Notification.VISIBILITY_PRIVATE
         })
@@ -53,9 +60,6 @@ internal class ReminderOutbox(private val context: Context) {
                 }
                 repository.updateDelivery(record.reminderId, record.token, "sent")
                 sent++
-                context.sendBroadcast(Intent(ReminderScheduler.EVENT_REMINDER).setPackage(context.packageName)
-                    .putExtra(ReminderScheduler.EXTRA_ID, record.reminderId).putExtra("title", record.title)
-                    .putExtra("message", "${displayTime(record.dueAt)} · ${record.title}"))
             } catch (_: SecurityException) {
                 repository.updateDelivery(record.reminderId, record.token, "blocked", "通知权限在投递时被撤销，授权后会补发")
             } catch (_: RuntimeException) {
@@ -101,6 +105,7 @@ internal class ReminderOutbox(private val context: Context) {
                 .putExtra(ReminderScheduler.EXTRA_OCCURRENCE, record.dueAt).putExtra(ReminderScheduler.EXTRA_TOKEN, record.token),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         return Notification.Builder(context, ReminderReceiver.CHANNEL_ID).setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
+            .addExtras(android.os.Bundle().apply { putString(ReminderScheduler.EXTRA_TOKEN, record.token) })
             .setContentTitle(if (record.priority >= 3) "重要事项 · ${record.title}" else "小狗来提醒你啦")
             .setContentText(content).setStyle(Notification.BigTextStyle().bigText(content + if (record.details.isNotBlank()) "\n${record.details}" else ""))
             .setContentIntent(open).setAutoCancel(true).setOnlyAlertOnce(true)

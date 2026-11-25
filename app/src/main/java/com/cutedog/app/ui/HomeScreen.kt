@@ -1,8 +1,6 @@
 package com.cutedog.app.ui
 
 import android.content.SharedPreferences
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -11,8 +9,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.semantics
@@ -23,11 +19,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
 import com.cutedog.app.daily.DailyQuote
 import com.cutedog.app.data.Reminder
-import com.cutedog.app.pet.PetSettings
-import com.cutedog.app.pet.PetView
 import com.cutedog.app.pet.behavior.GrowthStore
 import java.time.Instant
 import java.time.LocalDate
@@ -39,11 +32,9 @@ import java.util.Locale
 @Composable
 internal fun HomeScreen(
     reminders: List<Reminder>, quote: DailyQuote?, onAdd: () -> Unit, onTasks: () -> Unit,
-    onChat: () -> Unit, onEdit: (Reminder) -> Unit, onComplete: (Reminder) -> Unit, onFavorite: () -> Unit
+    onChat: () -> Unit, onPetSettings: () -> Unit, onEdit: (Reminder) -> Unit, onComplete: (Reminder) -> Unit, onFavorite: () -> Unit
 ) {
     val context = LocalContext.current
-    val name = remember { PetSettings(context).name }
-    var petView by remember { mutableStateOf<PetView?>(null) }
     val growth = remember { GrowthStore(context.applicationContext) }
     var growthSnapshot by remember { mutableStateOf(growth.snapshot()) }
     var clearGrowth by rememberSaveable { mutableStateOf(false) }
@@ -67,25 +58,8 @@ internal fun HomeScreen(
                 Text("C\nD", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold, lineHeight = 14.sp, modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp))
             }
         }
-        Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(32.dp)).background(Brush.verticalGradient(listOf(MaterialTheme.colorScheme.primaryContainer, MaterialTheme.colorScheme.surfaceVariant)))) {
-            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-                Row(Modifier.fillMaxWidth().padding(top = 20.dp, start = 20.dp, end = 20.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text("$name 的小小世界", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onPrimaryContainer)
-                    Text("轻触 · 打个招呼", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimaryContainer)
-                }
-                AndroidView(factory = { PetView(it).also { view -> petView = view } }, modifier = Modifier.fillMaxWidth().height(242.dp).testTag("home_pet"), update = { it.contentDescription = "毛茸茸的萨摩耶$name，轻触互动" })
-                Text("把平凡的日子，过得毛茸茸。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onPrimaryContainer)
-                Spacer(Modifier.height(18.dp))
-            }
-        }
-        SoftCard(Modifier.fillMaxWidth()) {
-            Text("陪我玩一会儿", style = MaterialTheme.typography.titleMedium)
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp), maxItemsInEachRow = 3) {
-                listOf("call" to "呼唤", "pet" to "摸摸", "ball" to "玩球", "treat" to "零食", "sleep" to "陪我休息").forEach { (intent, label) ->
-                    FilledTonalButton(onClick = { petView?.interact(intent) }, enabled = petView != null, modifier = Modifier.heightIn(min = 48.dp).testTag("home_interact_$intent"), shape = RoundedCornerShape(16.dp), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp)) { Text(label) }
-                }
-            }
-            Text("按自己的节奏相处，玩具随时都在。", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        TextButton(onClick = onPetSettings, modifier = Modifier.testTag("home_pet_settings")) {
+            Text("桌宠设置与悬浮窗权限")
         }
         if (quote != null) {
             SoftCard(Modifier.fillMaxWidth()) {

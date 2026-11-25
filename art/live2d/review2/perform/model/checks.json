@@ -1,0 +1,43 @@
+{
+  "look_around": {
+    "samples": 101,
+    "maximumDifferingPixelsBelowY285": 0,
+    "largestMovingAreaPx": 36169,
+    "facialFeatureChecks": {
+      "eye": {
+        "minimum_template_correlation": 0.9285,
+        "minimum_edge_strength_ratio": 0.9491
+      },
+      "nose": {
+        "minimum_template_correlation": 0.9318,
+        "minimum_edge_strength_ratio": 0.9271
+      },
+      "far_eye": {
+        "minimum_template_correlation": 0.9082,
+        "minimum_edge_strength_ratio": 0.9237
+      },
+      "samples": 101,
+      "static_body_identical": true
+    }
+  },
+  "look_left": {
+    "samples": 40,
+    "maximumDifferingPixelsBelowY285": 0,
+    "largestMovingAreaPx": 35079
+  },
+  "look_right": {
+    "samples": 49,
+    "maximumDifferingPixelsBelowY285": 0,
+    "largestMovingAreaPx": 36200
+  },
+  "curious": {
+    "samples": 55,
+    "maximumDifferingPixelsBelowY285": 0,
+    "largestMovingAreaPx": 34615
+  },
+  "tail_wag": {
+    "samples": 81,
+    "maximumDifferingPixelsBelowY285": 160,
+    "largestMovingAreaPx": 30303
+  }
+}

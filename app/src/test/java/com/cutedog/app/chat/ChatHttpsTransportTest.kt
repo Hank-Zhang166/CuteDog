@@ -74,6 +74,46 @@ class ChatHttpsTransportTest {
         assertEquals(1, requestCount.get())
     }
 
+    @Test fun streamDeliversSpeechBeforeNetworkCompletionAndNeverLeaksActionOrReasoning() = runBlocking {
+        fun event(delta: JSONObject) = "data: " + JSONObject().put("choices", org.json.JSONArray()
+            .put(JSONObject().put("index", 0).put("delta", delta))) + "\n\n"
+        val first = ": keep-alive\n\n" + event(JSONObject().put("reasoning_content", "内部字段")) +
+            event(JSONObject().put("content", "球来啦！"))
+        val tail = event(JSONObject().put("content", " <ac")) +
+            event(JSONObject().put("content", "tion:happy>")) + "data: [DONE]\n\n"
+        val spoken = CountDownLatch(1)
+        val previews = java.util.concurrent.CopyOnWriteArrayList<String>()
+        handler = { exchange ->
+            val bytes = first.toByteArray()
+            val end = tail.toByteArray()
+            exchange.responseHeaders.set("Content-Type", "text/event-stream; charset=utf-8")
+            exchange.sendResponseHeaders(200, (bytes.size + end.size).toLong())
+            exchange.responseBody.write(bytes)
+            exchange.responseBody.flush()
+            check(spoken.await(2, TimeUnit.SECONDS))
+            exchange.responseBody.write(end)
+        }
+        val result = transport().execute(request()) { line ->
+            previews.add(line)
+            if (line == "球来啦！") spoken.countDown()
+        }
+        assertEquals(ChatReply("球来啦！", "happy"), result)
+        assertTrue(previews.isNotEmpty() && previews.all { it == result.text })
+    }
+
+    @Test fun truncatedStreamCannotCommitAnUnfinishedReply() = runBlocking {
+        val partial = "data: {\"choices\":[{\"delta\":{\"content\":\"半句\"}}]}\n\n"
+        handler = { exchange ->
+            val bytes = partial.toByteArray()
+            exchange.responseHeaders.set("Content-Type", "text/event-stream")
+            exchange.sendResponseHeaders(200, bytes.size.toLong())
+            exchange.responseBody.write(bytes)
+        }
+        val previews = mutableListOf<String>()
+        assertTrue(runCatching { transport().execute(request(), previews::add) }.exceptionOrNull() is ChatException)
+        assertEquals(listOf("半句"), previews)
+    }
+
     @Test fun redirectDoesNotForwardCredentialOrFollowDestination() = runBlocking {
         val redirected = AtomicInteger()
         server.createContext("/leak") { redirected.incrementAndGet(); it.close() }

@@ -5,7 +5,6 @@ import com.cutedog.app.pet.animation.ClipInterrupt
 import com.cutedog.app.pet.animation.ClipManifest
 import com.cutedog.app.pet.animation.FrameClip
 import com.cutedog.app.pet.animation.ReleasedArtwork
-import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
 import java.io.File
@@ -18,22 +17,41 @@ class PetBrainTest {
         it.update(0f, current, all, context)
     }
 
-    @Test fun everyEmittedTargetIsAnAuthoredActionNotAPostureTransition() {
-        val file = listOf(File("../art/character/motions.json"), File("art/character/motions.json")).firstOrNull { it.isFile }
-            ?: error("Authored motion catalog is required for this contract test")
-        val clips = JSONObject(file.readText()).getJSONArray("clips")
-        val metadata = (0 until clips.length()).map { clips.getJSONObject(it) }.associateBy { it.getString("id") }
-        assertTrue(metadata.keys.containsAll(all))
-        all.forEach { id ->
-            val clip = metadata.getValue(id)
-            assertEquals("$id must be an endpoint/action, not a standalone transition", clip.getString("entryPose"), clip.getString("exitPose"))
+    @Test fun liveFingertipAndRecordedFollowingUseSeparateSources() {
+        assertEquals("stand", ready().interact("finger_follow"))
+        assertEquals("follow", ready().interact("follow"))
+    }
+
+    @Test fun staleRequestsForRemovedActionsLeaveAnOngoingGestureAlone() {
+        val brain = ready()
+        assertEquals("wave", brain.interact("wave"))
+        for (id in listOf("tongue", "sad")) {
+            assertFalse(id in PetBrain.supportedTargets)
+            assertNull(brain.interact(id))
+            assertEquals("wave", brain.pendingTarget)
         }
     }
 
+    @Test fun everyEmittedTargetIsAnAuthoredActionNotAPostureTransition() {
+        val assets = listOf(File("src/main/assets"), File("app/src/main/assets")).first { it.isDirectory }
+        val manifest = ClipManifest.parse(File(assets, ClipManifest.ASSET_PATH).readText(), ReleasedArtwork.REQUIRED_ACTIONS)
+        // The optional rear-facing pose has no released drawing and must never enter the actual queue.
+        assertEquals(setOf("back_stand"), all - manifest.requestableClipIds)
+        val available = all intersect manifest.requestableClipIds
+        available.forEach { id ->
+            val clip = manifest.clips.getValue(id)
+            assertEquals("$id must be an endpoint/action", clip.entryPose, clip.exitPose)
+            assertNotNull("Missing route from stand to $id", manifest.route("stand", id))
+        }
+        val brain = PetBrain(17)
+        brain.update(0f, "stand", manifest.requestableClipIds, day)
+        assertNull(brain.interact("back_stand"))
+    }
+
     @Test fun requestedGoalWaitsThroughTheEntireAuthoredRouteWithoutChurning() {
-        val brain = ready(current = "run")
+        val brain = ready(current = "trot")
         assertEquals("pet_head", brain.interact("head"))
-        listOf("run_to_trot", "trot", "trot_to_walk", "walk", "walk_stop", "stand").forEach { clip ->
+        listOf("trot_to_walk", "walk", "walk_stop", "stand").forEach { clip ->
             assertNull(brain.update(3f, clip, all, day))
             assertEquals("pet_head", brain.pendingTarget)
         }
@@ -89,13 +107,27 @@ class PetBrainTest {
         assertEquals("soothe", ready().interact("calm"))
     }
 
-    @Test fun publishedHomeGesturesAndAllowedModelIntentsHaveActualAvailableTargets() {
+    @Test fun everyDesktopMenuGestureRequestsAReleasedAction() {
+        val actions = com.cutedog.app.pet.PetInteractionMenu.actions
+        assertEquals(actions.size, actions.map { it.intent }.toSet().size)
+        assertEquals(actions.size, actions.map { it.label }.toSet().size)
         val available = ReleasedArtwork.REQUIRED_ACTIONS
-        val homeAndGestures = mapOf("call" to "wave", "pet" to "soothe", "ball" to "play_ball",
-            "treat" to "treat", "sleep" to "sit_idle", "jump" to "hop", "cuddle" to "soothe")
+        for (action in actions.filter { it.intent != com.cutedog.app.pet.PetInteractionMenu.CHAT }) {
+            val brain = PetBrain(17)
+            brain.update(0f, "stand", available, day)
+            assertTrue("${action.label} must dispatch a playable action", brain.interact(action.intent) in available)
+        }
+    }
+
+    @Test fun publishedDesktopGesturesAndAllowedModelIntentsHaveActualAvailableTargets() {
+        val available = ReleasedArtwork.REQUIRED_ACTIONS
+        val desktopAndGestures = mapOf("call" to "call", "pet" to "pet_head", "ball" to "play_ball",
+            "treat" to "treat", "sleep" to "sleep", "jump" to "jump", "cuddle" to "cuddle", "follow" to "follow")
         val model = mapOf("happy" to "happy", "calm" to "soothe", "curious" to "curious",
-            "cuddle" to "soothe", "wave" to "wave")
-        listOf(homeAndGestures to PetBrain.InteractionSource.USER, model to PetBrain.InteractionSource.MODEL).forEach { (intents, source) ->
+            "cuddle" to "cuddle", "wave" to "wave", "excited" to "excited",
+            "sleepy" to "sleepy", "shy" to "shy", "startled" to "startled")
+        assertEquals(com.cutedog.app.chat.ChatPolicy.allowedIntents, model.keys)
+        listOf(desktopAndGestures to PetBrain.InteractionSource.USER, model to PetBrain.InteractionSource.MODEL).forEach { (intents, source) ->
             intents.forEach { (intent, expected) ->
                 val brain = PetBrain(17).also { it.update(0f, "stand", available, day) }
                 val target = brain.interact(intent, source)
@@ -157,7 +189,7 @@ class PetBrainTest {
     }
 
     @Test fun powerSavingQuietAndNightExcludeAutonomousRunningAndJumping() {
-        val energetic = setOf("walk", "trot", "run", "hop", "jump", "excited", "play_ball")
+        val energetic = setOf("walk", "trot", "hop", "jump", "excited", "play_ball")
         listOf(day.copy(powerSaving = true), day.copy(activity = "quiet"), day.copy(hour = 2)).forEach { context ->
             assertTrue(simulate(23, context, 3600).none { it.second in energetic })
         }
@@ -165,15 +197,15 @@ class PetBrainTest {
 
     @Test fun livelyDayProducesMovementWhileChargingAvoidsHardExercise() {
         val lively = simulate(12, day.copy(activity = "lively", interactionAgeSeconds = 20f), 3600)
-        assertTrue(lively.any { it.second in setOf("walk", "trot", "run", "hop", "jump") })
+        assertTrue(lively.any { it.second in setOf("walk", "trot", "hop", "jump") })
         val charging = simulate(12, day.copy(activity = "lively", charging = true), 3600)
-        assertTrue(charging.none { it.second in setOf("run", "hop", "jump") })
+        assertTrue(charging.none { it.second in setOf("hop", "jump") })
     }
 
     @Test fun longSessionsHaveVarietyWithoutGuiltOrRepeatedRequestsForAttention() {
         val requests = simulate(902, day.copy(interactionAgeSeconds = 3600f), 7200)
         assertTrue("Expected varied context-selected actions", requests.map { it.second }.toSet().size >= 10)
-        assertTrue(requests.none { it.second in setOf("sad", "startled") })
+        assertTrue(requests.none { it.second == "startled" })
         val asks = requests.filter { it.second == "request_pet" }.map { it.first }
         asks.zipWithNext().forEach { (a, b) -> assertTrue("Pet requests must respect ten-minute cooldown", b - a >= 600) }
         val grooming = requests.filter { it.second == "scratch" }.map { it.first }
@@ -187,7 +219,9 @@ class PetBrainTest {
     @Test fun allNamedInteractionsMapToSpecificExistingActions() {
         val expected = mapOf("head" to "pet_head", "body" to "cuddle", "nose" to "curious", "call" to "call",
             "happy" to "happy", "calm" to "soothe", "curious" to "curious", "cuddle" to "cuddle",
-            "wave" to "wave", "jump" to "jump", "treat" to "treat", "ball" to "play_ball", "follow" to "follow")
+            "wave" to "wave", "jump" to "jump", "treat" to "treat", "ball" to "play_ball", "follow" to "follow",
+            "excited" to "excited", "sleepy" to "sleepy",
+            "shy" to "shy", "startled" to "startled", "request_pet" to "request_pet", "seek" to "seek")
         expected.forEach { (kind, clip) -> assertEquals(clip, ready().interact(kind)) }
     }
 

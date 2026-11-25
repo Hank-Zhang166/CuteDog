@@ -1,0 +1,13 @@
+Offline Mandarin recognition
+
+Vosk API for Android by Alpha Cephei and contributors
+https://github.com/alphacep/vosk-api
+Mandarin ASR model vosk-model-small-cn-0.22 by Alpha Cephei
+https://alphacephei.com/vosk/models
+Both are distributed under the Apache License, Version 2.0.
+
+Java Native Access (JNA) by Timothy Wall and contributors
+https://github.com/java-native-access/jna
+Distributed here under the Apache License, Version 2.0.
+
+License text is included in Apache-2.0.txt.

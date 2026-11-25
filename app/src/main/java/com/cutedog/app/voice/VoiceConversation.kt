@@ -1,0 +1,133 @@
+package com.cutedog.app.voice
+
+import android.Manifest
+import android.app.AlertDialog
+import android.animation.ValueAnimator
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.view.accessibility.AccessibilityManager
+import androidx.activity.ComponentActivity
+import com.cutedog.app.PetChatActivity
+import com.cutedog.app.chat.*
+import com.cutedog.app.pet.PetEvents
+import com.cutedog.app.ui.ReplyTyping
+import kotlinx.coroutines.*
+import kotlin.coroutines.resume
+
+/** A foreground-only voice turn. ChatScreen can take over after transcription to use its own history UI. */
+internal class VoiceConversation(
+    private val activity: ComponentActivity,
+    private val onStatus: (String) -> Unit,
+    private val onTranscript: ((String) -> Unit)? = null,
+) {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var capture: MicCapture? = null
+    private var turn: Job? = null
+    private var generation = 0
+    private val voice = lazy { PetSpeech(activity, onStatus) }
+
+    fun start(): Boolean {
+        cancel()
+        if (activity.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            onStatus("请先允许使用麦克风。")
+            return false
+        }
+        return try {
+            capture = MicCapture.start(activity, scope)
+            onStatus("在听啦…松手发送，滑出取消。最多说 30 秒。")
+            true
+        } catch (e: Exception) {
+            onStatus("暂时打不开麦克风，请检查权限或其他正在录音的应用。")
+            false
+        }
+    }
+
+    fun submit() {
+        val recording = capture ?: return
+        capture = null
+        recording.end()
+        val current = generation
+        turn = scope.launch {
+            try {
+                processAudio(recording.finish())
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (e: Exception) { onStatus(e.message?.take(180) ?: "语音对话暂时遇到了问题，请再试一次。") }
+            finally { if (generation == current) turn = null }
+        }
+    }
+
+    internal suspend fun processAudio(pcm: ByteArray) {
+        onStatus("在本机听写刚才的话…")
+        val text = OfflineSpeechInput.transcribe(activity, pcm)
+        currentCoroutineContext().ensureActive()
+        if (text.isBlank()) { onStatus("没听清呢，再按住麦克风说一次吧。"); return }
+        if (onTranscript != null) onTranscript.invoke(text) else converse(text)
+    }
+
+    private suspend fun converse(text: String) {
+        val settings = AiSettings(activity)
+        val consent = activity.getSharedPreferences("ai_ui_consent", Context.MODE_PRIVATE)
+        if (!withContext(Dispatchers.IO) { settings.hasApiKey }) {
+            onStatus("听到你说「$text」。连接对话服务后，小狗就能回答啦。")
+            if (confirm("连接对话服务", "听写结果：$text\n\n打开聊天并配置你自己的模型服务，即可发送这句话。", "去设置")) {
+                activity.startActivity(Intent(activity, PetChatActivity::class.java)
+                    .putExtra(PetChatActivity.VOICE_DRAFT, text).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                activity.finish()
+            }
+            return
+        }
+        if (!consent.getBoolean("remote_chat", false)) {
+            if (!confirm("把听写文字发给小狗？", "本机听写：$text\n\n当前文字、近期聊天和你启用的记忆会发送给设置中的模型服务商。录音仅用于本机识别。", "同意并发送")) {
+                onStatus("已取消发送。"); return
+            }
+            consent.edit().putBoolean("remote_chat", true).apply()
+        }
+        onStatus("听到你说「$text」。小狗在想啦…")
+        val repository = ChatRepository(activity)
+        val (id, history) = withContext(Dispatchers.IO) {
+            val id = repository.add("user", text).id
+            id to repository.messages().takeWhile { it.id <= id }
+        }
+        coroutineScope {
+            val captions = ReplyTyping(!ValueAnimator.areAnimatorsEnabled() ||
+                activity.getSystemService(AccessibilityManager::class.java).isTouchExplorationEnabled)
+            val typing = launch { captions.display(onStatus) }
+            try {
+                val reply = ChatClient(activity).reply(history, id, captions::preview)
+                ensureActive()
+                withContext(Dispatchers.IO) { repository.add("assistant", reply.text) }
+                reply.intent?.let { PetEvents.modelAction(activity, it) }
+                captions.finish(reply.text)
+                voice.value.speak(reply.text)
+                typing.join()
+                onStatus(reply.text)
+            } finally { typing.cancel() }
+        }
+    }
+
+    private suspend fun confirm(title: String, text: String, yes: String): Boolean =
+        suspendCancellableCoroutine { continuation ->
+            val dialog = AlertDialog.Builder(activity).setTitle(title).setMessage(text)
+                .setPositiveButton(yes) { _, _ -> if (continuation.isActive) continuation.resume(true) }
+                .setNegativeButton("暂不发送") { _, _ -> if (continuation.isActive) continuation.resume(false) }
+                .setOnCancelListener { if (continuation.isActive) continuation.resume(false) }
+                .show()
+            continuation.invokeOnCancellation { activity.runOnUiThread { if (dialog.isShowing) dialog.dismiss() } }
+        }
+
+    fun cancel() {
+        generation++
+        capture?.end()
+        capture = null
+        turn?.cancel()
+        turn = null
+        if (voice.isInitialized()) voice.value.stop()
+    }
+
+    fun close() {
+        cancel()
+        scope.cancel()
+        if (voice.isInitialized()) voice.value.close()
+    }
+}

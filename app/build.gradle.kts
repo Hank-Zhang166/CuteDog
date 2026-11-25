@@ -3,15 +3,43 @@ plugins {
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
 }
+val originalAssets = layout.projectDirectory.dir("src/main/assets")
+val compactAssets = layout.buildDirectory.dir("generated/compact-artwork/assets")
+val artworkPacker = rootProject.layout.projectDirectory.file("scripts/compact-artwork.py")
+val packArtwork by tasks.registering(Exec::class) {
+    inputs.dir(originalAssets).withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.file(artworkPacker).withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.file(rootProject.layout.projectDirectory.file("scripts/artwork-requirements.txt"))
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+    outputs.dir(compactAssets)
+    val defaultPython = if (System.getProperty("os.name").startsWith("Windows")) "python" else "python3"
+    commandLine(providers.gradleProperty("cuteDogPython").getOrElse(defaultPython), artworkPacker.asFile,
+        originalAssets.asFile, compactAssets.get().asFile)
+}
+
+val voiceAssets = layout.buildDirectory.dir("generated/voice-input/assets")
+val prepareVoiceInput by tasks.registering(Exec::class) {
+    val script = rootProject.file("scripts/prepare-voice-input.py")
+    inputs.file(script)
+    outputs.dir(voiceAssets)
+    val python = if (System.getProperty("os.name").startsWith("Windows")) "python" else "python3"
+    commandLine(providers.gradleProperty("cuteDogPython").getOrElse(python), script,
+        rootProject.file(".gradle/cutedog-voice-input"), voiceAssets.get().asFile)
+}
+
 android {
     namespace = "com.cutedog.app"
     compileSdk = 35
+    sourceSets.getByName("main").assets.setSrcDirs(listOf(compactAssets, voiceAssets))
+    sourceSets.getByName("test").java.srcDir("src/sharedTest/java")
+    sourceSets.getByName("androidTest").java.srcDir("src/sharedTest/java")
+    sourceSets.getByName("androidTest").assets.srcDir("src/test/resources/chat")
     defaultConfig {
         applicationId = "com.cutedog.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "0.2.0-preview.1"
+        versionCode = 5
+        versionName = "0.2.1-preview.3"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildTypes {
@@ -26,11 +54,21 @@ android {
     }
     kotlinOptions { jvmTarget = "17" }
     buildFeatures { compose = true; buildConfig = true }
-    testOptions { unitTests.isIncludeAndroidResources = true }
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+        unitTests.all { it.systemProperty("cuteDog.compactAssets", compactAssets.get().asFile.absolutePath) }
+    }
     lint { abortOnError = true }
+    packaging.jniLibs.useLegacyPackaging = true
     packaging { resources.excludes += "/META-INF/{AL2.0,LGPL2.1}" }
 }
+apply(from = rootProject.file("scripts/pet-speech.gradle"))
+
+tasks.named("preBuild") { dependsOn(packArtwork, prepareVoiceInput) }
+
 dependencies {
+    implementation("net.java.dev.jna:jna:5.18.1@aar")
+    implementation("com.alphacephei:vosk-android:0.3.75@aar")
     val composeBom = platform("androidx.compose:compose-bom:2025.04.01")
     implementation(composeBom)
     implementation("androidx.core:core-ktx:1.15.0")

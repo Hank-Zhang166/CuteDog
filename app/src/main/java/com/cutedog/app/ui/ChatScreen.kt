@@ -1,6 +1,9 @@
 package com.cutedog.app.ui
 
-import android.content.Intent
+import android.animation.ValueAnimator
+import android.view.accessibility.AccessibilityManager
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -15,22 +18,23 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.contentDescription
 import java.time.LocalDate
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.cutedog.app.chat.*
 import com.cutedog.app.pet.PetSettings
-import com.cutedog.app.pet.PetView
+import com.cutedog.app.voice.PetSpeech
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.*
 import java.net.URI
 
 @Composable
-internal fun ChatScreen() {
+internal fun ChatScreen(onClose: (() -> Unit)? = null, voiceDraft: String? = null) {
     val context = LocalContext.current
     val repository = remember { ChatRepository(context.applicationContext) }
     val settings = remember { AiSettings(context.applicationContext) }
@@ -38,11 +42,16 @@ internal fun ChatScreen() {
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
     var messages by remember { mutableStateOf<List<ChatMessage>>(emptyList()) }
-    var input by rememberSaveable { mutableStateOf("") }
+    var input by rememberSaveable { mutableStateOf(voiceDraft.orEmpty()) }
+    var voiceTurn by rememberSaveable { mutableStateOf(voiceDraft != null) }
+    var retryWithVoice by rememberSaveable { mutableStateOf(false) }
+    var voiceStatus by remember { mutableStateOf("") }
+    var playback by remember { mutableStateOf<Job?>(null) }
+    val speaker = remember { PetSpeech(context.applicationContext) { voiceStatus = it } }
     var busy by remember { mutableStateOf(false) }
     var requestJob by remember { mutableStateOf<Job?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
-    var showSettings by rememberSaveable { mutableStateOf(false) }
+    var showSettings by rememberSaveable { mutableStateOf(voiceDraft != null) }
     var showMemories by rememberSaveable { mutableStateOf(false) }
     var clearConfirm by remember { mutableStateOf(false) }
     var deleteId by rememberSaveable { mutableLongStateOf(0L) }
@@ -50,48 +59,93 @@ internal fun ChatScreen() {
     var requestGeneration by remember { mutableIntStateOf(0) }
     var truncated by rememberSaveable { mutableStateOf(false) }
     val exportChat = rememberJsonExporter("conversation", "CuteDog-聊天-${LocalDate.now()}.json") { repository.exportConversation() }
-    var petView by remember { mutableStateOf<PetView?>(null) }
+    var speaking by remember { mutableStateOf<ReplyTyping?>(null) }
     var configured by remember { mutableStateOf(runCatching { settings.hasApiKey }.getOrDefault(false)) }
     var consentVisible by remember { mutableStateOf(false) }
     val consent = remember { context.getSharedPreferences("ai_ui_consent", 0) }
     val name = remember { PetSettings(context).name }
-    LaunchedEffect(Unit) { try { messages = withContext(Dispatchers.IO) { repository.messages() }; if (failedUserId == 0L && messages.lastOrNull()?.role == "user") failedUserId = messages.last().id } catch (e: Exception) { error = "无法读取聊天记录，请重新打开本页。" } }
-    LaunchedEffect(messages.size, busy) { if (messages.isNotEmpty()) listState.animateScrollToItem(messages.size - 1) }
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    fun stopPlayback() { playback?.cancel(); playback = null; speaker.stop() }
+    fun readAnswer(answer: String) {
+        stopPlayback()
+        playback = scope.launch {
+            try { voiceStatus = "小狗在说话…"; speaker.speak(answer); voiceStatus = "" }
+            catch (e: CancellationException) { throw e }
+            catch (e: Exception) { voiceStatus = e.message ?: "暂时无法播放语音。" }
+            finally { if (playback == coroutineContext[Job]) playback = null }
+        }
+    }
+    DisposableEffect(lifecycle, speaker) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) { stopPlayback(); voiceStatus = "" }
+        }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer); stopPlayback(); speaker.close() }
+    }
+    val currentlyBusy by rememberUpdatedState(busy)
+    LaunchedEffect(lifecycle, repository) {
+        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            if (!currentlyBusy) {
+                try {
+                    val records = withContext(Dispatchers.IO) { repository.messages() }
+                    if (!currentlyBusy) {
+                        messages = records
+                        failedUserId = records.lastOrNull()?.takeIf { it.role == "user" }?.id ?: 0L
+                    }
+                } catch (e: CancellationException) { throw e }
+                catch (e: Exception) { error = "无法读取聊天记录，请重新打开本页。" }
+            }
+        }
+    }
+    LaunchedEffect(messages.size, busy) { if (messages.isNotEmpty()) listState.scrollToItem(if (busy) messages.size else messages.lastIndex) }
     fun send(retry: Boolean = false) {
         if (busy || (!retry && input.isBlank())) return
         if (!configured) { showSettings = true; return }
         if (!consent.getBoolean("remote_chat", false)) { consentVisible = true; return }
         val text = input.trim()
+        val aloud = if (retry) retryWithVoice else voiceTurn
+        retryWithVoice = aloud; voiceTurn = false; stopPlayback(); voiceStatus = ""
         input = ""; busy = true; error = null
         requestGeneration++
         val generation = requestGeneration
+        val speech = ReplyTyping(!ValueAnimator.areAnimatorsEnabled() ||
+            context.getSystemService(AccessibilityManager::class.java).isTouchExplorationEnabled)
+        speaking = speech
         requestJob = scope.launch {
+            val typing = launch { speech.display() }
             try {
                 val target = if (!retry) withContext(Dispatchers.IO) { repository.add("user", text) }.id else failedUserId
                 require(target > 0) { "没有可以重试的消息，请重新发送。" }
                 failedUserId = target
                 messages = withContext(Dispatchers.IO) { repository.messages() }
                 val history = messages.takeWhile { it.id <= target }
-                val reply = client.reply(history, target)
+                val reply = client.reply(history, target, speech::preview)
                 currentCoroutineContext().ensureActive()
                 if (generation != requestGeneration) return@launch
                 withContext(Dispatchers.IO) { currentCoroutineContext().ensureActive(); repository.add("assistant", reply.text) }
+                reply.intent?.let { com.cutedog.app.pet.PetEvents.modelAction(context, it) }
+                failedUserId = 0L
+                truncated = reply.contextTruncated
+                speech.finish(reply.text)
+                if (aloud && lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) readAnswer(reply.text)
+                typing.join()
                 messages = withContext(Dispatchers.IO) { repository.messages() }
-                failedUserId = 0L; truncated = reply.contextTruncated
-                reply.intent?.let { petView?.react(it); com.cutedog.app.pet.PetEvents.modelAction(context, it) }
             } catch (cancelled: CancellationException) { error = "这次请求已取消。你可以稍后重试。"; throw cancelled }
             catch (e: Exception) { error = e.message ?: "暂时没有连接上，请稍后重试。" }
-            finally { busy = false; requestJob = null }
+            finally { typing.cancel(); speaking = null; busy = false; requestJob = null }
         }
     }
     Column(Modifier.fillMaxSize().imePadding().testTag("chat_screen")) {
         Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 16.dp, top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            AndroidView(factory = { PetView(it).also { pet -> petView = pet } }, modifier = Modifier.size(70.dp), update = { it.contentDescription = "$name 的表情" })
+            PawMark(Modifier.size(43.dp))
+            Spacer(Modifier.width(11.dp))
             Column(Modifier.weight(1f)) {
                 Text("和$name 聊聊", style = MaterialTheme.typography.titleLarge)
-                Text(if (busy) "正在认真听你说…" else if (configured) "连接你选择的模型服务" else "配置模型，开启真正的对话", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(if (busy) "耳朵竖起来啦…" else if (configured) "你的萨摩耶伙伴" else "连接模型后就能聊天",
+                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             TextButton(onClick = { showSettings = true }) { Text("设置") }
+            if (onClose != null) TextButton(onClick = onClose) { Text("收起聊天") }
         }
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.End) {
             TextButton(onClick = { showMemories = true }, modifier = Modifier.testTag("chat_memories")) { Text("记忆") }
@@ -99,35 +153,44 @@ internal fun ChatScreen() {
             TextButton(onClick = { clearConfirm = true }, enabled = messages.isNotEmpty()) { Text("清空聊天") }
         }
         LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = listState, contentPadding = PaddingValues(horizontal = 22.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            if (messages.isEmpty()) item {
+            if (messages.isEmpty() && !busy) item {
                 SoftCard(Modifier.fillMaxWidth()) {
-                    Text("给心事一个柔软的落脚点", style = MaterialTheme.typography.titleLarge)
-                    Text("开心的瞬间、没想明白的小事，或只是今天有点累，都可以从这里说起。", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    HorizontalDivider()
-                    Text("联网对话由你配置的模型提供。尚未连接时，备忘录、每日一句和桌宠仍可离线使用。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("和${name}打个招呼", style = MaterialTheme.typography.titleLarge)
+                    Text(if (configured) "今天有什么想跟小狗分享的？" else "连上你自己的模型服务，$name 就能读到你写的话。", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     if (!configured) FilledTonalButton(onClick = { showSettings = true }) { Text("连接模型服务") }
                 }
             }
             items(messages, key = { it.id }) { item ->
                 val user = item.role == "user"
-                Column(Modifier.fillMaxWidth(), horizontalAlignment = if (user) Alignment.End else Alignment.Start) {
-                    Text(if (user) "你" else name, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp))
-                    Surface(shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp, bottomEnd = if (user) 5.dp else 20.dp, bottomStart = if (user) 20.dp else 5.dp), color = if (user) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface, modifier = Modifier.widthIn(max = 560.dp)) {
-                        androidx.compose.foundation.text.selection.SelectionContainer {
-                            Text(item.content, modifier = Modifier.padding(17.dp), style = MaterialTheme.typography.bodyLarge)
+                ChatBubble(if (user) "你" else name, item.content, user,
+                    onDelete = { deleteId = item.id }, deleteTag = "chat_delete_${item.id}")
+            }
+            speaking?.let { speech ->
+                item(key = "speaking") {
+                    var previousHeight by remember { mutableIntStateOf(0) }
+                    Column(Modifier.fillMaxWidth().onSizeChanged { size ->
+                        val growth = size.height - previousHeight
+                        val view = listState.layoutInfo
+                        val last = view.visibleItemsInfo.lastOrNull()
+                        val nearBottom = last?.key == "speaking" && last.offset + last.size <= view.viewportEndOffset + 60
+                        if (previousHeight > 0 && growth > 0 && nearBottom && !listState.isScrollInProgress)
+                            scope.launch { listState.scrollBy(growth.toFloat()) }
+                        previousHeight = size.height
+                    }) {
+                        if (speech.visible.isNotEmpty()) ChatBubble(name, speech.visible, false, Modifier.testTag("chat_speaking"))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (speech.visible.isEmpty()) {
+                                CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+                                Text(" 等小狗回话…", style = MaterialTheme.typography.labelLarge)
+                            } else if (!speech.reducedMotion) {
+                                TextButton(onClick = { speech.showNow() }) { Text("跳过逐字显示") }
+                            }
+                            if (!speech.received) TextButton(onClick = { requestJob?.cancel() }) { Text("取消") }
                         }
                     }
-                    TextButton(onClick = { deleteId = item.id }, modifier = Modifier.testTag("chat_delete_${item.id}").semantics { contentDescription = "删除这条${if (user) "发送" else "回复"}消息" }) { Text("删除") }
                 }
             }
-            if (truncated) item { Text("本次只使用最近上下文；旧记录仍在本机。", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-            if (busy) item {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                    Text("正在等待模型回复", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    TextButton(onClick = { requestJob?.cancel() }) { Text("取消") }
-                }
-            }
+            if (truncated) item { Text("本次只使用最近上下文，旧记录仍在本机。", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             if (error != null) item {
                 Surface(color = MaterialTheme.colorScheme.errorContainer, shape = RoundedCornerShape(18.dp)) {
                     Column(Modifier.padding(16.dp)) {
@@ -139,9 +202,16 @@ internal fun ChatScreen() {
                 TextButton(onClick = { send(true) }) { Text("继续请求上一条回复") }
             }
         }
+        if (voiceStatus.isNotBlank() || playback != null) Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(voiceStatus, Modifier.weight(1f), style = MaterialTheme.typography.labelSmall)
+            if (playback != null) TextButton(onClick = { stopPlayback(); voiceStatus = "" }) { Text("停止朗读") }
+        }
         Surface(color = MaterialTheme.colorScheme.surface) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Bottom) {
-                OutlinedTextField(input, { input = it.take(8000) }, modifier = Modifier.weight(1f).testTag("chat_input"), placeholder = { Text("今天想和我说什么？") }, maxLines = 5, shape = RoundedCornerShape(23.dp), enabled = !busy)
+                VoiceInputButton(!busy, onStart = { stopPlayback() }, onText = {
+                    input = it; voiceTurn = true; voiceStatus = "听写完成"; send()
+                }, onStatus = { voiceStatus = it })
+                OutlinedTextField(input, { input = it.take(8000) }, modifier = Modifier.weight(1f).testTag("chat_input"), placeholder = { Text("说给${name}听…") }, maxLines = 5, shape = RoundedCornerShape(23.dp), enabled = !busy)
                 Button(onClick = { send() }, enabled = input.isNotBlank() && !busy, modifier = Modifier.heightIn(min = 54.dp).testTag("chat_send"), shape = RoundedCornerShape(20.dp), contentPadding = PaddingValues(horizontal = 18.dp)) { Text("发送") }
             }
         }

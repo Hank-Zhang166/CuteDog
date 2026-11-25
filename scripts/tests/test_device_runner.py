@@ -49,11 +49,13 @@ elif args[:1]==['install']:
     state['installed'].append(package); state['reinstalls']+=1;save();print('Success')
 elif args[:3]==['shell','dumpsys','package']:
     print('android.permission.POST_NOTIFICATIONS: granted='+str(state['notification']=='granted').lower())
+    print('android.permission.RECORD_AUDIO: granted='+str(state['microphone']=='granted').lower())
 elif args[:5]==['shell','cmd','appops','get','com.cutedog.app']:
     print('SCHEDULE_EXACT_ALARM: '+state['exact'])
 elif args[:3] in (['shell','pm','grant'],['shell','pm','revoke']):
     if args[3] not in state['installed']: print('package not found',file=sys.stderr);raise SystemExit(1)
-    state['notification']='granted' if args[2]=='grant' else 'denied';save()
+    key={'android.permission.POST_NOTIFICATIONS':'notification','android.permission.RECORD_AUDIO':'microphone'}[args[4]]
+    state[key]='granted' if args[2]=='grant' else 'denied';save()
 elif args[:4]==['shell','cmd','appops','set']:
     if args[4] not in state['installed']: print('No UID',file=sys.stderr);raise SystemExit(1)
     state['exact']=args[-1];save()
@@ -79,6 +81,7 @@ assert '-Pandroid.injected.androidTest.leaveApksInstalledAfterRun=true' in args
 assert '--rerun' in args and '--rerun-tasks' not in args
 denied=any(arg.startswith('-Pandroid.testInstrumentationRunnerArguments.class=') for arg in args)
 phase='denied' if denied else 'granted';state['phases'].append(phase)
+state['microphone']='granted'
 if state['api']>=33: assert state['notification']==('denied' if denied else 'granted')
 if state['api']>=31: assert state['exact']==('deny' if denied else 'allow')
 failure=os.environ.get('FIXTURE_FAIL_GRANTED')=='1' and not denied
@@ -121,7 +124,7 @@ class DeviceRunnerHostTest(unittest.TestCase):
                         'user.email=fixture@example.invalid', 'commit', '-qm', 'explicit host fixture'], check=True)
 
     def run_fixture(self, api, **flags):
-        initial = {'api': api, 'installed': [], 'notification': 'denied', 'exact': 'default',
+        initial = {'api': api, 'installed': [], 'notification': 'denied', 'microphone':'denied', 'exact': 'default',
                    'reinstalls': 0, 'phases': []}
         (self.root / 'device-state.json').write_text(json.dumps(initial))
         env = dict(os.environ, PATH=str(self.root / 'bin') + os.pathsep + os.environ['PATH'], ANDROID_SERIAL='')
@@ -146,6 +149,7 @@ class DeviceRunnerHostTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertEqual(summary['phases']['granted']['counts']['skipped'], 3)
         self.assertEqual(summary['phases']['denied']['counts']['passed'], 3)
+        self.assertEqual(state['microphone'], 'denied')
         self.assertEqual(state['notification'], 'denied')
         self.assertEqual(state['exact'], 'default')
         self.assertEqual(state['reinstalls'], 0)

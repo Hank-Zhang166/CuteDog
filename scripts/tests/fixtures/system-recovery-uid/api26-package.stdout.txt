@@ -1,0 +1,159 @@
+Activity Resolver Table:
+  Non-Data Actions:
+      android.intent.action.MAIN:
+        6d249bd com.cutedog.app/.MainActivity filter ead1354
+          Action: "android.intent.action.MAIN"
+          Category: "android.intent.category.LAUNCHER"
+
+Receiver Resolver Table:
+  Non-Data Actions:
+      android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED:
+        f2f2bb2 com.cutedog.app/.reminder.RestoreReceiver filter c4a239a
+          Action: "android.intent.action.BOOT_COMPLETED"
+          Action: "android.intent.action.MY_PACKAGE_REPLACED"
+          Action: "android.intent.action.TIME_SET"
+          Action: "android.intent.action.TIMEZONE_CHANGED"
+          Action: "android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED"
+      androidx.profileinstaller.action.SAVE_PROFILE:
+        4120703 com.cutedog.app/androidx.profileinstaller.ProfileInstallReceiver filter 96df66
+          Action: "androidx.profileinstaller.action.SAVE_PROFILE"
+      androidx.profileinstaller.action.INSTALL_PROFILE:
+        4120703 com.cutedog.app/androidx.profileinstaller.ProfileInstallReceiver filter 32354a8
+          Action: "androidx.profileinstaller.action.INSTALL_PROFILE"
+      android.intent.action.TIMEZONE_CHANGED:
+        f2f2bb2 com.cutedog.app/.reminder.RestoreReceiver filter c4a239a
+          Action: "android.intent.action.BOOT_COMPLETED"
+          Action: "android.intent.action.MY_PACKAGE_REPLACED"
+          Action: "android.intent.action.TIME_SET"
+          Action: "android.intent.action.TIMEZONE_CHANGED"
+          Action: "android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED"
+      android.intent.action.TIME_SET:
+        f2f2bb2 com.cutedog.app/.reminder.RestoreReceiver filter c4a239a
+          Action: "android.intent.action.BOOT_COMPLETED"
+          Action: "android.intent.action.MY_PACKAGE_REPLACED"
+          Action: "android.intent.action.TIME_SET"
+          Action: "android.intent.action.TIMEZONE_CHANGED"
+          Action: "android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED"
+      androidx.profileinstaller.action.SKIP_FILE:
+        4120703 com.cutedog.app/androidx.profileinstaller.ProfileInstallReceiver filter bc66bc1
+          Action: "androidx.profileinstaller.action.SKIP_FILE"
+      androidx.profileinstaller.action.BENCHMARK_OPERATION:
+        4120703 com.cutedog.app/androidx.profileinstaller.ProfileInstallReceiver filter 73262a7
+          Action: "androidx.profileinstaller.action.BENCHMARK_OPERATION"
+      android.intent.action.BOOT_COMPLETED:
+        f2f2bb2 com.cutedog.app/.reminder.RestoreReceiver filter c4a239a
+          Action: "android.intent.action.BOOT_COMPLETED"
+          Action: "android.intent.action.MY_PACKAGE_REPLACED"
+          Action: "android.intent.action.TIME_SET"
+          Action: "android.intent.action.TIMEZONE_CHANGED"
+          Action: "android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED"
+        9221680 com.cutedog.app/.pet.PetBootReceiver filter 58644cb
+          Action: "android.intent.action.BOOT_COMPLETED"
+      android.intent.action.MY_PACKAGE_REPLACED:
+        f2f2bb2 com.cutedog.app/.reminder.RestoreReceiver filter c4a239a
+          Action: "android.intent.action.BOOT_COMPLETED"
+          Action: "android.intent.action.MY_PACKAGE_REPLACED"
+          Action: "android.intent.action.TIME_SET"
+          Action: "android.intent.action.TIMEZONE_CHANGED"
+          Action: "android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED"
+
+Permissions:
+  Permission [com.cutedog.app.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION] (d5ec4b9):
+    sourcePackage=com.cutedog.app
+    uid=10077 gids=null type=0 prot=signature
+    perm=Permission{16050fe com.cutedog.app.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION}
+    packageSetting=PackageSetting{124105f com.cutedog.app/10077}
+
+Registered ContentProviders:
+  com.cutedog.app/androidx.startup.InitializationProvider:
+    Provider{1d21aac com.cutedog.app/androidx.startup.InitializationProvider}
+
+ContentProvider Authorities:
+  [com.cutedog.app.androidx-startup]:
+    Provider{1d21aac com.cutedog.app/androidx.startup.InitializationProvider}
+      applicationInfo=ApplicationInfo{79df375 com.cutedog.app}
+
+Key Set Manager:
+  [com.cutedog.app]
+      Signing KeySets: 21
+
+Packages:
+  Package [com.cutedog.app] (124105f):
+    userId=10077
+    pkg=Package{fec7f0a com.cutedog.app}
+    codePath=/data/app/com.cutedog.app-5urLu-O1A3X8qauVjG_KDQ==
+    resourcePath=/data/app/com.cutedog.app-5urLu-O1A3X8qauVjG_KDQ==
+    legacyNativeLibraryDir=/data/app/com.cutedog.app-5urLu-O1A3X8qauVjG_KDQ==/lib
+    primaryCpuAbi=x86_64
+    secondaryCpuAbi=null
+    versionCode=1 minSdk=26 targetSdk=35
+    versionName=0.1.0
+    splits=[base]
+    apkSigningVersion=2
+    applicationInfo=ApplicationInfo{79df375 com.cutedog.app}
+    flags=[ DEBUGGABLE HAS_CODE ALLOW_CLEAR_USER_DATA ]
+    privateFlags=[ PRIVATE_FLAG_ACTIVITIES_RESIZE_MODE_RESIZEABLE_VIA_SDK_VERSION ]
+    dataDir=/data/user/0/com.cutedog.app
+    supportsScreens=[small, medium, large, xlarge, resizeable, anyDensity]
+    timeStamp=2026-11-15 08:53:46
+    firstInstallTime=2026-11-15 08:53:44
+    lastUpdateTime=2026-11-15 08:53:54
+    signatures=PackageSignatures{223537b [609cf21a]}
+    installPermissionsFixed=true installStatus=1
+    pkgFlags=[ DEBUGGABLE HAS_CODE ALLOW_CLEAR_USER_DATA ]
+    declared permissions:
+      com.cutedog.app.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION: prot=signature, INSTALLED
+    requested permissions:
+      android.permission.INTERNET
+      android.permission.POST_NOTIFICATIONS
+      android.permission.SCHEDULE_EXACT_ALARM
+      android.permission.RECEIVE_BOOT_COMPLETED
+      android.permission.SYSTEM_ALERT_WINDOW
+      android.permission.FOREGROUND_SERVICE
+      android.permission.FOREGROUND_SERVICE_SPECIAL_USE
+      com.cutedog.app.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION
+    install permissions:
+      android.permission.RECEIVE_BOOT_COMPLETED: granted=true
+      android.permission.INTERNET: granted=true
+      com.cutedog.app.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION: granted=true
+    User 0: ceDataInode=123004 installed=true hidden=false suspended=false stopped=true notLaunched=true enabled=0 instant=false
+      gids=[3003]
+      runtime permissions:
+
+Package Changes:
+  Sequence number=325
+  User 0:
+    seq=0, package=com.google.android.apps.inputmethod.hindi
+    seq=1, package=com.google.android.inputmethod.pinyin
+    seq=2, package=com.google.android.webview
+    seq=4, package=com.google.android.setupwizard
+    seq=5, package=com.google.android.sdksetup
+    seq=8, package=com.google.android.inputmethod.latin
+    seq=13, package=com.google.android.partnersetup
+    seq=17, package=com.google.android.apps.messaging
+    seq=18, package=com.android.settings
+    seq=32, package=com.google.android.calendar
+    seq=34, package=com.android.camera2
+    seq=78, package=com.google.android.gm
+    seq=84, package=com.google.android.googlequicksearchbox
+    seq=191, package=com.google.android.gsf
+    seq=316, package=com.google.android.videos
+    seq=317, package=com.google.android.apps.maps
+    seq=318, package=com.android.vending
+    seq=319, package=com.google.android.youtube
+    seq=321, package=com.cutedog.app
+    seq=322, package=com.cutedog.app.test
+    seq=324, package=com.google.android.gms
+
+
+Dexopt state:
+  [com.cutedog.app]
+    Instruction Set: x86_64
+      path: /data/app/com.cutedog.app-5urLu-O1A3X8qauVjG_KDQ==/base.apk
+      status: /data/app/com.cutedog.app-5urLu-O1A3X8qauVjG_KDQ==/oat/x86_64/base.odex[status=kOatUpToDate, compilation_f
+      ilter=quicken]
+
+
+Compiler stats:
+  [com.cutedog.app]
+     base.apk - 7584

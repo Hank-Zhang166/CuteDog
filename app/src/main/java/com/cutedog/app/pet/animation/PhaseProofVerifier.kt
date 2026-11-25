@@ -18,6 +18,18 @@ object PhaseProofVerifier {
             val inputs = root.getJSONObject("inputs")
             require(INPUTS.all(inputs::has)) { "相位报告缺少实际输入集合" }
             for (key in inputs.keys()) require(inputs.get(key) is String && ClipIntegrity.SHA256.matches(inputs.getString(key))) { "相位报告输入摘要无效" }
+            if (inputs.has("nativeProvenanceSha256")) {
+                val provenance = ClipIntegrity.readLimited(source.open("pet3d/native-provenance.json"), ClipIntegrity.MAX_REPORT_BYTES)
+                require(ClipIntegrity.sha256(provenance) == inputs.getString("nativeProvenanceSha256")) { "Cubism 模型来源记录摘要不符" }
+            }
+            if (inputs.has("reviewProvenanceSha256")) {
+                val review = ClipIntegrity.readLimited(source.open("pet3d/review-provenance.json"), ClipIntegrity.MAX_REPORT_BYTES)
+                require(ClipIntegrity.sha256(review) == inputs.getString("reviewProvenanceSha256")) { "完整动作来源摘要不符" }
+            }
+            if (inputs.has("tailCoreBridgeCurvesSha256")) {
+                val curves = ClipIntegrity.readLimited(source.open("pet3d/tail-recoveries.json"), ClipIntegrity.MAX_REPORT_BYTES)
+                require(ClipIntegrity.sha256(curves) == inputs.getString("tailCoreBridgeCurvesSha256")) { "尾部恢复的实际控制曲线摘要不符" }
+            }
             val rows = root.getJSONArray("bindings")
             require(rows.length() == bridges.size) { "相位报告不能遗漏或添加未绑定的内部桥" }
             val byId = bridges.associateBy { it.id }

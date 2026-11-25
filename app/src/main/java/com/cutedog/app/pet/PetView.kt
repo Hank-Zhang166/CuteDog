@@ -19,7 +19,7 @@ import com.cutedog.app.pet.behavior.PetBrain
 import com.cutedog.app.pet.behavior.PetContext
 import com.cutedog.app.pet.behavior.GrowthStore
 
-/** Small, cached texture renderer shared by the app and the bounded overlay window. */
+/** Cached frame renderer and touch target for the floating dog. */
 class PetView(context: Context) : View(context) {
     private val settings = PetSettings(context)
     private val audio = PetAudio(context.applicationContext)
@@ -63,12 +63,15 @@ class PetView(context: Context) : View(context) {
         player.manifest?.clips?.get(player.currentClip)?.let { if (it.heading == it.exitHeading) it.heading?.sign ?: 0 else 0 }
     } ?: 0
     val authoredDesiredHeading: Int get() = desiredHeading
+    val authoredGestureTravel: Boolean get() = rigPlayer?.requestedClip?.let { id ->
+        val player = rigPlayer ?: return@let false
+        val family = player.manifest?.canonicalClipId(id)
+        family in MOVING_GESTURES && player.manifest?.travelReady(id) == true
+    } ?: false
     private val hostAllowsTravel: Boolean get() = authoredTravelAllowed && !touchActive && running && isShown && power.isInteractive && !settings.reducedMotion
     private val canAuthoredTravel: Boolean get() = hostAllowsTravel && authoredTravelInProgress && rigPlayer?.canTravel == true
     val behavior = PetBehavior()
     var onDrag: ((Float, Float, Boolean) -> Unit)? = null
-    var onTap: (() -> Unit)? = null
-    var onAction: ((String) -> Unit)? = null
     var onAuthoredFrameCommitted: ((Int, Long) -> Unit)? = null
     var onAuthoredStepAllowed: ((Float, Long) -> Boolean)? = null
     var onAuthoredEntryAllowed: ((Float) -> Boolean)? = null
@@ -95,9 +98,17 @@ class PetView(context: Context) : View(context) {
     private var lastX = 0f; private var lastY = 0f
     private var downAt = 0L
     private var dragged = false
+    var onInteractionMenu: (() -> Boolean)? = null
+    private var secondTap = false
+    private var movedBeyondSlop = false
     private var stroked = false
+    private var following = false
+    private val pointerGaze = PointerGaze()
     private var lastTap = 0L
-    private val singleTap = Runnable { performClick() }
+    private var lastTapX = 0f
+    private var lastTapY = 0f
+    private val singleTap = Runnable { lastTap = 0; performClick() }
+    private val doubleTapSlop = ViewConfiguration.get(context).scaledDoubleTapSlop
     private val slop = ViewConfiguration.get(context).scaledTouchSlop
     private val power = context.getSystemService(PowerManager::class.java)
     private val frameClock = Choreographer.getInstance()
@@ -124,6 +135,7 @@ class PetView(context: Context) : View(context) {
             if (lastAuthoredFrameNanos == 0L) 0.0 else ((frameTimeNanos - lastAuthoredFrameNanos) / 1_000_000_000.0).coerceIn(0.0, .25)
         } else if (lastFrame == 0L) 0.0 else ((now - lastFrame) / 1000.0).coerceIn(0.0, .25)
         val delta = seconds.toFloat()
+        if (pointerGaze.step(delta)) needsInvalidate = true
         if (hasRigAssets) {
             val player = rigPlayer
             if (player != null) {
@@ -184,7 +196,7 @@ class PetView(context: Context) : View(context) {
         }
     }
     init {
-        contentDescription = "${settings.name}，轻抚互动，长按拖动，点击打开应用"
+        contentDescription = "${settings.name}，轻触互动，双击打开互动菜单"
         importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
         isClickable = true
         setLayerType(LAYER_TYPE_HARDWARE, null)
@@ -231,8 +243,9 @@ class PetView(context: Context) : View(context) {
     fun consumeAuthoredTravelPixels(sign: Int): Float = authoredTravel.consume(sign,
         hostAllowsTravel, SystemClock.uptimeMillis())
     fun pause() {
+        pointerGaze.reset()
         frameLifecycle.pause(); touchActive = false; authoredTravel.clear(); authoredTravelAllowed = false
-        removeCallbacks(tick); authoredTick?.let(frameClock::removeFrameCallback); authoredTick = null; removeCallbacks(singleTap)
+        removeCallbacks(tick); authoredTick?.let(frameClock::removeFrameCallback); authoredTick = null; removeCallbacks(singleTap); lastTap = 0; secondTap = false
         rigPlayer?.setActive(false); lastFrame = 0; lastAuthoredFrameNanos = 0; deferredBrainSeconds = 0f
     }
     fun resume() {
@@ -285,15 +298,17 @@ class PetView(context: Context) : View(context) {
                 val side = min(width, height).toFloat() * spatialDepth
                 source.set(0, 0, pixels.width, pixels.height)
                 dest.set((width - side) / 2, height - side, (width + side) / 2, height.toFloat())
-                // The released 512px artwork shares a fixed ground plane at y=452 (far paws 447).
-                // Keep the soft contact shadow on that plane even during the gait's brief flight.
+                // The whole-dog reference's planted paws meet the floor at y=428.
                 canvas.save()
-                canvas.translate(dest.left + side * (285f / 512f), dest.top + side * (452f / 512f))
-                canvas.scale(side * (135f / 512f), side * (10f / 512f))
+                canvas.translate(dest.left + side * (260f / 512f), dest.top + side * (428f / 512f))
+                canvas.scale(side * (202f / 512f), side * (9f / 512f))
                 canvas.drawCircle(0f, 0f, 1f, authoredShadow)
                 canvas.restore()
                 paint.alpha = 255
-                canvas.drawBitmap(pixels, source, dest, paint)
+                if (pointerGaze.active && frame.clipId in pointerPoses && !settings.reducedMotion) {
+                    pointerGaze.position(dest.left, dest.top, side, frame.clipId == "stand_right")
+                    canvas.drawBitmapMesh(pixels, pointerGaze.divisions, pointerGaze.divisions, pointerGaze.vertices, 0, null, 0, paint)
+                } else canvas.drawBitmap(pixels, source, dest, paint)
             } else if (frame?.error != null) {
                 paint.alpha = 255; paint.color = Color.rgb(77, 85, 75)
                 paint.textSize = android.util.TypedValue.applyDimension(android.util.TypedValue.COMPLEX_UNIT_SP, 14f, resources.displayMetrics)
@@ -340,44 +355,68 @@ class PetView(context: Context) : View(context) {
     override fun onTouchEvent(event: MotionEvent): Boolean {
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                touchActive = true; authoredTravel.clear()
+                touchActive = true; following = false; authoredTravel.clear()
                 downX = event.rawX; downY = event.rawY; lastX = downX; lastY = downY
-                downAt = SystemClock.uptimeMillis(); dragged = false; stroked = false
-                growth.recordInteraction()
+                downAt = event.eventTime; dragged = false; stroked = false
+                movedBeyondSlop = false
+                secondTap = lastTap != 0L && downAt - lastTap in 0..ViewConfiguration.getDoubleTapTimeout().toLong() &&
+                    hypot(downX - lastTapX, downY - lastTapY) <= doubleTapSlop
+                if (lastTap != 0L) {
+                    removeCallbacks(singleTap)
+                    if (secondTap) lastTap = 0 else singleTap.run()
+                }
                 brain.setAttentionTarget((event.x / max(1, width)).coerceIn(0f, 1f), (event.y / max(1, height)).coerceIn(0f, 1f))
                 parent?.requestDisallowInterceptTouchEvent(true)
                 return true
             }
             MotionEvent.ACTION_MOVE -> {
                 val distance = hypot(event.rawX - downX, event.rawY - downY)
-                if (distance > slop && SystemClock.uptimeMillis() - downAt >= settings.dragHoldMs && !stroked && !settings.locked && onDrag != null) {
+                if (distance > slop) movedBeyondSlop = true
+                if ((dragged || distance > slop) && event.eventTime - downAt >= settings.dragHoldMs && !stroked && !settings.locked && onDrag != null) {
                     if (!dragged && settings.haptics) performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                     dragged = true
+                    pointerGaze.release()
                     onDrag?.invoke(event.rawX - lastX, event.rawY - lastY, false)
-                } else if (!dragged && settings.pettingEnabled && distance > slop && SystemClock.uptimeMillis() - downAt < settings.dragHoldMs) {
-                    if (!stroked) { react(if (event.y < height * .6f) "pet" else "body", PetBrain.InteractionSource.USER); if (settings.haptics) performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK) }
+                } else if (!dragged && settings.pettingEnabled && distance > slop && event.eventTime - downAt < settings.dragHoldMs) {
+                    if (!stroked) { interact(if (event.y < height * .6f) "pet" else "body"); if (settings.haptics) performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK) }
                     stroked = true
+                }
+                if (stroked && !dragged && distance >= slop * 3f) {
+                    val side = min(width, height).toFloat().coerceAtLeast(1f) * spatialDepth
+                    val u = (event.x - (width - side) / 2f) / side
+                    val v = (event.y - (height - side)) / side
+                    brain.setAttentionTarget(u, v)
+                    if (!settings.reducedMotion) pointerGaze.target(u, v)
+                    if (!following) { following = true; react("finger_follow", PetBrain.InteractionSource.USER) }
                 }
                 lastX = event.rawX; lastY = event.rawY
                 return true
             }
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                movedBeyondSlop = true
+                return true
+            }
             MotionEvent.ACTION_UP -> {
+                pointerGaze.release()
                 touchActive = false; authoredTravel.clear()
-                if (dragged) onDrag?.invoke(0f, 0f, true) else if (!stroked) {
-                    val now = SystemClock.uptimeMillis()
-                    if (settings.doubleTapAction == "none") performClick()
-                    else if (lastTap != 0L && now - lastTap <= ViewConfiguration.getDoubleTapTimeout()) {
-                        removeCallbacks(singleTap); lastTap = 0; react(settings.doubleTapAction, PetBrain.InteractionSource.USER)
-                    } else { lastTap = now; removeCallbacks(singleTap); postDelayed(singleTap, ViewConfiguration.getDoubleTapTimeout().toLong()) }
+                if (dragged) onDrag?.invoke(0f, 0f, true)
+                else if (!stroked && !movedBeyondSlop && event.eventTime - downAt < settings.dragHoldMs) {
+                    if (secondTap) onInteractionMenu?.invoke()
+                    else {
+                        lastTap = event.eventTime
+                        lastTapX = downX; lastTapY = downY
+                        postDelayed(singleTap, ViewConfiguration.getDoubleTapTimeout().toLong())
+                    }
                 }
+                secondTap = false
                 parent?.requestDisallowInterceptTouchEvent(false)
                 return true
             }
-            MotionEvent.ACTION_CANCEL -> { touchActive = false; authoredTravel.clear(); if (dragged) onDrag?.invoke(0f, 0f, true); parent?.requestDisallowInterceptTouchEvent(false); return true }
+            MotionEvent.ACTION_CANCEL -> { removeCallbacks(singleTap); lastTap = 0; secondTap = false; pointerGaze.release(); touchActive = false; authoredTravel.clear(); if (dragged) onDrag?.invoke(0f, 0f, true); parent?.requestDisallowInterceptTouchEvent(false); return true }
         }
         return super.onTouchEvent(event)
     }
-    override fun performClick(): Boolean { super.performClick(); react("wave", PetBrain.InteractionSource.USER); onTap?.invoke(); onAction?.invoke(settings.tapAction); return true }
+    override fun performClick(): Boolean { super.performClick(); interact(settings.tapAction); return true }
     /** Shell dumpsys diagnostics contain counters only, never chats, reminders, names or credentials. */
     fun diagnosticSnapshot(): org.json.JSONObject {
         val cache = rigPlayer?.cacheStats()
@@ -401,6 +440,9 @@ class PetView(context: Context) : View(context) {
         }
     }
     companion object {
+        private val MOVING_GESTURES = setOf("backstep", "chase", "jump", "land", "rebound", "slide_correct")
+        // The live neck projection replaces the recorded tracking path on an animated neutral base.
+        private val pointerPoses = setOf("stand", "stand_right", "breathe")
         private val STATIONARY_PROP_ACTIONS = setOf("play_ball", "treat")
         private var cachedAtlas = WeakReference<Bitmap>(null)
         private val attachedViews = mutableListOf<WeakReference<PetView>>()

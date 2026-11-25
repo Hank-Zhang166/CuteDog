@@ -1,7 +1,6 @@
 package com.cutedog.app.ui
 
 import android.content.Context
-import android.os.SystemClock
 import android.view.View
 import android.view.ViewGroup
 import androidx.compose.ui.test.*
@@ -58,28 +57,24 @@ class GrowthInteractionTest {
     }
     @get:Rule val rules: RuleChain = RuleChain.outerRule(fixture).around(compose)
 
-    @Test fun explicitAccessibleButtonsRecordHumanInteractions() {
-        val growth = GrowthStore(context)
+    @Test fun homeProvidesPetSettingsWithoutAnyInteractiveDog() {
+        compose.onNodeWithTag("home_pet").assertDoesNotExist()
         for (action in listOf("call", "pet", "ball", "treat", "sleep")) {
-            // Exercise the real wall-clock debounce; Compose's synthetic animation
-            // clock does not advance GrowthStore's System.currentTimeMillis clock.
-            SystemClock.sleep(2100)
-            val before = growth.snapshot().interactions
-            compose.onNodeWithTag("home_interact_$action").performScrollTo().assertIsEnabled().assertHasClickAction().performClick()
-            compose.waitUntil(5000) { growth.snapshot().interactions == (if (before == Long.MAX_VALUE) before else before + 1) }
+            compose.onNodeWithTag("home_interact_$action").assertDoesNotExist()
         }
-        compose.onNodeWithTag("growth_interactions").performScrollTo().assertTextContains("${growth.snapshot().interactions} 次温柔互动")
+        compose.runOnIdle { assertNull(findPet(compose.activity.window.decorView)) }
+        compose.onNodeWithTag("home_pet_settings").performScrollTo().performClick()
+        compose.onNodeWithTag("pet_settings_screen").assertExists()
     }
 
     @Test fun systemOrModelReactionDoesNotIncreaseHumanInteractionCount() {
         val growth = GrowthStore(context)
         val before = growth.snapshot().interactions
         compose.runOnIdle {
-            val pet = findPet(compose.activity.window.decorView)
-            assertNotNull("Home must contain the real PetView", pet)
-            pet!!.react("happy")
+            val view = PetView(compose.activity)
+            view.react("happy")
+            view.remind()
         }
-        compose.waitForIdle()
         assertEquals(before, growth.snapshot().interactions)
     }
 
@@ -98,7 +93,7 @@ class GrowthInteractionTest {
         assertEquals(expectedReminder, reminders.get(reminderId))
         assertTrue(chat.messages().any { it.id == message.id && it.content == message.content })
         assertTrue(chat.memories().any { it.id == memoryId && it.text == prefix + "长期记忆" })
-        for (action in listOf("ball", "treat")) compose.onNodeWithTag("home_interact_$action").performScrollTo().assertIsEnabled()
+        compose.onNodeWithTag("home_pet_settings").performScrollTo().assertIsEnabled()
     }
 
     private fun findPet(view: View): PetView? {

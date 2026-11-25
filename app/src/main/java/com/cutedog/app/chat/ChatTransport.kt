@@ -1,9 +1,8 @@
 package com.cutedog.app.chat
 
+import java.io.InterruptedIOException
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
-import org.json.JSONObject
-import java.io.ByteArrayOutputStream
 import java.net.HttpURLConnection
 import java.net.SocketTimeoutException
 import java.net.URL
@@ -21,10 +20,10 @@ internal class ChatTransport(
 ) {
     init { require(connectTimeoutMs > 0 && readTimeoutMs > 0 && deadlineMs > 0) }
 
-    suspend fun execute(request: ChatRequest): ChatReply = withTimeoutOrNull(deadlineMs) { exchange(request) }
+    suspend fun execute(request: ChatRequest, onText: (String) -> Unit = {}): ChatReply = withTimeoutOrNull(deadlineMs) { exchange(request, onText) }
         ?: throw ChatException("AI 回复超过请求时限，已取消本次请求。请稍后重试。")
 
-    private suspend fun exchange(request: ChatRequest): ChatReply = suspendCancellableCoroutine { continuation ->
+    private suspend fun exchange(request: ChatRequest, onText: (String) -> Unit): ChatReply = suspendCancellableCoroutine { continuation ->
         val active = AtomicReference<HttpURLConnection?>()
         val future = NETWORK.submit {
             if (!continuation.isActive) return@submit
@@ -39,7 +38,7 @@ internal class ChatTransport(
                     instanceFollowRedirects = false // Never forward Authorization to a redirect host.
                     doOutput = true
                     setRequestProperty("Content-Type", "application/json; charset=utf-8")
-                    setRequestProperty("Accept", "application/json")
+                    setRequestProperty("Accept", "text/event-stream, application/json")
                     setRequestProperty("Authorization", "Bearer ${request.key}")
                     setFixedLengthStreamingMode(request.payload.size)
                 }
@@ -53,22 +52,12 @@ internal class ChatTransport(
                     in 500..599 -> "AI 服务暂时不可用（HTTP $status），请稍后再试。"
                     else -> "AI 请求未被接受（HTTP $status），请检查服务是否兼容聊天接口。"
                 })
-                val bytes = ByteArrayOutputStream()
-                connection.inputStream.use { input ->
-                    val buffer = ByteArray(8192)
-                    while (continuation.isActive) {
-                        val count = input.read(buffer)
-                        if (count < 0) break
-                        if (bytes.size() + count > 262_144) throw ChatException("AI 响应过大，请减少对话长度后重试。")
-                        bytes.write(buffer, 0, count)
+                val reply = connection.inputStream.use { input ->
+                    ChatResponseReader.read(input, connection.contentType) { preview ->
+                        if (!continuation.isActive) throw InterruptedIOException()
+                        onText(preview)
                     }
-                }
-                if (!continuation.isActive) return@submit
-                val parsed = JSONObject(bytes.toString(Charsets.UTF_8.name()))
-                val content = parsed.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.opt("content") as? String
-                if (content.isNullOrBlank()) throw ChatException("AI 服务未返回文字，请检查模型是否支持聊天补全。")
-                val reply = try { ChatPolicy.parseReply(content).copy(contextTruncated = request.contextTruncated) }
-                catch (e: IllegalArgumentException) { throw ChatException(e.message ?: "模型回复格式不正确") }
+                }.copy(contextTruncated = request.contextTruncated)
                 if (continuation.isActive) continuation.resume(reply)
             } catch (e: Exception) {
                 if (continuation.isActive) continuation.resumeWithException(when (e) {

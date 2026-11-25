@@ -32,7 +32,7 @@ RESTORABLE_PERMISSION_FLAGS = {
     "REVOKED_COMPAT": "revoked-compat", "USER_SENSITIVE_WHEN_GRANTED": "user-sensitive-when-granted",
     "USER_SENSITIVE_WHEN_DENIED": "user-sensitive-when-denied",
 }
-PAGE_MARKERS = {"home": ("轻触 · 打个招呼",), "reminders": ("把小事记好",),
+PAGE_MARKERS = {"home": ("桌宠设置与悬浮窗权限",), "reminders": ("把小事记好",),
                 "companion": ("记忆", "清空聊天"), "settings": ("你的小狗，你的节奏",)}
 
 
@@ -208,6 +208,26 @@ def visible_overlay_blocks(raw):
         if "mHasSurface=true" in block or "isOnScreen=true" in block or "isVisible=true" in block:
             result.append(block)
     return result
+
+
+def visible_pet_rectangles(raw):
+    rectangles = []
+    for block in visible_overlay_blocks(raw):
+        frame = re.search(r"\b(?:frame|mFrame)=\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]", block)
+        if frame:
+            rectangles.append(tuple(map(int, frame.groups())))
+    return rectangles
+
+
+def uncovered_point(bounds, rectangles):
+    left, top, right, bottom = bounds
+    for horizontal in (.5, .15, .85):
+        for vertical in (.5, .2, .8):
+            x = int(left + (right - left) * horizontal)
+            y = int(top + (bottom - top) * vertical)
+            if all(not (l <= x < r and t <= y < b) for l, t, r, b in rectangles):
+                return x, y
+    return None
 
 
 def parse_keyguard(raw):
@@ -414,11 +434,13 @@ class Device:
         for attempt in range(10 if scroll else 3):
             tree = self.tree()
             bounds = self.find(tree, label)
+            rectangles = visible_pet_rectangles(self.run("shell", "dumpsys", "window", "windows"))
             if bounds:
-                left, top, right, bottom = bounds
-                self.run("shell", "input", "tap", (left + right) // 2, (top + bottom) // 2)
-                time.sleep(.7)
-                return
+                point = uncovered_point(bounds, rectangles)
+                if point:
+                    self.run("shell", "input", "tap", *point)
+                    time.sleep(.7)
+                    return
             if scroll:
                 if not ui_observation(tree)["has_navigation"]:
                     raise AssertionError("Cannot safely scroll: app navigation is absent from the single active-window tree")
@@ -427,7 +449,12 @@ class Device:
                     raise RuntimeError("Cannot read display dimensions")
                 width, height = map(int, size[-1])
                 start, end = ((.78, .3) if attempt < 6 else (.3, .78))
-                self.run("shell", "input", "swipe", width // 2, int(height * start), width // 2, int(height * end), 350)
+                start_y, end_y = int(height * start), int(height * end)
+                for fraction in (.20, .80, .50):
+                    x = int(width * fraction)
+                    if all(not (l <= x < r and max(start_y, end_y) >= t and min(start_y, end_y) < b) for l,t,r,b in rectangles):
+                        self.run("shell", "input", "swipe", x, start_y, x, end_y, 350)
+                        break
             time.sleep(.6)
         raise AssertionError(f"Visible app control not found: {label}")
 
@@ -537,7 +564,8 @@ class Device:
             "meminfo": self.evidence(name + "/meminfo.txt", memory_raw),
             "diagnostics": self.evidence(name + "/pet-diagnostics.txt", metrics_raw),
         }
-        return {"host_monotonic": time.monotonic(), "pid": pid, "cpu": self.cpu(pid),
+        return {"empty_activity_pet_registry": bool(re.search(r"CUTEDOG_VIEW_METRICS_JSON:\s*\[\s*\]", metrics_raw)),
+                "host_monotonic": time.monotonic(), "pid": pid, "cpu": self.cpu(pid),
                 "memory": parse_memory(memory_raw), "gfx": parse_gfx(gfx_raw),
                 "pet": parse_metrics(metrics_raw, scope), "screen": self.screen_state(), "evidence": paths}
 
@@ -579,6 +607,7 @@ def interval_report(before, after, elapsed, ticks_per_second):
               "frame_duration_p99_ms": percentile(durations, .99),
               "frame_stats_scope": "Gfxinfo keeps a limited ring buffer. Percentiles cover retained completed frames, not necessarily the entire interval. Renderer redraws are not unique pet animation frames.",
               "pet_before": before["pet"], "pet_after": after["pet"], "pet_counter_deltas": None}
+    result["empty_activity_pet_registry"] = before.get("empty_activity_pet_registry") is True and after.get("empty_activity_pet_registry") is True
     if same_process and len(before["pet"]) == len(after["pet"]) == 1:
         a, b = before["pet"][0], after["pet"][0]
         same_view = a.get("viewId") == b.get("viewId") and a.get("scope") == b.get("scope")
@@ -597,6 +626,7 @@ def interval_report(before, after, elapsed, ticks_per_second):
 
 
 def main():
+    global PACKAGE, SERVICE, ACTIVITY
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--serial", default=os.getenv("ANDROID_SERIAL", "emulator-5554"))
     parser.add_argument("--adb", default="adb")
@@ -611,7 +641,12 @@ def main():
     parser.add_argument("--source-commit", help="Declared APK source commit, independently recorded from the test tooling commit")
     parser.add_argument("--start-label", default="召唤小狗")
     parser.add_argument("--stop-label", default="停止桌宠")
+    parser.add_argument("--package", choices=("com.cutedog.app", "com.cutedog.app.motionpreview"), default="com.cutedog.app",
+                        help="Application ID of the installed build")
     args = parser.parse_args()
+    PACKAGE = args.package
+    SERVICE = PACKAGE + "/com.cutedog.app.pet.OverlayService"
+    ACTIVITY = PACKAGE + "/com.cutedog.app.MainActivity"
     if not args.disposable:
         parser.error("--disposable is required; this workflow temporarily revokes overlay access and stops the app")
     if not args.serial.startswith("emulator-"):
@@ -740,7 +775,8 @@ def main():
         time.sleep(5)
         foreground = device.interval("foreground", "activity", args.duration, ticks_per_second)
         report["measurements"].append(foreground)
-        rig_assertion("foreground-real-rig-advances", foreground)
+        check("home-has-no-animated-pet", lambda: assert_result(foreground["empty_activity_pet_registry"],
+                "Home activity diagnostics must explicitly show an empty pet view registry", foreground["after_evidence"]))
         check("foreground-memory-is-measurable", lambda: assert_result(foreground["after_memory"]["total_pss_kib"] is not None,
                                                                         "No app PSS measurement was returned", foreground["after_memory"]), strict=False)
         check("start-overlay-from-user-control", lambda: device.start_overlay(args.start_label) or device.service_state())

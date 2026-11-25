@@ -1,0 +1,30 @@
+/*
+ * gradlew -I tools/preview/motion-preview.gradle assembleDebug
+ * Scopes this build to a separate app ID so the public CuteDog install and its data stay available.
+ */
+allprojects { project ->
+    plugins.withId("com.android.application") {
+        project.androidComponents.finalizeDsl { dsl ->
+            def applicationId = dsl.defaultConfig.applicationId
+            def suffix = ".motionpreview"
+            def directory = project.layout.buildDirectory.dir("generated/motion-preview").get().asFile
+            directory.mkdirs()
+            def manifest = new File(directory, "AndroidManifest.xml")
+            manifest.setText('''<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
+    <application android:label="CuteDog 动作预览" tools:replace="android:label" />
+</manifest>
+''', "UTF-8")
+            dsl.buildTypes.getByName("debug").applicationIdSuffix = suffix
+            dsl.sourceSets.getByName("debug").manifest.srcFile(manifest)
+            def originalTest = project.file("src/androidTest/AndroidManifest.xml")
+            if (originalTest.exists()) {
+                def testManifest = new File(directory, "AndroidTestManifest.xml")
+                def from = 'android:targetPackage="' + applicationId + '"'
+                def to = 'android:targetPackage="' + applicationId + suffix + '"'
+                testManifest.setText(originalTest.getText("UTF-8").replace(from, to), "UTF-8")
+                dsl.sourceSets.getByName("androidTest").manifest.srcFile(testManifest)
+            }
+        }
+    }
+}
+

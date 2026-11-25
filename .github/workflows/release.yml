@@ -22,6 +22,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     outputs:
+      uploaded: ${{ steps.uploaded.outputs.checked }}
       tag: ${{ steps.verify.outputs.tag }}
       mode: ${{ steps.verify.outputs.mode }}
       apk: ${{ steps.verify.outputs.apk }}
@@ -45,8 +46,16 @@ jobs:
           log-accepted-android-sdk-licenses: false
       - name: Check offline release verifier boundaries
         run: python3 scripts/prepare-release-input.py self-test
+      - name: Verify the signed public preview when its tag binds a reviewed APK
+        id: uploaded
+        if: github.event_name == 'push'
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/check-uploaded-preview.py --tag "$RELEASE_TAG" --output "$RUNNER_TEMP/verified-release" --build-tools "$ANDROID_HOME/build-tools/35.0.0"
       - name: Fetch immutable input and verify APK against the tag source
         id: verify
+        if: steps.uploaded.outputs.checked != 'true'
         env:
           RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
           INPUT_COMMIT: ${{ inputs.input_commit }}
@@ -66,6 +75,7 @@ jobs:
           retention-days: 30
   publish:
     needs: verify
+    if: needs.verify.outputs.uploaded != 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:

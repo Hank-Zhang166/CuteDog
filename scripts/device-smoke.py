@@ -213,7 +213,7 @@ class Device:
             self.adb("shell", "input", "touchscreen", "motionevent", "UP", end_x, end_y, check=False)
 
     def launch(self):
-        result = self.adb("shell", "am", "start", "-W", "-n", PACKAGE + "/.MainActivity", timeout=120)
+        result = self.adb("shell", "am", "start", "-W", "-n", PACKAGE + "/com.cutedog.app.MainActivity", timeout=120)
         if "Status: ok" not in result:
             raise AssertionError("Activity launch did not report Status: ok: " + result)
         for pid in self.adb("shell", "pidof", PACKAGE, check=False).split():
@@ -320,6 +320,7 @@ class Device:
 
 
 def main():
+    global PACKAGE
     parser = argparse.ArgumentParser()
     parser.add_argument("--apk", type=Path, required=True)
     parser.add_argument("--expected-sha256", required=True)
@@ -329,7 +330,10 @@ def main():
     parser.add_argument("--baseline-sha256", help="Required together with --baseline-apk")
     parser.add_argument("--serial", default="emulator-5554")
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--package", choices=("com.cutedog.app", "com.cutedog.app.motionpreview"), default="com.cutedog.app",
+                        help="Application ID of the installed build")
     args = parser.parse_args()
+    PACKAGE = args.package
     if not args.disposable:
         parser.error("--disposable is required; existing app installations are never cleared")
     if not re.fullmatch(r"[0-9a-f]{40}", args.source_commit):
@@ -481,8 +485,8 @@ def main():
     def tabs():
         device.launch()
         paths = []
-        for label, marker, filename in [("首页", "轻触 · 打个招呼", "home"), ("事项", "把小事记好", "reminders"),
-                                         ("陪伴", "给心事一个柔软的落脚点", "chat"), ("小狗", "你的小狗，你的节奏", "settings")]:
+        for label, marker, filename in [("首页", "桌宠设置与悬浮窗权限", "home"), ("事项", "把小事记好", "reminders"),
+                                         ("陪伴", "清空聊天", "chat"), ("小狗", "你的小狗，你的节奏", "settings")]:
             device.tap(label)
             device.wait_text(marker)
             paths.append(device.screenshot(filename))
@@ -560,13 +564,16 @@ def main():
                                         "small_non_modal_window": True}
         (args.output / "overlay-window-before.txt").write_text(window)
         first = device.screenshot("overlay-on-launcher")
+        # The dog can walk while the screenshot and accessibility tree are being collected.
+        before, _ = device.overlay_frame()
+        left, top, right, bottom = before
         cx, cy = (left + right) // 2, (top + bottom) // 2
         destination_x = int(device.width * (.2 if cx > device.width / 2 else .8))
         destination_y = max(120, min(device.height - 180, cy - 180))
         device.long_drag(cx, cy, destination_x, destination_y)
         time.sleep(2)
         after, after_window = device.overlay_frame()
-        if abs(after[0] - before[0]) + abs(after[1] - before[1]) < 40:
+        if abs(after[1] - before[1]) < 40:
             raise AssertionError("Long drag did not change overlay position: " + str(after))
         metadata["overlay_observed"].update(window_after=after, drag_moved=True)
         (args.output / "overlay-window-after.txt").write_text(after_window)

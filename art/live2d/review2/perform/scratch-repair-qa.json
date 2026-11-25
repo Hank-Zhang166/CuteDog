@@ -1,0 +1,34 @@
+{
+  "totalFrames": 84,
+  "intervals": 83,
+  "fps": 24,
+  "endpointsEqualOriginalSit05": true,
+  "silhouetteComponentsOver8px": [
+    1.0,
+    1.0
+  ],
+  "touchFrames": [
+    38,
+    45,
+    52
+  ],
+  "recoveryGapsPixels": [
+    19.0,
+    20.0
+  ],
+  "lateFramesMeasured": 46,
+  "clearlyLiftedLatePawFramesMeasured": 40,
+  "faceReference": "Original Sit05 rigid head sampling, evaluated at each output angle. Sobel magnitude over nose and iris in original material space.",
+  "maxEyeNoseRGBDifferenceVsSingleSample": 0,
+  "faceSobelMagnitudeRatioToOriginal": [
+    0.99656,
+    1.02514
+  ],
+  "pawReference": "Same toe core of the generated high-contact painting registered at every angle; excludes the short transition behind the support foot.",
+  "maxMeanToeRGBDifferenceVsSingleSample": 0.40621,
+  "pawSobelMagnitudeRatioToOriginal": [
+    0.97623,
+    1.01468
+  ],
+  "maxFrontFeetInteriorRGBShift": 0
+}

@@ -23,6 +23,17 @@ class ChatRequestFactoryTest {
         assertEquals("ChatRequest(redacted)", request.toString())
     }
 
+    @Test fun deepSeekGetsTheSamoyedPersonaAndStreamsByDefault() {
+        val request = ChatRequestFactory.create("https://api.deepseek.com/v1", "deepseek-flash", "fixture",
+            history, emptyList(), false, name = "奶糖")
+        val payload = JSONObject(String(request.payload, Charsets.UTF_8))
+        assertTrue(payload.getBoolean("stream"))
+        val system = payload.getJSONArray("messages").getJSONObject(0)
+        assertEquals("system", system.getString("role"))
+        assertTrue(system.getString("content").contains(ChatPolicy.PERSONA))
+        assertTrue(system.getString("content").contains("奶糖"))
+    }
+
     @Test fun memoryIsNeverSentWithoutConsentAndIsNeverPrivileged() {
         val secret = "仅本地记忆：准备考试"
         assertFalse(String(request(listOf(Memory(7, secret)), false).payload).contains(secret))

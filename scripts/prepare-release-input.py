@@ -469,6 +469,23 @@ class ReleaseBoundaryTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "checkout HEAD"):
                 APK.source_state(source_commit="b" * 40)
 
+    def test_motion_preview_from_declared_source(self):
+        commit = APK.run(["git", "rev-parse", "HEAD"], APK.REPO).strip()
+        base = APK.source_metadata(APK.REPO, commit)
+        preview = {**base, "applicationId": base["applicationId"] + ".motionpreview", "debuggable": True}
+        APK.check_source_metadata(base, APK.REPO, commit)
+        APK.check_source_metadata(preview, APK.REPO, commit)
+        for key, value in (("applicationId", base["applicationId"] + ".other"),
+                           ("debuggable", False), ("versionName", base["versionName"] + "-other"),
+                           ("versionCode", base["versionCode"] + 1), ("minimumSdk", base["minimumSdk"] + 1),
+                           ("targetSdk", base["targetSdk"] + 1)):
+            with self.subTest(field=key), self.assertRaises(ValueError):
+                APK.check_source_metadata({**preview, key: value}, APK.REPO, commit)
+        for blob in ("", "a" * 40):
+            with self.subTest(previewScriptBlob=blob), mock.patch.object(APK, "source_metadata", return_value=base), \
+                    mock.patch.object(APK, "run", return_value=blob), self.assertRaisesRegex(ValueError, "applicationId"):
+                APK.check_source_metadata(preview, APK.REPO, commit)
+
     def test_reassembled_apk_metadata_and_signer_mismatch_rejected(self):
         for field, value in (("signerCertificateSha256", ["d" * 64]), ("debuggable", True),
                              ("versionName", "9.9.9"), ("targetSdk", 36)):

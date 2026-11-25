@@ -69,6 +69,7 @@ api="$(adb_cmd shell getprop ro.build.version.sdk | tr -d '\r')"
 [[ "$api" =~ ^[0-9]+$ ]] || exit 2
 package=com.cutedog.app
 notification_before=not_applicable
+microphone_before=denied
 exact_before=not_applicable
 restore_needed=false
 permission_restore=not_needed
@@ -109,6 +110,11 @@ finish() {
     adb_cmd shell am force-stop "$package.test" >>"$output/permission-restore.log" 2>&1
     permission_restore=restored
     ensure_packages || permission_restore=failed
+    if [[ "$microphone_before" == granted ]]; then
+      adb_cmd shell pm grant "$package" android.permission.RECORD_AUDIO >>"$output/permission-restore.log" 2>&1 || permission_restore=failed
+    else
+      adb_cmd shell pm revoke "$package" android.permission.RECORD_AUDIO >>"$output/permission-restore.log" 2>&1 || permission_restore=failed
+    fi
     if ((api >= 33)); then
       if [[ "$notification_before" == granted ]]; then
         adb_cmd shell pm grant "$package" android.permission.POST_NOTIFICATIONS >>"$output/permission-restore.log" 2>&1 || permission_restore=failed
@@ -166,6 +172,7 @@ for label,path in [('application','app/build/outputs/apk/debug/app-debug.apk'),(
 PY
 stage snapshot_permissions
 ensure_packages
+microphone_before="$(adb_cmd shell dumpsys package "$package" | python3 -c 'import re,sys; print("granted" if re.search(r"android\.permission\.RECORD_AUDIO: granted=true",sys.stdin.read()) else "denied")')"
 if ((api >= 33)); then
   notification_before="$(adb_cmd shell dumpsys package "$package" | python3 -c 'import re,sys; text=sys.stdin.read(); print("granted" if re.search(r"android\.permission\.POST_NOTIFICATIONS: granted=true",text) else "denied")')"
 fi
@@ -173,10 +180,10 @@ if ((api >= 31)); then
   exact_before="$(adb_cmd shell cmd appops get "$package" SCHEDULE_EXACT_ALARM | python3 -c 'import re,sys; text=sys.stdin.read(); match=re.search(r"SCHEDULE_EXACT_ALARM:\s*(allow|ignore|deny|default|foreground)",text); print(match.group(1) if match else "default")')"
 fi
 restore_needed=true
-python3 - "$output" "$notification_before" "$exact_before" <<'PY'
+python3 - "$output" "$notification_before" "$exact_before" "$microphone_before" <<'PY'
 import json,sys
 from pathlib import Path
-(Path(sys.argv[1])/'initial-permissions.json').write_text(json.dumps({'notification':sys.argv[2],'exactAlarmAppOp':sys.argv[3]},indent=2)+'\n')
+(Path(sys.argv[1])/'initial-permissions.json').write_text(json.dumps({'notification':sys.argv[2],'exactAlarmAppOp':sys.argv[3],'microphone':sys.argv[4]},indent=2)+'\n')
 PY
 
 denied_methods='com.cutedog.app.reminder.ReminderPersistenceTest#deniedExactAlarmPermissionUsesInexactSchedulingWithoutSecurityFailure,com.cutedog.app.reminder.ReminderReliabilityTest#deniedNotificationPermissionRetainsDurablePendingOccurrence,com.cutedog.app.daily.DailyInstrumentationTest#deniedNotificationPermissionRetainsDailyQuoteWithoutClaimingDelivery'

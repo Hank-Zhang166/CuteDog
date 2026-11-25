@@ -1,0 +1,69 @@
+{
+  "version": 1,
+  "fps": 24,
+  "rigModel": "../rig/CuteDog.model3.json",
+  "rigEditable": "../rig/Interactions.cmo3",
+  "frameOrigin": "top left",
+  "worldCanvas": [
+    800,
+    512
+  ],
+  "dogSize": [
+    512,
+    512
+  ],
+  "clips": [
+    {
+      "id": "play_ball",
+      "durationSeconds": 6.0833,
+      "intervals": 146,
+      "manifest": "play_ball/scene.json",
+      "movie": "play_ball/review.mp4",
+      "nativeMotion": "play_ball/play_ball.motion3.json",
+      "mobileIntervals": 146,
+      "mobileManifest": "play_ball/mobile/motion.json"
+    },
+    {
+      "id": "treat",
+      "durationSeconds": 5.0,
+      "intervals": 120,
+      "manifest": "treat/scene.json",
+      "movie": "treat/review.mp4",
+      "nativeMotion": "treat/treat.motion3.json",
+      "mobileIntervals": 120,
+      "mobileManifest": "treat/mobile/motion.json"
+    },
+    {
+      "id": "nuzzle",
+      "durationSeconds": 2.875,
+      "intervals": 69,
+      "manifest": "nuzzle/scene.json",
+      "movie": "nuzzle/review.mp4",
+      "nativeMotion": "nuzzle/nuzzle.motion3.json",
+      "mobileIntervals": 69,
+      "mobileManifest": "nuzzle/mobile/motion.json"
+    },
+    {
+      "id": "paw_lick",
+      "durationSeconds": 3.0,
+      "intervals": 72,
+      "manifest": "paw_lick/scene.json",
+      "movie": "paw_lick/review.mp4",
+      "nativeMotion": "paw_lick/paw_lick.motion3.json",
+      "mobileIntervals": 213,
+      "mobileManifest": "paw_lick/mobile/motion.json"
+    },
+    {
+      "id": "groom",
+      "durationSeconds": 3.375,
+      "intervals": 81,
+      "manifest": "groom/scene.json",
+      "movie": "groom/review.mp4",
+      "nativeMotion": "groom/groom.motion3.json",
+      "mobileIntervals": 125,
+      "mobileManifest": "groom/mobile/motion.json",
+      "rigModel": "../groom-rig/CuteDog.model3.json",
+      "rigEditable": "../groom-rig/Grooming.cmo3"
+    }
+  ]
+}

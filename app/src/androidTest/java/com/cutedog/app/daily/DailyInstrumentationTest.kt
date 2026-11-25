@@ -227,10 +227,11 @@ class DailyInstrumentationTest {
     private fun dailyAlarms(label: String): List<Pair<String, String>> {
         val raw = fixture.shell("dumpsys alarm")
         fixture.evidence("registeredDailyAlarm", "$label-alarm-dump.txt", raw)
+        val headerPattern = Regex("^\\s+RTC(?:_WAKEUP)? #\\d+: Alarm\\{.* ${Regex.escape(context.packageName)}\\}$")
         val lines = raw.lines()
         return lines.indices.mapNotNull { index ->
             val header = lines[index]
-            if (!Regex("^\\s+RTC(?:_WAKEUP)? #\\d+: Alarm\\{.* com\\.cutedog\\.app\\}$").matches(header)) return@mapNotNull null
+            if (!headerPattern.matches(header)) return@mapNotNull null
             val following = lines.drop(index + 1).take(6)
             if (following.firstOrNull()?.trim() != "tag=*alarm*:${DailyScheduler.ACTION}") return@mapNotNull null
             header to following.joinToString("\n")
