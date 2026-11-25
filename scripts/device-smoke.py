@@ -328,6 +328,7 @@ def main():
     parser.add_argument("--disposable", action="store_true", help="Required: use a fresh isolated emulator with no existing CuteDog installation")
     parser.add_argument("--baseline-apk", type=Path, help="Optional old APK for actual in-place upgrade/data-retention validation")
     parser.add_argument("--baseline-sha256", help="Required together with --baseline-apk")
+    parser.add_argument("--upgrade-only", action="store_true", help="Stop after the signed upgrade and real reminder-retention checks")
     parser.add_argument("--serial", default="emulator-5554")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--package", choices=("com.cutedog.app", "com.cutedog.app.motionpreview"), default="com.cutedog.app",
@@ -342,6 +343,8 @@ def main():
         parser.error("--expected-sha256 must be a 64-character SHA-256")
     if bool(args.baseline_apk) != bool(args.baseline_sha256):
         parser.error("--baseline-apk and --baseline-sha256 must be supplied together")
+    if args.upgrade_only and not args.baseline_apk:
+        parser.error("--upgrade-only requires --baseline-apk and --baseline-sha256")
     if args.baseline_sha256 and not re.fullmatch(r"[0-9a-fA-F]{64}", args.baseline_sha256):
         parser.error("--baseline-sha256 must be a 64-character SHA-256")
     if args.baseline_sha256 and args.baseline_sha256.lower() == args.expected_sha256.lower():
@@ -636,7 +639,9 @@ def main():
                 "service_stopped_from_ui": True, "screenshots": [first, second, external_touch]}
 
     try:
-        if step("install-pinned-apk", prepare) and (not args.baseline_apk or step("actual-in-place-upgrade-preserves-ui-data", upgrade)):
+        if (step("install-pinned-apk", prepare)
+                and (not args.baseline_apk or step("actual-in-place-upgrade-preserves-ui-data", upgrade))
+                and not args.upgrade_only):
             step("launch-and-four-tabs", tabs)
             step("reminder-ui-lifecycle", reminder_crud)
             step("chat-without-credentials", offline_chat)

@@ -145,9 +145,9 @@ class BackupSafFlowTest {
             assertTrue("Actual DocumentsUI filename accepts text", filename.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT,
                 Bundle().apply { putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, documentName) }))
             capture("create-picker-local-destination")
-            click(awaitNode("DocumentsUI Save button") { node ->
+            clickPickerControl("DocumentsUI Save button") { node ->
                 node.isEnabled && node.text?.toString()?.trim() in setOf("Save", "SAVE", "保存")
-            })
+            }
             val created = awaitResult(beforeExport, "create")
             exportedUri = requireNotNull(created.uri) { "Real CreateDocument result was cancelled" }
             assertTrue("Returned URI must be a document URI", DocumentsContract.isDocumentUri(context, exportedUri!!))
@@ -325,20 +325,32 @@ class BackupSafFlowTest {
     }
 
     private fun chooseDownloads() {
-        click(awaitNode("DocumentsUI navigation drawer") { node ->
-            node.viewIdResourceName == "android:id/home" || node.contentDescription?.toString() in
-                setOf("Show roots", "显示根目录", "显示导航抽屉", "打开导航抽屉")
-        })
-        click(awaitNode("Local Downloads root") { node ->
-            node.text?.toString() in setOf("Downloads", "下载", "下载内容") && ancestorHasId(node, "roots_list")
-        })
-        awaitPicker()
-        automation.waitForIdle(300, 5_000)
-        awaitNode("Actual Downloads directory heading") { node ->
-            node.text?.toString() in setOf("Downloads", "下载", "下载内容") && !ancestorHasId(node, "roots_list")
+        val downloads = setOf("Downloads", "下载", "下载内容")
+        fun isCurrentDirectory(node: AccessibilityNodeInfo) = node.text?.toString() in downloads &&
+            (ancestorHasId(node, "toolbar") || ancestorHasId(node, "directory_header"))
+        // DocumentsUI restores its last location independently for create and open. Opening
+        // the roots drawer again would replace the accessibility rows of an already selected root.
+        val observed = nodes()
+        val activeWindow = automation.windows.firstOrNull { it.isActive && it.root?.packageName?.toString() in pickerPackages }
+        if (observed.any { node ->
+                node.windowId == activeWindow?.id && node.isVisibleToUser && isCurrentDirectory(node) &&
+                    !behindRootsDrawer(node, observed)
+            }) return
+        val windowWidth = activeWindow?.let { Rect().also(it::getBoundsInScreen).width() } ?: 0
+        val drawerOpen = observed.any { node ->
+            node.windowId == activeWindow?.id && node.isVisibleToUser && node.viewIdResourceName?.endsWith("/roots_list") == true &&
+                windowWidth > 0 && Rect().also(node::getBoundsInScreen).width() > windowWidth / 3
         }
-        // API 26 retains a visible sliver of roots_list after the drawer is closed.
-        // The next control must be unobstructed; disappearance of that node is not required.
+        if (!drawerOpen) {
+            clickPickerControl("DocumentsUI navigation drawer") { node ->
+                node.viewIdResourceName == "android:id/home" || node.contentDescription?.toString() in
+                    setOf("Show roots", "显示根目录", "显示导航抽屉", "打开导航抽屉")
+            }
+        }
+        clickPickerControl("Local Downloads root") { node ->
+            node.text?.toString() in downloads && ancestorHasId(node, "roots_list")
+        }
+        awaitUncoveredNode("Actual Downloads directory heading", ::isCurrentDirectory)
     }
 
     private fun touchExportedDocument(label: String) {
@@ -412,16 +424,19 @@ class BackupSafFlowTest {
             val observed = nodes()
             found = observed.firstOrNull { node ->
                 val bounds = Rect().also(node::getBoundsInScreen)
-                node.isVisibleToUser && node.isEnabled && predicate(node) && !bounds.isEmpty &&
-                    observed.none { drawer ->
-                        drawer.windowId == node.windowId && drawer.isVisibleToUser &&
-                            drawer.viewIdResourceName?.endsWith("/roots_list") == true &&
-                            Rect().also(drawer::getBoundsInScreen).contains(bounds.centerX(), bounds.centerY())
-                    }
+                node.isVisibleToUser && node.isEnabled && predicate(node) && !bounds.isEmpty && !behindRootsDrawer(node, observed)
             }
             found != null
         }
         return requireNotNull(found)
+    }
+
+    private fun behindRootsDrawer(node: AccessibilityNodeInfo, observed: List<AccessibilityNodeInfo>): Boolean {
+        val center = Rect().also(node::getBoundsInScreen)
+        return observed.any { drawer ->
+            drawer.windowId == node.windowId && drawer.isVisibleToUser && drawer.viewIdResourceName?.endsWith("/roots_list") == true &&
+                Rect().also(drawer::getBoundsInScreen).contains(center.centerX(), center.centerY())
+        }
     }
 
     private fun nodes(): List<AccessibilityNodeInfo> {
@@ -435,21 +450,28 @@ class BackupSafFlowTest {
         return result
     }
 
-    private fun click(node: AccessibilityNodeInfo) {
-        var current: AccessibilityNodeInfo? = node
-        while (current != null) {
-            val value = current
-            if (value.isClickable && value.isEnabled && value.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return
-            current = value.parent
+    private fun clickPickerControl(description: String, matches: (AccessibilityNodeInfo) -> Boolean) {
+        var previous: Pair<Int, Rect>? = null
+        awaitCondition(description) {
+            val window = automation.windows.firstOrNull { it.isActive && it.root?.packageName?.toString() in pickerPackages }
+                ?: return@awaitCondition false
+            val node = nodes().firstOrNull { it.windowId == window.id && it.isVisibleToUser && it.isEnabled && matches(it) }
+                ?: return@awaitCondition false
+            if (!node.refresh() || !node.isVisibleToUser || !node.isEnabled || !matches(node)) return@awaitCondition false
+            val bounds = Rect().also(node::getBoundsInScreen)
+            val available = Rect().also(window::getBoundsInScreen)
+            if (bounds.isEmpty || !available.contains(bounds.centerX(), bounds.centerY())) return@awaitCondition false
+            val location = window.id to bounds
+            if (previous != location) { previous = location; return@awaitCondition false }
+            var current: AccessibilityNodeInfo? = node
+            while (current != null) {
+                if (current.isClickable && current.isEnabled && current.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return@awaitCondition true
+                current = current.parent
+            }
+            // Some system versions expose the row title with no clickable ancestor.
+            touchBounds(bounds)
+            true
         }
-        // Android 15 has also exposed a visible Downloads root title without any
-        // clickable ancestor. Exercise that exact row through the real picker.
-        check(node.refresh() && node.isVisibleToUser && node.isEnabled)
-        val window = automation.windows.single { it.id == node.windowId && it.isActive && it.root?.packageName?.toString() in pickerPackages }
-        val bounds = Rect().also(node::getBoundsInScreen)
-        val available = Rect().also(window::getBoundsInScreen)
-        check(!bounds.isEmpty && available.contains(bounds.centerX(), bounds.centerY()))
-        touchBounds(bounds)
     }
 
     private fun awaitCondition(description: String, timeoutMs: Long = 15_000, condition: () -> Boolean) {
