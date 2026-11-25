@@ -354,22 +354,38 @@ class BackupSafFlowTest {
     }
 
     private fun touchExportedDocument(label: String) {
-        val node = awaitUncoveredNode("Exported fixture file in actual DocumentsUI") {
-            it.text?.toString() == documentName && it.isEnabled
+        // DocumentsUI reports accessible file rows while its whole window is still sliding
+        // in. A cached center can land outside that file when the transition finishes.
+        fun settledTitle(): Pair<AccessibilityNodeInfo, Rect> {
+            var previous: Pair<Int, Rect>? = null
+            var stableSince = 0L
+            var result: Pair<AccessibilityNodeInfo, Rect>? = null
+            awaitCondition("Stationary exported file title in the real document picker") {
+                val active = automation.windows.firstOrNull { it.isActive && it.root?.packageName?.toString() in pickerPackages }
+                    ?: return@awaitCondition false
+                val tree = nodes()
+                val title = tree.firstOrNull { it.windowId == active.id && it.text?.toString() == documentName && it.isVisibleToUser }
+                    ?: return@awaitCondition false
+                if (!title.refresh() || !title.isVisibleToUser || !title.isEnabled || title.text?.toString() != documentName ||
+                    behindRootsDrawer(title, tree)) return@awaitCondition false
+                val bounds = Rect().also(title::getBoundsInScreen)
+                if (bounds.isEmpty || !Rect().also(active::getBoundsInScreen).contains(bounds.centerX(), bounds.centerY())) return@awaitCondition false
+                val key = active.id to bounds
+                val now = SystemClock.uptimeMillis()
+                if (key != previous) { previous = key; stableSince = now }
+                result = title to bounds
+                now - stableSince >= 400
+            }
+            return requireNotNull(result)
         }
-        check(node.refresh() && node.isVisibleToUser && node.text?.toString() == documentName) {
-            "The exported file title must still be visible in the actual system picker"
-        }
-        val window = automation.windows.single { it.id == node.windowId && it.isActive && it.root?.packageName?.toString() in pickerPackages }
-        val bounds = Rect().also(node::getBoundsInScreen)
-        val windowBounds = Rect().also(window::getBoundsInScreen)
-        check(!bounds.isEmpty && windowBounds.contains(bounds.centerX(), bounds.centerY()))
+        settledTitle()
+        capture("$label-before-document-touch")
+        val (node, bounds) = settledTitle()
         events.put(JSONObject().put("stage", "$label-document-touch")
             .put("package", node.packageName?.toString()).put("windowId", node.windowId)
             .put("displayName", node.text?.toString()).put("bounds", bounds.toShortString())
             .put("pointerToolType", MotionEvent.TOOL_TYPE_FINGER).put("touchDurationMs", 100)
             .put("elapsedMs", SystemClock.elapsedRealtime()))
-        capture("$label-before-document-touch")
         touchBounds(bounds)
     }
 

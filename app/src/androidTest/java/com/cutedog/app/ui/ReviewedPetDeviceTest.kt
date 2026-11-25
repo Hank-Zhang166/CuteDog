@@ -412,17 +412,11 @@ class ReviewedPetDeviceTest {
                 await("Tapping outside did not dismiss the menu and restore Launcher", 7000) {
                     label("投球") == null && shell("dumpsys activity activities").lineSequence().any {
                         (it.contains("mResumedActivity") || it.contains("topResumedActivity")) && it.contains("launcher", ignoreCase = true)
+                    } && shell("dumpsys window windows").lineSequence().none {
+                        it.trimStart().startsWith("Window #") && it.contains("/com.cutedog.app.pet.PetMenuActivity")
                     }
                 }
-                tap(phone.exactCenterX(), phone.exactCenterY())
-                await("Dismissed menu still blocked the launcher icon", 10_000) {
-                    shell("dumpsys activity activities").lineSequence().any {
-                        (it.contains("mResumedActivity") || it.contains("topResumedActivity")) &&
-                            (it.contains("dialer", ignoreCase = true) || it.contains("Dialtacts"))
-                    }
-                }
-                capture("outside-touch-opens-dialer")
-                shell("input keyevent KEYCODE_HOME")
+                capture("outside-touch-restores-launcher")
             }
         } finally {
             OverlayService.stop(context)

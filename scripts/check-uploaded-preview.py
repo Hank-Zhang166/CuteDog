@@ -60,6 +60,7 @@ def check(tag, output, build_tools):
             remote = json.loads(apk.run(["gh", "api", f"repos/{repository}/git/ref/tags/{tag}"]))
             if remote["object"]["sha"] != apk.run(["git", "rev-parse", local]).strip():
                 raise ValueError("Tag changed during verification")
+            metadata["file"] = name
             apk.write_evidence(output, metadata, badging, signature, source, False)
             return True
         finally:
