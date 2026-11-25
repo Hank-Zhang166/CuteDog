@@ -448,10 +448,14 @@ class Device:
                 if not size:
                     raise RuntimeError("Cannot read display dimensions")
                 width, height = map(int, size[-1])
+                containers = [tuple(map(int, re.findall(r"-?\d+", node.get("bounds", ""))))
+                              for node in tree.iter("node") if node.get("scrollable") == "true"]
+                left, top, right, bottom = max(containers, key=lambda b: (b[2]-b[0])*(b[3]-b[1]),
+                                               default=(0, 0, width, height))
                 start, end = ((.78, .3) if attempt < 6 else (.3, .78))
-                start_y, end_y = int(height * start), int(height * end)
+                start_y, end_y = top + int((bottom-top) * start), top + int((bottom-top) * end)
                 for fraction in (.20, .80, .50):
-                    x = int(width * fraction)
+                    x = left + int((right-left) * fraction)
                     if all(not (l <= x < r and max(start_y, end_y) >= t and min(start_y, end_y) < b) for l,t,r,b in rectangles):
                         self.run("shell", "input", "swipe", x, start_y, x, end_y, 350)
                         break

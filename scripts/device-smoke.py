@@ -129,12 +129,22 @@ class Device:
 
     def scroll_to(self, text):
         for _ in range(7):
-            node = self.find(text)
+            tree = self.tree()
+            node = self.find(text, tree=tree)
             if node is not None:
                 self.tap_node(node)
                 return
-            self.adb("shell", "input", "swipe", self.width // 2, int(self.height * .72),
-                     self.width // 2, int(self.height * .32), 450)
+            def rect(item):
+                return tuple(map(int, re.findall(r"-?\d+", item.get("bounds", ""))))
+            containers = [rect(n) for n in tree.iter("node") if n.get("scrollable") == "true"]
+            left, top, right, bottom = max(containers, default=(0, 0, self.width, self.height),
+                                           key=lambda b: (b[2]-b[0])*(b[3]-b[1]))
+            x = (left+right)//2
+            entries = [rect(n) for n in tree.iter("node") if n.get("class") == "android.widget.EditText"]
+            start = next((top+(bottom-top)*f//100 for f in (68, 74, 62, 80, 55, 88, 48)
+                          if all(not (a <= x <= c and b-8 <= top+(bottom-top)*f//100 <= d+8)
+                                 for a,b,c,d in entries)), top+(bottom-top)*3//4)
+            self.adb("shell", "input", "touchscreen", "swipe", x, start, x, top+(bottom-top)//9, 400)
             time.sleep(.7)
         raise AssertionError("Could not scroll to " + text)
 

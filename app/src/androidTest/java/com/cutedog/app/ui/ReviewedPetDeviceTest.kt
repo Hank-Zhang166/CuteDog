@@ -186,8 +186,15 @@ class ReviewedPetDeviceTest {
                 usableSince != 0L && now - usableSince >= 700
             }
             val box = bounds()
-            val tapCommand = "input tap ${box.centerX()} ${box.centerY()}"
-            shell(if (twice) "$tapCommand; sleep 0.06; $tapCommand" else tapCommand)
+            // Dispatch each physical event to Android. UiAutomation's shell command API
+            // does not provide an interactive shell for a compound "tap; sleep; tap".
+            repeat(if (twice) 2 else 1) { step ->
+                val down = SystemClock.uptimeMillis()
+                sendTouch(MotionEvent.ACTION_DOWN, down, box.exactCenterX(), box.exactCenterY(), sync = false)
+                SystemClock.sleep(28)
+                sendTouch(MotionEvent.ACTION_UP, down, box.exactCenterX(), box.exactCenterY(), sync = false)
+                if (twice && step == 0) SystemClock.sleep(68)
+            }
         }
         fun awaitMenuInput() {
             var focusSince = 0L
