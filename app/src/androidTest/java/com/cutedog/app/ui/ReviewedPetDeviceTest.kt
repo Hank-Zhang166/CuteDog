@@ -211,10 +211,37 @@ class ReviewedPetDeviceTest {
             }
             automation.waitForIdle(150, 2000)
         }
-        fun choose(text: String, inPetMenu: Boolean = true) {
-            if (inPetMenu) awaitMenuInput()
+        fun menuBounds(text: String? = null): Rect {
             val rect = Rect()
-            requireNotNull(label(text)).getBoundsInScreen(rect)
+            await("Visible native menu control was not laid out: $text", 6000) {
+                InstrumentationRegistry.getInstrumentation().runOnMainSync {
+                    val menu = ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(Stage.RESUMED)
+                        .filterIsInstance<PetMenuActivity>().firstOrNull { it.hasWindowFocus() }
+                    val view = menu?.let { activity -> descendants(activity.window.decorView).firstOrNull {
+                        if (text == null) it is android.widget.ScrollView else it is android.widget.TextView && it.text.toString() == text
+                    } }
+                    val visible = Rect()
+                    if (view != null && view.isShown && view.getLocalVisibleRect(visible)) {
+                        val location = IntArray(2)
+                        view.getLocationOnScreen(location)
+                        rect.set(visible)
+                        rect.offset(location[0], location[1])
+                    }
+                }
+                !rect.isEmpty
+            }
+            return rect
+        }
+        fun choose(text: String, inPetMenu: Boolean = true) {
+            val rect = if (inPetMenu) {
+                awaitMenuInput()
+                menuBounds(text)
+            } else Rect().also { bounds ->
+                await("Visible control was not available: $text", 6000) {
+                    label(text)?.getBoundsInScreen(bounds)
+                    !bounds.isEmpty
+                }
+            }
             tap(rect.exactCenterX(), rect.exactCenterY())
         }
         try {
@@ -378,8 +405,7 @@ class ReviewedPetDeviceTest {
                 touchDog(true)
                 await("Menu absent before testing outside touch", 8000) { label("投球") != null }
                 awaitMenuInput()
-                val menuPanel = Rect()
-                requireNotNull(node { it.className == "android.widget.ScrollView" }).getBoundsInScreen(menuPanel)
+                val menuPanel = menuBounds()
                 assertFalse("Launcher icon must be outside the menu", menuPanel.contains(phone.centerX(), phone.centerY()))
                 assertFalse("Launcher icon must be outside the dog", preMenuDog.contains(phone.centerX(), phone.centerY()))
                 tap(phone.exactCenterX(), phone.exactCenterY())
