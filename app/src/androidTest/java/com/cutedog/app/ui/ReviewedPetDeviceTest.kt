@@ -188,6 +188,19 @@ class ReviewedPetDeviceTest {
                 val rect = Rect(l.toInt(),t.toInt(),r.toInt(),b.toInt())
                 if (!rect.isEmpty) return rect
             }
+            // Some Android builds group InputDispatcher's metadata over multiple lines.
+            // WindowManager exposes the same display-pixel frame for a drawn, touchable surface.
+            val surface = shell("dumpsys window windows").split(Regex("(?m)^  Window #\\d+"))
+                .firstOrNull { window ->
+                    window.lineSequence().firstOrNull()?.contains(pkg) == true &&
+                        window.contains("ty=APPLICATION_OVERLAY") && window.contains("Surface: shown=true") &&
+                        window.contains("isVisible=true") && !window.contains("NOT_TOUCHABLE")
+                }
+            surface?.let { window ->
+                val groups = frame.find(window)?.groupValues ?: return@let
+                val rect = Rect(groups[1].toInt(),groups[2].toInt(),groups[3].toInt(),groups[4].toInt())
+                if (!rect.isEmpty) return rect
+            }
             return null
         }
         fun screenPoint(current: org.json.JSONObject, u: Float, v: Float): Pair<Float,Float> {
