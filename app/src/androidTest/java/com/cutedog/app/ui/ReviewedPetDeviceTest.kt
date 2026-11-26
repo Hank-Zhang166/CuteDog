@@ -382,11 +382,19 @@ class ReviewedPetDeviceTest {
                             await("Previous floating view did not close", 8000) { snapshot() == null }
                             activity.onActivity { OverlayService.start(it) }
                         }
-                        await("Standing artwork has not been drawn", 20_000) {
-                            snapshot()?.let { it.optString("clipId") == "stand" && it.optInt("displayedFrameIndex", -1) >= 0 } == true
-                        }
+                        awaitDogInput()
                         fun tapCanvas(u: Float, v: Float) {
-                            val (x,y) = screenPoint(requireNotNull(snapshot()),u,v)
+                            var target: Pair<Float,Float>? = null
+                            await("Standing artwork has not been drawn", 20_000) {
+                                val drawn = snapshot() ?: return@await false
+                                if (drawn.optString("displayedClip") != "stand" || drawn.optBoolean("loading") ||
+                                    drawn.optInt("displayedFrameIndex", -1) < 0 || drawn.optDouble("canvasSide", 0.0) <= 0) {
+                                    return@await false
+                                }
+                                target = screenPoint(drawn, u, v)
+                                true
+                            }
+                            val (x,y) = requireNotNull(target)
                             tap(x,y)
                         }
                         if (index == 0) {
