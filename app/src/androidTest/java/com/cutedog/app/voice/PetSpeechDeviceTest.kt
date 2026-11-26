@@ -1,5 +1,8 @@
 package com.cutedog.app.voice
 
+import android.media.AudioAttributes
+import android.media.AudioFormat
+import android.media.AudioTrack
 import android.os.SystemClock
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -20,6 +23,34 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class PetSpeechDeviceTest {
+    @Test fun starvedTrackPlaysItsFinalShortBuffer() = runBlocking {
+        val rate = 24_000
+        val minimum = AudioTrack.getMinBufferSize(rate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
+        val track = AudioTrack.Builder()
+            .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANT)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
+            .setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                .setSampleRate(rate).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
+            .setTransferMode(AudioTrack.MODE_STREAM).setBufferSizeInBytes(maxOf(16384, minimum * 3)).build()
+        try {
+            val fill = ShortArray(track.bufferSizeInFrames)
+            assertEquals(fill.size, track.write(fill, 0, fill.size, AudioTrack.WRITE_NON_BLOCKING))
+            track.play()
+            withTimeout(5000) { while (track.underrunCount == 0) delay(10) }
+            // Give the mixer time to disable the starved track, as happens between neural chunks.
+            delay(500)
+            val tail = ShortArray(128) { (it - 64).toShort() }
+            assertEquals(tail.size, track.write(tail, 0, tail.size, AudioTrack.WRITE_NON_BLOCKING))
+            val target = (fill.size + tail.size).toLong()
+            PetSpeech.drainSpeech(track, target)
+            assertTrue("Mixer consumed the last real frame", (track.playbackHeadPosition.toLong() and 0xffffffffL) >= target)
+        } finally {
+            track.pause()
+            track.flush()
+            track.release()
+        }
+    }
+
     @Test fun bundledAVoiceSynthesizesAndStops() = runBlocking {
         val app = InstrumentationRegistry.getInstrumentation().targetContext
         assumeTrue("A speech synthesis requires a 64-bit app process", android.os.Process.is64Bit())

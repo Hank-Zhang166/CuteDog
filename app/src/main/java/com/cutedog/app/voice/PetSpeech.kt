@@ -185,9 +185,7 @@ class PetSpeech(context: Context, private val onStatus: (String) -> Unit = {}) :
                 }
                 for (pcm in waiting) write(pcm)
                 startIfReady(force = true)
-                withTimeout(6000) {
-                    while ((player.playbackHeadPosition.toLong() and 0xffffffffL) < written) delay(8)
-                }
+                drainSpeech(player, written)
                 Log.i("CuteDogVoiceTiming", "playback_drained elapsedMs=" + SystemClock.elapsedRealtime() +
                     " underruns=" + player.underrunCount + " beforeLastWrite=" + underrunsAtLastWrite)
                 Unit
@@ -267,6 +265,36 @@ class PetSpeech(context: Context, private val onStatus: (String) -> Unit = {}) :
     companion object {
         private const val RATE = 24_000
         private const val CHUNK_LOG_TAG = "CuteDogVoiceChunks"
+
+        internal suspend fun drainSpeech(player: AudioTrack, speechFrames: Long) {
+            fun playedFrames() = player.playbackHeadPosition.toLong() and 0xffffffffL
+            val remaining = speechFrames - playedFrames()
+            if (remaining <= 0) return
+
+            // After an underrun, Android can withhold the last short write until the
+            // output path fills again. Supply at most a track capacity of silence,
+            // but finish as soon as the mixer has consumed the last speech frame.
+            val capacity = player.bufferCapacityInFrames
+            val silence = ShortArray(capacity)
+            var padded = 0
+            val drained = withTimeoutOrNull(6_000L + remaining * 1_000L / player.sampleRate) {
+                while (playedFrames() < speechFrames) {
+                    if (padded < capacity) {
+                        val n = player.write(silence, 0, capacity - padded, AudioTrack.WRITE_NON_BLOCKING)
+                        check(n >= 0) { "小狗的声音输出中断，请检查音频设备后重试。" }
+                        padded += n
+                    }
+                    delay(8)
+                }
+                true
+            }
+            if (drained != true) {
+                Log.w("CuteDogVoiceTiming", "drain_stalled played=" + playedFrames() +
+                    " speech=" + speechFrames + " padding=" + padded)
+                error("小狗的声音没有播完，请检查音频设备后重试。")
+            }
+        }
+
         private val engineGate = Mutex()
         private val housekeeper = CoroutineScope(Dispatchers.IO + SupervisorJob())
         private var engine = 0L
