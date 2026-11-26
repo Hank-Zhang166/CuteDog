@@ -6,6 +6,7 @@ import org.junit.After
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
+import java.net.ConnectException
 import java.net.InetSocketAddress
 import java.net.Proxy
 import java.net.URL
@@ -175,10 +176,9 @@ class ChatHttpsTransportTest {
     }
 
     @Test fun connectionFailureHasHonestOfflineError() = runBlocking {
-        val port = server.address.port
-        server.stop(0)
-        val error = runCatching { transport().execute(ChatRequest("https://localhost:$port/v1/chat/completions", "fixture-key", "{}".toByteArray(), false)) }.exceptionOrNull()
-        assertTrue(error is ChatException)
-        assertTrue(error!!.message!!.contains("无法连接"))
+        val offline = ChatTransport { throw ConnectException("Connection refused") }
+        val error = runCatching { offline.execute(request()) }.exceptionOrNull()
+        assertTrue("Expected a user-facing connection error, got $error", error is ChatException)
+        assertEquals("无法连接 AI 服务，请检查网络与服务地址。", error?.message)
     }
 }

@@ -4,7 +4,9 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Rect
 import android.os.Build
+import android.view.accessibility.AccessibilityNodeInfo
 import androidx.test.core.app.ActivityScenario
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.compose.ui.test.*
@@ -97,9 +99,49 @@ class OfflineVoiceDeviceTest {
         val followUpAnswer = "好呀，我来接！"
         val requests = AtomicInteger()
         fun showMessage(value: String) =
-            compose.onNodeWithTag("chat_messages").performScrollToNode(hasText(value))
-        fun waitForMessage(value: String) = compose.waitUntil(25_000) {
-            runCatching { showMessage(value); compose.onNodeWithText(value).assertIsDisplayed() }.isSuccess
+            compose.onNodeWithTag("chat_messages", useUnmergedTree = true).performScrollToNode(hasText(value))
+        fun foregroundLines(): Map<String, Rect> {
+            val root = device.uiAutomation.rootInActiveWindow ?: return emptyMap()
+            if (root.packageName?.toString() != context.packageName) return emptyMap()
+            val queue = ArrayDeque<AccessibilityNodeInfo>().apply { add(root) }
+            val visible = mutableMapOf<String, Rect>()
+            while (queue.isNotEmpty()) {
+                val node = queue.removeFirst()
+                val text = node.text?.toString()
+                if (node.isVisibleToUser && !text.isNullOrBlank()) {
+                    val bounds = Rect().also(node::getBoundsInScreen)
+                    if (!bounds.isEmpty) visible[text] = bounds
+                }
+                for (i in 0 until node.childCount) node.getChild(i)?.let(queue::addLast)
+            }
+            return visible
+        }
+        fun waitForMessage(value: String) {
+            var lastObservation = "row not yet saved"
+            try {
+                compose.waitUntil(25_000) {
+                    val id = repository.messages().singleOrNull { it.content == value }?.id ?: return@waitUntil false
+                    // A LazyColumn can be in the middle of auto-scrolling after the DB flow emits.
+                    // Seek its stable row key, then inspect the visible text in Android's own window.
+                    val result = runCatching {
+                        val list = compose.onNodeWithTag("chat_messages", useUnmergedTree = true)
+                        list.performScrollToKey(id)
+                        val bubble = hasText(value) and hasAnyAncestor(hasTestTag("chat_messages"))
+                        compose.onNode(bubble, useUnmergedTree = true).assertIsDisplayed()
+                    }
+                    val visible = foregroundLines()
+                    if (result.isFailure || value !in visible) {
+                        lastObservation = "id=$id; Compose=${result.exceptionOrNull()?.message?.take(500) ?: "visible"}; visible=${visible.keys}"
+                        false
+                    } else {
+                        android.util.Log.i("CuteDogUiEvidence","Voice chat row $id visible in Compose and Android at ${visible[value]}")
+                        true
+                    }
+                }
+            } catch (failure: ComposeTimeoutException) {
+                val tree = runCatching { compose.onRoot(useUnmergedTree = true).printToString(maxDepth = 12) }.getOrNull()
+                throw AssertionError("Saved chat bubble was not visible: $value; $lastObservation; tree=${tree?.take(4500)}", failure)
+            }
         }
         try {
             server.createContext("/chat/completions") { exchange ->
@@ -152,14 +194,14 @@ class OfflineVoiceDeviceTest {
                     assertTrue(saved.all { it.voice })
                     waitForMessage(answer)
                     showMessage("你 · 语音输入")
-                    showMessage(expected)
+                    waitForMessage(expected)
                 } finally { scenario.onActivity { session.close() } }
             }
             val mainChat = Intent(context, MainActivity::class.java).putExtra("open_chat", true)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             ActivityScenario.launch<MainActivity>(mainChat).use {
                 waitForMessage(answer)
-                showMessage(expected)
+                waitForMessage(expected)
                 compose.onNodeWithText("设置").performClick()
                 compose.onNodeWithText("连接你的模型").assertExists()
                 compose.onNodeWithText("安装 A 声线语音包").assertDoesNotExist()
@@ -174,8 +216,8 @@ class OfflineVoiceDeviceTest {
             }
             ActivityScenario.launch(PetChatActivity::class.java).use {
                 waitForMessage(followUpAnswer)
-                showMessage(expected)
-                showMessage(answer)
+                waitForMessage(expected)
+                waitForMessage(answer)
                 val saved = ChatRepository(context).messages()
                 assertEquals(listOf(expected, answer, followUp, followUpAnswer), saved.map { m -> m.content })
                 assertEquals(listOf(true, true, false, false), saved.map { m -> m.voice })
