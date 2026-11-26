@@ -1,4 +1,6 @@
-# 手机上的 A 声线
+# 旧版的本地 A 声线
+
+本页对应 preview.4。维护者可以用 `-PcuteDogBundleLegacySpeech=true` 构建带本地听写和 A 声线的版本。preview.5 默认采用豆包实时语音。[当前语音用法](interaction-review.md)
 
 安装 CuteDog APK 后，长按互动菜单里的麦克风，说完松手。手机完成普通话听写，已配置的 DeepSeek 服务根据文字生成回答，小狗再用 A 声线朗读。朗读与听写可在手机上离线运行。桌面聊天小窗与「陪伴」页都会保留本轮转录和回复。
 

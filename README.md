@@ -1,10 +1,8 @@
 # CuteDog
 
-CuteDog 是一只 Android 桌面萨摩耶。可以轻抚、喂零食、投球、提醒待办，也可以按住麦克风聊天。当前版本为 **0.2.1-preview.4**，支持 Android 8.0 及以上，A 声线的本地合成需要 64 位设备。
+CuteDog 是一只 Android 桌面萨摩耶。可以轻抚、喂零食、投球、提醒待办，也可以按住麦克风聊天。当前源码为 **0.2.1-preview.5**，支持 Android 8.0 及以上，使用豆包实时语音播放回答。
 
-[下载 Android APK](https://github.com/Hank-Zhang166/CuteDog/releases/download/v0.2.1-preview.4/CuteDog-0.2.1-preview.4.apk) · [观看 56 项动作与左右追球 MP4](https://github.com/Hank-Zhang166/CuteDog/releases/download/v0.2.1-preview.4/CuteDog-actions.mp4) · [可编辑的 Live2D 工程](https://github.com/Hank-Zhang166/CuteDog/releases/download/v0.2.1-preview.4/CuteDog-Live2D-project.zip)
-
-安装包共 1,049.16 MB（1,000.56 MiB），包含桌宠动作、普通话听写和固定 A 声线。安装后即可在支持的设备上合成新句子。
+[已发布的 APK 和动作素材](https://github.com/Hank-Zhang166/CuteDog/releases/latest) · [观看 56 项动作与左右追球 MP4](https://github.com/Hank-Zhang166/CuteDog/releases/download/v0.2.1-preview.4/CuteDog-actions.mp4) · [可编辑的 Live2D 工程](https://github.com/Hank-Zhang166/CuteDog/releases/download/v0.2.1-preview.4/CuteDog-Live2D-project.zip)
 
 ![萨摩耶站姿](art/live2d/poses/Stand.png)
 
@@ -12,15 +10,15 @@ CuteDog 是一只 Android 桌面萨摩耶。可以轻抚、喂零食、投球、
 
 ## 使用
 
-- 在「小狗」页授权悬浮窗并召唤桌宠。轻点头、腿或尾巴，小狗会用相应部位回应。按住再拖可以移动小狗。双击小狗可选择喂零食、玩球、聊天等互动，轻点菜单外即可收起。
+- 在「小狗」页授权悬浮窗并召唤桌宠。轻点头、腿或尾巴，小狗会用相应部位回应。按住再拖可以移动小狗。双击后，小狗旁边的浮动面板可以连续选择喂零食、玩球和聊天，轻点面板外收起。
 - 双击菜单和聊天输入栏都有麦克风。按住说普通话，松手发送，滑出按钮取消。首次授予麦克风权限后要再按一次。你的语音会转成文字，和小狗的回复一起出现在「陪伴」和桌面聊天窗共用的历史中。
-- 安装 APK 即可用 A 声线在手机上朗读新的回复。语音资源只保留了小萨摩耶的固定参考和生成新句子需要的权重。[包内语音与模型来源](docs/offline-pet-speech.md)
+- 在「豆包实时语音」中填写语音 API Key。搜索使用独立的豆包搜索 Custom API Key。语音首次使用需确认将录音实时发给豆包。[配置和交互说明](docs/interaction-review.md)
 - 在「事项」页创建待办并设置到期时间。小狗身旁只显示到点的待办提醒，直接勾选即可完成。通知权限与精确闹钟授权影响送达方式。[提醒与重复规则](docs/reminders.md)
 - 「陪伴」可配置支持 OpenAI 兼容接口的 HTTPS 服务和自己的密钥。聊天需要联网，待办、桌宠和每日短句可离线使用。[模型服务与记忆设置](docs/ai-design.md)
 
 ## 构建
 
-安装 JDK 17、Android SDK Platform 35、Build-Tools 35.0.0、工程指定的 Android NDK 与 CMake，以及 Python 3.11 或以上版本。在 Windows 项目根目录运行以下命令。
+安装 JDK 17、Android SDK Platform 35、Build-Tools 35.0.0 和 Python 3.11 或以上版本。在 Windows 项目根目录运行以下命令。
 
 ```powershell
 python -m pip install -r scripts/artwork-requirements.txt

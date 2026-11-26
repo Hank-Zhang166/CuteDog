@@ -26,7 +26,7 @@ class PetChatActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        if (intent.hasExtra(VOICE_DRAFT)) draftVersion++
+        if (intent.hasExtra(VOICE_DRAFT) || intent.getBooleanExtra(VOICE_SETUP, false)) draftVersion++
     }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -34,7 +34,10 @@ class PetChatActivity : ComponentActivity() {
         setContent {
             CuteDogTheme {
                 Surface(Modifier.fillMaxSize(), shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.background) {
-                    key(draftVersion) { ChatScreen(onClose = { finish() }, voiceDraft = intent.getStringExtra(VOICE_DRAFT)) }
+                    key(draftVersion) {
+                        ChatScreen(onClose = { finish() }, voiceDraft = intent.getStringExtra(VOICE_DRAFT),
+                            voiceSetup = intent.getBooleanExtra(VOICE_SETUP, false))
+                    }
                 }
             }
         }
@@ -48,5 +51,8 @@ class PetChatActivity : ComponentActivity() {
             y = (14 * density).roundToInt()
         }
     }
-    companion object { internal const val VOICE_DRAFT = "voice_draft" }
+    companion object {
+        internal const val VOICE_DRAFT = "voice_draft"
+        internal const val VOICE_SETUP = "voice_setup"
+    }
 }

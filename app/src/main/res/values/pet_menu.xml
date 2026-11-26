@@ -1,9 +1,12 @@
 <resources>
-    <style name="Theme.CuteDog.PetMenu" parent="@android:style/Theme.Material.Light.NoActionBar">
-        <item name="android:windowIsFloating">false</item>
+    <style name="Theme.CuteDog.PetMenu" parent="@android:style/Theme.Material.Light.Dialog.NoActionBar">
         <item name="android:windowIsTranslucent">true</item>
         <item name="android:backgroundDimEnabled">false</item>
         <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowDisablePreview">true</item>
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:windowMinWidthMajor">0dp</item>
+        <item name="android:windowMinWidthMinor">0dp</item>
         <item name="android:windowNoTitle">true</item>
         <item name="android:colorAccent">#795637</item>
     </style>

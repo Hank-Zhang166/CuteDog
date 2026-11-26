@@ -53,6 +53,7 @@ class PetSpeechDeviceTest {
 
     @Test fun bundledAVoiceSynthesizesAndStops() = runBlocking {
         val app = InstrumentationRegistry.getInstrumentation().targetContext
+        assumeTrue("This build includes the optional legacy model", com.cutedog.app.BuildConfig.LEGACY_SPEECH)
         assumeTrue("A speech synthesis requires a 64-bit app process", android.os.Process.is64Bit())
         PetSpeech(app).use { pet ->
             val firstStart = SystemClock.elapsedRealtime()

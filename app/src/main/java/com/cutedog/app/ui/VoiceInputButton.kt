@@ -22,7 +22,8 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.cutedog.app.voice.VoiceConversation
 
 @Composable
-internal fun VoiceInputButton(enabled: Boolean, onStart: () -> Unit, onText: (String) -> Unit, onStatus: (String) -> Unit) {
+internal fun VoiceInputButton(enabled: Boolean, onStart: () -> Unit, onText: (String) -> Unit,
+                              onStatus: (String) -> Unit, onSetup: () -> Unit) {
     val context = LocalContext.current
     val activity = remember(context) {
         generateSequence(context) { (it as? ContextWrapper)?.baseContext }.filterIsInstance<ComponentActivity>().first()
@@ -31,7 +32,8 @@ internal fun VoiceInputButton(enabled: Boolean, onStart: () -> Unit, onText: (St
     val status by rememberUpdatedState(onStatus)
     val transcript by rememberUpdatedState(onText)
     val begin by rememberUpdatedState(onStart)
-    val conversation = remember(activity) { VoiceConversation(activity, { status(it) }, { transcript(it) }) }
+    val setup by rememberUpdatedState(onSetup)
+    val conversation = remember(activity) { VoiceConversation(activity, { status(it) }, { transcript(it) }, { setup() }) }
     var holding by remember { mutableStateOf(false) }
     var permissionPending by remember { mutableStateOf(false) }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->

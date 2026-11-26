@@ -23,9 +23,7 @@ internal object PetInteractionMenu {
 
     fun select(id: Long, intent: String) {
         if (id != current.value) return
-        val select = onSelection
-        close(id)
-        select?.invoke(intent)
+        onSelection?.invoke(intent)
     }
 
     const val CHAT = "open_chat"

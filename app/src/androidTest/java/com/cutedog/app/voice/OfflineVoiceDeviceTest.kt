@@ -32,10 +32,12 @@ class OfflineVoiceDeviceTest {
     private val context get() = device.targetContext
 
     @Test fun silenceDoesNotTriggerAChat() = runBlocking {
+        assumeTrue(com.cutedog.app.BuildConfig.LEGACY_SPEECH)
         assertEquals("", OfflineSpeechInput.transcribe(context, ByteArray(32_000)))
     }
 
     @Test fun liveMandarinBlocksMatchTheRecordingAndCancelledAudioIsDiscarded() = runBlocking {
+        assumeTrue(com.cutedog.app.BuildConfig.LEGACY_SPEECH)
         val recording = device.context.assets.open("like-dogs-16k.pcm").use { it.readBytes() }
         val cancelled = OfflineSpeechInput.listen(context,this)
         cancelled.offer(recording,3200)
@@ -74,6 +76,7 @@ class OfflineVoiceDeviceTest {
     }
 
     @Test fun mandarinAudioToHttpsAndSpokenReply() {
+        assumeTrue("This build includes the optional legacy model", com.cutedog.app.BuildConfig.LEGACY_SPEECH)
         val settings = AiSettings(context)
         val repository = ChatRepository(context)
         assumeTrue((Build.HARDWARE.contains("ranchu") || Build.HARDWARE.contains("goldfish")) &&

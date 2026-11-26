@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.cutedog.app.chat.*
+import com.cutedog.app.BuildConfig
 import com.cutedog.app.pet.PetSettings
 import com.cutedog.app.voice.PetSpeech
 import com.cutedog.app.voice.VoiceReplyPreparation
@@ -37,7 +38,7 @@ import kotlinx.coroutines.flow.collect
 import java.net.URI
 
 @Composable
-internal fun ChatScreen(onClose: (() -> Unit)? = null, voiceDraft: String? = null) {
+internal fun ChatScreen(onClose: (() -> Unit)? = null, voiceDraft: String? = null, voiceSetup: Boolean = false) {
     val context = LocalContext.current
     val repository = remember { ChatRepository(context.applicationContext) }
     val settings = remember { AiSettings(context.applicationContext) }
@@ -54,6 +55,7 @@ internal fun ChatScreen(onClose: (() -> Unit)? = null, voiceDraft: String? = nul
     var requestJob by remember { mutableStateOf<Job?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var showSettings by rememberSaveable { mutableStateOf(voiceDraft != null) }
+    var showVoiceSettings by rememberSaveable { mutableStateOf(voiceSetup) }
     var showMemories by rememberSaveable { mutableStateOf(false) }
     var clearConfirm by remember { mutableStateOf(false) }
     var deleteId by rememberSaveable { mutableLongStateOf(0L) }
@@ -98,7 +100,9 @@ internal fun ChatScreen(onClose: (() -> Unit)? = null, voiceDraft: String? = nul
             try {
                 repository.observeMessages().collect { records ->
                     messages = records
-                    failedUserId = records.lastOrNull()?.takeIf { it.role == "user" }?.id ?: 0L
+                    failedUserId = records.lastOrNull()
+                        ?.takeIf { it.role == "user" && (!it.voice || BuildConfig.LEGACY_SPEECH) }
+                        ?.id ?: 0L
                 }
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) { error = "无法读取聊天记录，请重新打开本页。" }
@@ -110,7 +114,8 @@ internal fun ChatScreen(onClose: (() -> Unit)? = null, voiceDraft: String? = nul
         if (!configured) { showSettings = true; return }
         if (!consent.getBoolean("remote_chat", false)) { consentVisible = true; return }
         val text = input.trim()
-        val aloud = if (retry) messages.firstOrNull { it.id == failedUserId }?.voice == true else voiceTurn
+        val aloud = BuildConfig.LEGACY_SPEECH &&
+            if (retry) messages.firstOrNull { it.id == failedUserId }?.voice == true else voiceTurn
         voiceTurn = false; stopPlayback(); voiceStatus = ""
         val draft = if (aloud) VoiceReplyPreparation(scope, speaker::streamSamples).also {
             speaker.prewarm(); preparingVoice = it
@@ -237,13 +242,14 @@ internal fun ChatScreen(onClose: (() -> Unit)? = null, voiceDraft: String? = nul
             Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Bottom) {
                 VoiceInputButton(!busy, onStart = { stopPlayback() }, onText = {
                     input = it; voiceTurn = true; voiceStatus = "听写完成"; send()
-                }, onStatus = { voiceStatus = it })
+                }, onStatus = { voiceStatus = it }, onSetup = { showVoiceSettings = true })
                 OutlinedTextField(input, { input = it.take(8000) }, modifier = Modifier.weight(1f).testTag("chat_input"), placeholder = { Text("说给${name}听…") }, maxLines = 5, shape = RoundedCornerShape(23.dp), enabled = !busy)
                 Button(onClick = { send() }, enabled = input.isNotBlank() && !busy, modifier = Modifier.heightIn(min = 54.dp).testTag("chat_send"), shape = RoundedCornerShape(20.dp), contentPadding = PaddingValues(horizontal = 18.dp)) { Text("发送") }
             }
         }
     }
     if (showSettings) AiSettingsDialog(onDismiss = { showSettings = false; configured = runCatching { settings.hasApiKey }.getOrDefault(false) })
+    if (showVoiceSettings) DoubaoSettingsDialog(onDismiss = { showVoiceSettings = false })
     if (showMemories) MemoryDialog { showMemories = false }
     if (clearConfirm) AlertDialog(onDismissRequest = { clearConfirm = false }, title = { Text("清空本机聊天记录？") }, text = { Text("此操作无法撤销。长期记忆单独管理；已经发送给服务商的数据不在本机控制范围内。") }, confirmButton = { TextButton(onClick = { scope.launch { try { requestJob?.cancelAndJoin(); requestGeneration++; withContext(Dispatchers.IO) { repository.clear() }; messages = emptyList(); error = null; failedUserId = 0; truncated = false } catch (e: Exception) { error = "清空失败，请重试。" } }; clearConfirm = false }) { Text("清空") } }, dismissButton = { TextButton(onClick = { clearConfirm = false }) { Text("取消") } })
     if (deleteId > 0) AlertDialog(onDismissRequest = { deleteId = 0 }, title = { Text("删除这条消息？") }, text = { Text("将删除本机记录，并取消正在进行的回复。已经发送给服务商的数据无法从这里撤回。") }, confirmButton = { TextButton(onClick = { val target = deleteId; deleteId = 0; scope.launch { try { requestJob?.cancelAndJoin(); requestGeneration++; withContext(Dispatchers.IO) { repository.deleteMessage(target) }; messages = withContext(Dispatchers.IO) { repository.messages() }; if (failedUserId == target) failedUserId = 0; error = null } catch (e: Exception) { error = "删除失败，请重试。" } } }) { Text("删除消息") } }, dismissButton = { TextButton(onClick = { deleteId = 0 }) { Text("取消") } })
@@ -254,15 +260,23 @@ internal fun ChatScreen(onClose: (() -> Unit)? = null, voiceDraft: String? = nul
 internal fun AiSettingsDialog(onDismiss: () -> Unit) {
     val context = LocalContext.current
     val settings = remember { AiSettings(context.applicationContext) }
+    var showDoubao by remember { mutableStateOf(false) }
     var endpoint by remember { mutableStateOf(settings.endpoint) }
     var model by remember { mutableStateOf(settings.model) }
     var key by remember { mutableStateOf("") }
     var hasKey by remember { mutableStateOf(runCatching { settings.hasApiKey }.getOrDefault(false)) }
     var error by remember { mutableStateOf<String?>(null) }
+    if (showDoubao) {
+        DoubaoSettingsDialog(onDismiss = { showDoubao = false })
+        return
+    }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(Modifier.widthIn(max = 680.dp).fillMaxWidth().fillMaxHeight(.9f).padding(horizontal = 16.dp), shape = RoundedCornerShape(28.dp)) {
             Column(Modifier.padding(24.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 Text("连接你的模型", style = MaterialTheme.typography.headlineMedium)
+                OutlinedButton(onClick = { showDoubao = true }, modifier = Modifier.fillMaxWidth()) {
+                    Text("设置豆包实时语音")
+                }
                 Text("支持 OpenAI 兼容的对话服务。DeepSeek 地址可填写 https://api.deepseek.com，模型使用你指定的 deepseek-flash。需要你自己的 API Key 和可用额度。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 OutlinedTextField(endpoint, { endpoint = it }, label = { Text("HTTPS 接口根地址（/v1 按服务商要求）") }, modifier = Modifier.fillMaxWidth(), singleLine = true, shape = RoundedCornerShape(16.dp))
                 OutlinedTextField(model, { model = it }, label = { Text("模型名称") }, modifier = Modifier.fillMaxWidth(), singleLine = true, shape = RoundedCornerShape(16.dp))

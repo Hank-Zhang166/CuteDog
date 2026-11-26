@@ -17,14 +17,12 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.Button
-import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.core.view.ViewCompat
-import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.doOnPreDraw
 import androidx.lifecycle.lifecycleScope
 import com.cutedog.app.PetChatActivity
 import com.cutedog.app.voice.VoiceConversation
@@ -32,7 +30,7 @@ import kotlinx.coroutines.launch
 import kotlin.math.min
 import kotlin.math.roundToInt
 
-/** The visible menu owns the microphone. Its transparent backdrop dismisses on the first outside tap. */
+/** The floating menu owns the microphone and dismisses on the first outside tap. */
 class PetMenuActivity : ComponentActivity() {
     private var sessionId = 0L
     private lateinit var speech: VoiceConversation
@@ -69,29 +67,11 @@ class PetMenuActivity : ComponentActivity() {
         if (sessionId != PetInteractionMenu.session.value) { finish(); return }
         permissionPending = savedInstanceState?.getBoolean("permissionPending") == true
         window.clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
-        window.statusBarColor = Color.TRANSPARENT
-        window.navigationBarColor = Color.TRANSPARENT
-        if (android.os.Build.VERSION.SDK_INT >= 29) {
-            window.isStatusBarContrastEnforced = false
-            window.isNavigationBarContrastEnforced = false
-        }
-        val surface = FrameLayout(this)
-        val backdrop = View(this).apply {
-            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-            setOnClickListener { finish() }
-        }
-        surface.addView(backdrop, FrameLayout.LayoutParams(-1, -1))
-        val panel = menu()
-        surface.addView(panel, FrameLayout.LayoutParams(1, 1))
-        ViewCompat.setOnApplyWindowInsetsListener(surface) { root, insets ->
-            val safe = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
-            root.setPadding(safe.left, safe.top, safe.right, safe.bottom)
-            positionMenu(surface, panel)
-            insets
-        }
-        surface.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> positionMenu(surface, panel) }
-        setContentView(surface)
-        speech = VoiceConversation(this, ::updateStatus)
+        window.setBackgroundDrawableResource(android.R.color.transparent)
+        setFinishOnTouchOutside(true)
+        setContentView(menu())
+        positionMenu()
+        speech = VoiceConversation(this, ::updateStatus, onSetup = { openChat(voiceSetup = true) })
         lifecycleScope.launch {
             PetInteractionMenu.session.collect { if (it != sessionId && !isFinishing) finish() }
         }
@@ -120,17 +100,12 @@ class PetMenuActivity : ComponentActivity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(12), dp(8), dp(12), dp(10))
         }
-        val header = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
-        header.addView(TextView(this).apply {
+        panel.addView(TextView(this).apply {
             text = "和${PetSettings(this@PetMenuActivity).name}互动"
             textSize = 20f
             setTextColor(Color.rgb(61, 45, 36))
-        }, LinearLayout.LayoutParams(0, -2, 1f))
-        header.addView(Button(this, null, android.R.attr.borderlessButtonStyle).apply {
-            text = "取消"
-            setOnClickListener { finish() }
+            setPadding(dp(4), dp(3), dp(4), dp(9))
         })
-        panel.addView(header)
         mic = Button(this).apply {
             text = "按住说话"
             styleAction(this, primary = true)
@@ -216,13 +191,16 @@ class PetMenuActivity : ComponentActivity() {
     private fun choose(intentId: String) {
         if (PetInteractionMenu.session.value != sessionId) { finish(); return }
         if (intentId == PetInteractionMenu.CHAT) {
-            PetInteractionMenu.close(sessionId)
-            finish()
-            startActivity(Intent(this, PetChatActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP))
+            openChat()
         } else {
             PetInteractionMenu.select(sessionId, intentId)
-            finish()
         }
+    }
+
+    private fun openChat(voiceSetup: Boolean = false) {
+        startActivity(Intent(this, PetChatActivity::class.java)
+            .putExtra(PetChatActivity.VOICE_SETUP, voiceSetup)
+            .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP))
     }
 
     private fun hasMicrophonePermission() = checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
@@ -267,31 +245,49 @@ class PetMenuActivity : ComponentActivity() {
         if (!isDestroyed && ::status.isInitialized) status.text = message
     }
 
-    private fun positionMenu(surface: FrameLayout, panel: View) {
-        val width = surface.width - surface.paddingLeft - surface.paddingRight
-        val height = surface.height - surface.paddingTop - surface.paddingBottom
-        if (width <= 0 || height <= 0) return
-        val margin = dp(6)
+    private fun positionMenu() {
+        val viewport = intent.getIntArrayExtra(VIEWPORT)
+        val width = viewport?.getOrNull(0) ?: dp(resources.configuration.screenWidthDp)
+        val height = viewport?.getOrNull(1) ?: dp(resources.configuration.screenHeightDp)
+        val margin = dp(8)
         val safe = Rect(margin, margin, width - margin, height - margin)
         val dog = intent.getFloatArrayExtra(DOG_BOUNDS) ?: floatArrayOf(.4f, .5f, .6f, .75f)
+        val anchor = Rect((dog[0] * width).toInt(), (dog[1] * height).toInt(),
+            (dog[2] * width).toInt(), (dog[3] * height).toInt())
         val areas = listOf(
-            Rect(safe.left, safe.top, safe.right, (dog[1] * height).toInt() - margin),
-            Rect(safe.left, (dog[3] * height).toInt() + margin, safe.right, safe.bottom),
-            Rect(safe.left, safe.top, (dog[0] * width).toInt() - margin, safe.bottom),
-            Rect((dog[2] * width).toInt() + margin, safe.top, safe.right, safe.bottom),
+            Gravity.TOP to Rect(safe.left, safe.top, safe.right, min(safe.bottom, anchor.top - margin)),
+            Gravity.BOTTOM to Rect(safe.left, maxOf(safe.top, anchor.bottom + margin), safe.right, safe.bottom),
+            Gravity.LEFT to Rect(safe.left, safe.top, min(safe.right, anchor.left - margin), safe.bottom),
+            Gravity.RIGHT to Rect(maxOf(safe.left, anchor.right + margin), safe.top, safe.right, safe.bottom),
         )
-        val area = areas.filter { it.width() >= dp(175) && it.height() >= dp(152) }.maxByOrNull {
-            min(it.width(), dp(320)).toLong() * min(it.height(), dp(446))
-        } ?: safe
-        val w = min(area.width(), dp(320)).coerceAtLeast(1)
-        val h = min(area.height(), dp(446)).coerceAtLeast(1)
-        val left = area.left + (area.width() - w) / 2
-        val top = area.top + (area.height() - h) / 2
-        val current = panel.layoutParams as FrameLayout.LayoutParams
-        if (current.width != w || current.height != h || current.leftMargin != left || current.topMargin != top) {
-            panel.layoutParams = FrameLayout.LayoutParams(w, h, Gravity.TOP or Gravity.LEFT).apply {
-                leftMargin = left
-                topMargin = top
+        val maxWidth = dp(284)
+        val maxHeight = dp(332)
+        val (side, area) = areas.filterNot { it.second.isEmpty }.maxByOrNull { (_, bounds) ->
+            min(bounds.width(), maxWidth).toLong() * min(bounds.height(), maxHeight)
+        } ?: (Gravity.TOP to safe)
+        val w = min(area.width(), maxWidth).coerceAtLeast(1)
+        val h = min(area.height(), maxHeight).coerceAtLeast(1)
+        val centeredX = (anchor.centerX() - w / 2).coerceIn(area.left, maxOf(area.left, area.right - w))
+        val centeredY = (anchor.centerY() - h / 2).coerceIn(area.top, maxOf(area.top, area.bottom - h))
+        val left = when (side) { Gravity.LEFT -> area.right - w; Gravity.RIGHT -> area.left; else -> centeredX }
+        val top = when (side) { Gravity.TOP -> area.bottom - h; Gravity.BOTTOM -> area.top; else -> centeredY }
+        window.attributes = window.attributes.apply {
+            gravity = Gravity.TOP or Gravity.LEFT
+            x = left
+            y = top
+            this.width = w
+            this.height = h
+        }
+        // Floating window offsets use the WindowManager's fitted frame. Its origin can
+        // differ from the service's safe-area origin, particularly on older Android.
+        if (android.os.Build.VERSION.SDK_INT < 30 && viewport?.size == 4) {
+            window.decorView.doOnPreDraw { decor ->
+                val actual = IntArray(2).also(decor::getLocationOnScreen)
+                val dx = left + viewport[2] - actual[0]
+                val dy = top + viewport[3] - actual[1]
+                if (dx != 0 || dy != 0) {
+                    window.attributes = window.attributes.apply { x += dx; y += dy }
+                }
             }
         }
     }
@@ -318,5 +314,6 @@ class PetMenuActivity : ComponentActivity() {
     companion object {
         internal const val SESSION = "session"
         internal const val DOG_BOUNDS = "dog_bounds"
+        internal const val VIEWPORT = "viewport"
     }
 }

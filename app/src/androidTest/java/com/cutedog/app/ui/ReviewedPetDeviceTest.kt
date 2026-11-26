@@ -23,6 +23,7 @@ import com.cutedog.app.pet.behavior.GrowthStore
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.platform.app.InstrumentationRegistry
+import com.cutedog.app.BuildConfig
 import com.cutedog.app.MainActivity
 import com.cutedog.app.data.Reminder
 import com.cutedog.app.data.ReminderRepository
@@ -298,7 +299,15 @@ class ReviewedPetDeviceTest {
         }
         fun menuBounds(text: String? = null): Rect {
             val rect = Rect()
+            val frame = Regex("""\bframe=\[(-?\d+),\s*(-?\d+)\]\[(-?\d+),\s*(-?\d+)\]""")
             await("Visible native menu control was not laid out: $text", 6000) {
+                // Match the coordinate system used by the injected tap. On this API 26
+                // build the dialog's View.getLocationOnScreen adds a status bar offset
+                // absent from its actual visible window and InputDispatcher frame.
+                val origin = shell("dumpsys input").lineSequence()
+                    .filter { it.contains("/com.cutedog.app.pet.PetMenuActivity") && !it.contains("visible=false") }
+                    .firstNotNullOfOrNull { frame.find(it) }
+                    ?: return@await false
                 InstrumentationRegistry.getInstrumentation().runOnMainSync {
                     val menu = ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(Stage.RESUMED)
                         .filterIsInstance<PetMenuActivity>().firstOrNull { it.hasWindowFocus() }
@@ -308,9 +317,9 @@ class ReviewedPetDeviceTest {
                     val visible = Rect()
                     if (view != null && view.isShown && view.getLocalVisibleRect(visible)) {
                         val location = IntArray(2)
-                        view.getLocationOnScreen(location)
+                        view.getLocationInWindow(location)
                         rect.set(visible)
-                        rect.offset(location[0], location[1])
+                        rect.offset(location[0] + origin.groupValues[1].toInt(), location[1] + origin.groupValues[2].toInt())
                     }
                 }
                 !rect.isEmpty
@@ -328,6 +337,17 @@ class ReviewedPetDeviceTest {
                 }
             }
             tap(rect.exactCenterX(), rect.exactCenterY())
+        }
+        fun tapOutsideMenu() {
+            awaitMenuInput()
+            val menu = menuBounds()
+            val dog = bounds()
+            val display = context.resources.displayMetrics
+            val point = listOf(.12f, .5f, .88f).flatMap { y ->
+                listOf(.1f, .5f, .9f).map { x -> x * display.widthPixels to y * display.heightPixels }
+            }.firstOrNull { (x, y) -> !menu.contains(x.toInt(), y.toInt()) && !dog.contains(x.toInt(), y.toInt()) }
+            requireNotNull(point) { "No unobstructed launcher point outside $menu and $dog" }
+            tap(point.first, point.second)
         }
         try {
             automation.serviceInfo = automation.serviceInfo.apply { this.flags = flags or AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS or AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS }
@@ -367,7 +387,8 @@ class ReviewedPetDeviceTest {
                     assertEquals("First press must land on the drawn cheek", "HEAD", presses.optString("previousDownPart"))
                     assertTrue("Second press must land outside the drawn fur", presses.isNull("lastDownPart"))
                     assertTrue("The second press must use the edge tolerance", presses.getBoolean("lastDownUsedEdge"))
-                    choose("取消")
+                    tapOutsideMenu()
+                    await("Outside tap did not close the menu", 5_000) { label("投球") == null }
                     assertEquals("Opening a menu must not also pet the dog",initial,growth.snapshot().interactions)
                     return@use
                 }
@@ -451,7 +472,7 @@ class ReviewedPetDeviceTest {
                         awaitMenuInput()
                         capture("microphone-permission-granted")
                     }
-                    if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED &&
+                    if (BuildConfig.LEGACY_SPEECH && context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED &&
                         InstrumentationRegistry.getArguments().getString("cuteDogDisposable") == "true") {
                         // The headless AVD supplies silent input. Verify capture, cancellation and submission
                         // without accessing a host microphone or transmitting private speech.
@@ -479,8 +500,10 @@ class ReviewedPetDeviceTest {
                     }
                     choose("投球")
                     await("Ball selection did not dispatch", 5_000) { growth.snapshot().interactions == initial + 2 }
-                    await("Menu still visible after selection", 5_000) { label("投球") == null }
                     waitForClip("play_ball")
+                    assertNotNull("The menu should stay visible after selection", label("投球"))
+                    tapOutsideMenu()
+                    await("Outside tap did not close the menu", 5_000) { label("投球") == null }
                     val dogNode = requireNotNull(dog())
                     val action = dogNode.actionList.first { it.label?.toString() == "打开互动菜单" }
                     assertTrue(dogNode.performAction(action.id))
@@ -514,10 +537,12 @@ class ReviewedPetDeviceTest {
                     capture("menu-above-launcher")
                     choose("喂食")
                     waitForClip("treat")
-                    touchDog(true)
-                    await("Menu not available for dismissal", 8000) { label("取消") != null }
-                    choose("取消")
-                    await("Cancel did not dismiss menu", 5000) { label("投球") == null }
+                    assertNotNull("The menu should stay open after feeding", label("投球"))
+                    choose("投球")
+                    waitForClip("play_ball")
+                    assertNotNull("The menu should accept a second action without reopening", label("喂食"))
+                    tapOutsideMenu()
+                    await("Outside tap did not dismiss menu", 5000) { label("投球") == null }
                     settings.locked = false
                     SystemClock.sleep(400)
                     val unlockedTop = bounds().top
@@ -540,9 +565,10 @@ class ReviewedPetDeviceTest {
                     }
                     capture("desktop-chat")
                     choose("收起聊天", inPetMenu = false)
-                    await("Closing desktop chat did not return to Launcher", 8000) {
-                        label("收起聊天") == null && automation.windows.any { it.root?.packageName?.toString()?.contains("launcher", ignoreCase = true) == true }
-                    }
+                    awaitMenuInput()
+                    assertFalse("Closing desktop chat must restore the open interaction menu", menuBounds("投球").isEmpty)
+                    tapOutsideMenu()
+                    await("Outside tap did not dismiss the menu after chatting", 5_000) { label("投球") == null }
                     return@use
                 }
                 val petOutside = bounds()
@@ -551,21 +577,15 @@ class ReviewedPetDeviceTest {
                 awaitMenuInput()
                 tap(petOutside.exactCenterX(), petOutside.exactCenterY())
                 await("The floating dog intercepted the menu's outside tap", 5000) { label("投球") == null }
-                fun phoneIcon() = node(false) {
-                    it.packageName?.toString()?.contains("launcher", ignoreCase = true) == true &&
-                        listOf(it.text?.toString(), it.contentDescription?.toString()).any { name -> name in setOf("Phone", "电话", "拨号") }
-                }
-                await("Launcher phone icon absent on this emulator", 8000) { phoneIcon() != null }
-                val phone = Rect()
-                requireNotNull(phoneIcon()).getBoundsInScreen(phone)
-                val preMenuDog = bounds()
                 touchDog(true)
                 await("Menu absent before testing outside touch", 8000) { label("投球") != null }
                 awaitMenuInput()
                 val menuPanel = menuBounds()
-                assertFalse("Launcher icon must be outside the menu", menuPanel.contains(phone.centerX(), phone.centerY()))
-                assertFalse("Launcher icon must be outside the dog", preMenuDog.contains(phone.centerX(), phone.centerY()))
-                tap(phone.exactCenterX(), phone.exactCenterY())
+                val display = context.resources.displayMetrics
+                assertTrue("Menu must be a compact floating window", menuPanel.height() < display.heightPixels * .70f)
+                val dogPanel = bounds()
+                assertFalse("Menu $menuPanel covers the dog $dogPanel", Rect.intersects(menuPanel, dogPanel))
+                tapOutsideMenu()
                 await("Tapping outside did not dismiss the menu and restore Launcher", 7000) {
                     label("投球") == null && shell("dumpsys activity activities").lineSequence().any {
                         (it.contains("mResumedActivity") || it.contains("topResumedActivity")) && it.contains("launcher", ignoreCase = true)

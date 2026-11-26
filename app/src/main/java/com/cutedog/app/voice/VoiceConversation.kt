@@ -8,10 +8,12 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.view.accessibility.AccessibilityManager
 import androidx.activity.ComponentActivity
+import com.cutedog.app.BuildConfig
 import com.cutedog.app.PetChatActivity
 import com.cutedog.app.chat.*
 import com.cutedog.app.pet.PetEvents
 import com.cutedog.app.ui.ReplyTyping
+import com.cutedog.app.voice.doubao.DoubaoSettings
 import kotlinx.coroutines.*
 import kotlin.coroutines.resume
 
@@ -20,8 +22,14 @@ internal class VoiceConversation(
     private val activity: ComponentActivity,
     private val onStatus: (String) -> Unit,
     private val onTranscript: ((String) -> Unit)? = null,
+    onSetup: () -> Unit = {
+        activity.startActivity(Intent(activity, PetChatActivity::class.java)
+            .putExtra(PetChatActivity.VOICE_SETUP, true)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP))
+    },
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val realtime = RealtimeVoiceConversation(activity, scope, onStatus, onSetup)
     private var capture: MicCapture? = null
     private var turn: Job? = null
     private var generation = 0
@@ -33,6 +41,7 @@ internal class VoiceConversation(
             onStatus("请先允许使用麦克风。")
             return false
         }
+        if (!BuildConfig.LEGACY_SPEECH || DoubaoSettings(activity).hasVoiceKey) return realtime.start()
         return try {
             capture = MicCapture.start(activity, scope, transcribe = true)
             voice.value.prewarm()
@@ -45,6 +54,7 @@ internal class VoiceConversation(
     }
 
     fun submit() {
+        if (realtime.submit()) return
         val recording = capture ?: return
         capture = null
         recording.end()
@@ -127,6 +137,7 @@ internal class VoiceConversation(
         }
 
     fun cancel() {
+        realtime.cancel()
         generation++
         capture?.discard()
         capture = null
@@ -137,6 +148,7 @@ internal class VoiceConversation(
 
     fun close() {
         cancel()
+        realtime.close()
         scope.cancel()
         if (voice.isInitialized()) voice.value.close()
     }

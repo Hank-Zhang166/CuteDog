@@ -28,6 +28,8 @@ class OverlayService : Service() {
     private var attached = false
     private var hidden = false
     private val menuOpen get() = PetInteractionMenu.session.value != null
+    private var menuMovementUntil = 0L
+    private val menuAllowsTravel get() = !menuOpen || SystemClock.uptimeMillis() < menuMovementUntil
     private var bubble: PetBubbleView? = null
     private var bubbleTimeout: Runnable? = null
     private var bubbleWindow: WindowManager.LayoutParams? = null
@@ -69,7 +71,7 @@ class OverlayService : Service() {
     }
     private val motion = object : Runnable {
         override fun run() {
-            if (attached && !hidden && !menuOpen && (bubble == null || pet.usesAuthoredFrames) && snapTask == null && pet.isShown && !dragging && !prefs.locked && !prefs.reducedMotion) {
+            if (attached && !hidden && menuAllowsTravel && (bubble == null || pet.usesAuthoredFrames) && snapTask == null && pet.isShown && !dragging && !prefs.locked && !prefs.reducedMotion) {
                 val now = SystemClock.uptimeMillis()
                 val dt = if (lastMotion == 0L) .05f else ((now - lastMotion) / 1000f).coerceAtMost(.1f)
                 lastMotion = now
@@ -155,7 +157,7 @@ class OverlayService : Service() {
 
     /** Checks common window/permission state. A bubble itself does not invalidate a committed step. */
     private fun authoredMovementHostReady(): Boolean = attached && !hidden && snapTask == null && pet.isShown &&
-        !dragging && !menuOpen && !prefs.locked && !prefs.reducedMotion && spaceAvailable
+        !dragging && menuAllowsTravel && !prefs.locked && !prefs.reducedMotion && spaceAvailable
 
     private fun authoredSpaceClear(pixels: Float): Boolean {
         if (!pixels.isFinite()) return false
@@ -253,8 +255,8 @@ class OverlayService : Service() {
         configure()
         bubbleScope.launch {
             PetInteractionMenu.session.collect { menu ->
-                // A tap on the dog, like any tap outside the menu card, reaches the
-                // transparent backdrop. Restore normal touch as soon as the card closes.
+                // The dog is above the floating window. Let Android deliver any outside
+                // tap to the menu and restore dog input when the menu closes.
                 val pass = WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
                 val flags = if (menu == null) params.flags and pass.inv() else params.flags or pass
                 if (params.flags != flags) {
@@ -408,21 +410,30 @@ class OverlayService : Service() {
         if (menuOpen) return true
         cancelSnap()
         route.clear()
+        menuMovementUntil = 0L
         pet.setAuthoredTravelAllowed(false)
         val session = PetInteractionMenu.open { action ->
-            if (pet.isShown && dogReminders.display.value == null) pet.interact(action)
+            if (pet.isShown && dogReminders.display.value == null) {
+                // Allow an explicit moving action to finish while the panel is still open.
+                if (action == "trot" || action == "jump") menuMovementUntil = SystemClock.uptimeMillis() + 14_000L
+                pet.interact(action)
+            }
         }
         val usableWidth = max(1, screenWidth - insetLeft - insetRight)
         val usableHeight = max(1, screenHeight - insetTop - insetBottom)
+        val origin = IntArray(2).also(pet::getLocationOnScreen)
+        val dogLeft = origin[0] - insetLeft
+        val dogTop = origin[1] - insetTop
         val bounds = floatArrayOf(
-            (params.x - insetLeft).toFloat() / usableWidth, (params.y - insetTop).toFloat() / usableHeight,
-            (params.x + params.width - insetLeft).toFloat() / usableWidth, (params.y + params.height - insetTop).toFloat() / usableHeight,
+            dogLeft.toFloat() / usableWidth, dogTop.toFloat() / usableHeight,
+            (dogLeft + pet.width).toFloat() / usableWidth, (dogTop + pet.height).toFloat() / usableHeight,
         )
         return try {
             startActivity(Intent(this, PetMenuActivity::class.java).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_NO_ANIMATION)
                 putExtra(PetMenuActivity.SESSION, session)
                 putExtra(PetMenuActivity.DOG_BOUNDS, bounds)
+                putExtra(PetMenuActivity.VIEWPORT, intArrayOf(usableWidth, usableHeight, insetLeft, insetTop))
             })
             true
         } catch (_: android.content.ActivityNotFoundException) {

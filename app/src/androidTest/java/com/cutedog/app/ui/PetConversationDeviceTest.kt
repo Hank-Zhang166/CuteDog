@@ -29,6 +29,7 @@ class PetConversationDeviceTest {
     @get:Rule val compose = createEmptyComposeRule()
 
     @Test fun desktopConversationSendsPersonaSpeaksAndReopensTheSavedAnswer() {
+        org.junit.Assume.assumeTrue("This build includes the optional legacy model", com.cutedog.app.BuildConfig.LEGACY_SPEECH)
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
         val settings = AiSettings(context)

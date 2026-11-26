@@ -18,6 +18,7 @@ val packArtwork by tasks.registering(Exec::class) {
 }
 
 val voiceAssets = layout.buildDirectory.dir("generated/voice-input/assets")
+val bundleLegacySpeech = providers.gradleProperty("cuteDogBundleLegacySpeech").map(String::toBoolean).getOrElse(false)
 val prepareVoiceInput by tasks.registering(Exec::class) {
     val script = rootProject.file("scripts/prepare-voice-input.py")
     inputs.file(script)
@@ -30,7 +31,9 @@ val prepareVoiceInput by tasks.registering(Exec::class) {
 android {
     namespace = "com.cutedog.app"
     compileSdk = 35
-    sourceSets.getByName("main").assets.setSrcDirs(listOf(compactAssets, voiceAssets))
+    sourceSets.getByName("main").assets.setSrcDirs(
+        if (bundleLegacySpeech) listOf(compactAssets, voiceAssets) else listOf(compactAssets)
+    )
     sourceSets.getByName("test").java.srcDir("src/sharedTest/java")
     sourceSets.getByName("androidTest").java.srcDir("src/sharedTest/java")
     sourceSets.getByName("androidTest").assets.srcDir("src/test/resources/chat")
@@ -38,8 +41,9 @@ android {
         applicationId = "com.cutedog.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 6
-        versionName = "0.2.1-preview.4"
+        versionCode = 7
+        versionName = "0.2.1-preview.5"
+        buildConfigField("boolean", "LEGACY_SPEECH", bundleLegacySpeech.toString())
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildTypes {
@@ -62,11 +66,15 @@ android {
     packaging.jniLibs.useLegacyPackaging = true
     packaging { resources.excludes += "/META-INF/{AL2.0,LGPL2.1}" }
 }
-apply(from = rootProject.file("scripts/pet-speech.gradle"))
+if (bundleLegacySpeech) apply(from = rootProject.file("scripts/pet-speech.gradle"))
 
-tasks.named("preBuild") { dependsOn(packArtwork, prepareVoiceInput) }
+tasks.named("preBuild") {
+    dependsOn(packArtwork)
+    if (bundleLegacySpeech) dependsOn(prepareVoiceInput)
+}
 
 dependencies {
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("net.java.dev.jna:jna:5.18.1@aar")
     implementation("com.alphacephei:vosk-android:0.3.75@aar")
     val composeBom = platform("androidx.compose:compose-bom:2025.04.01")

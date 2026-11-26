@@ -19,20 +19,24 @@ import java.util.zip.ZipInputStream
 
 /** Raw audio lives in memory only, from touch-down until release or cancellation. */
 internal class MicCapture private constructor(private val recorder: AudioRecord, scope: CoroutineScope,
-    private val listening: OfflineSpeechInput.Listening?) {
+    private val listening: OfflineSpeechInput.Listening?, private val onPcm: ((ByteArray) -> Unit)?) {
     @Volatile private var recording = true
     private val driver = Any()
     private var released = false
     private val samples = scope.async(Dispatchers.IO, start = CoroutineStart.ATOMIC) {
-        val buffer = ByteArray(3200)
-        val audio = if (listening == null) ByteArrayOutputStream() else null
+        val buffer = ByteArray(if (onPcm == null) 3200 else 640)
+        val audio = if (listening == null && onPcm == null) ByteArrayOutputStream() else null
         var captured = 0
         try {
             while (recording && isActive && captured < MAX_BYTES) {
                 val count = recorder.read(buffer, 0, minOf(buffer.size,MAX_BYTES-captured))
                 if (count > 0) {
                     captured += count
-                    if (listening != null) listening.offer(buffer,count) else audio!!.write(buffer,0,count)
+                    when {
+                        listening != null -> listening.offer(buffer, count)
+                        onPcm != null -> onPcm.invoke(buffer.copyOf(count))
+                        else -> audio?.write(buffer, 0, count)
+                    }
                 }
                 else if (recording) error("麦克风中断了，请松手后再试。")
             }
@@ -76,7 +80,8 @@ internal class MicCapture private constructor(private val recorder: AudioRecord,
         const val RATE = 16000
         private const val MAX_BYTES = 30 * RATE * 2
         @RequiresPermission(Manifest.permission.RECORD_AUDIO)
-        fun start(context: Context, scope: CoroutineScope, transcribe: Boolean = false): MicCapture {
+        fun start(context: Context, scope: CoroutineScope, transcribe: Boolean = false,
+                  onPcm: ((ByteArray) -> Unit)? = null): MicCapture {
             check(context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
                 "请先允许使用麦克风。"
             }
@@ -91,7 +96,7 @@ internal class MicCapture private constructor(private val recorder: AudioRecord,
                 check(recorder.state == AudioRecord.STATE_INITIALIZED)
                 recorder.startRecording()
                 check(recorder.recordingState == AudioRecord.RECORDSTATE_RECORDING)
-                return MicCapture(recorder, scope, if (transcribe) OfflineSpeechInput.listen(context,scope) else null)
+                return MicCapture(recorder, scope, if (transcribe) OfflineSpeechInput.listen(context,scope) else null, onPcm)
             } catch (error: Exception) { recorder.release(); throw error }
         }
     }
