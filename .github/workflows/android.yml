@@ -17,8 +17,9 @@ on:
       - 'scripts/compact-artwork.py'
       - 'scripts/artwork-requirements.txt'
       - 'scripts/prepare-voice-input.py'
-      - 'scripts/prepare-dog-voice.py'
+      - 'scripts/prepare-embedded-voice.py'
       - 'scripts/pet-speech.gradle'
+      - 'scripts/*qwen*'
       - 'scripts/licenses/**'
       - 'scripts/run-device-*.sh'
       - 'scripts/profile-device.py'
@@ -53,8 +54,10 @@ jobs:
           packages: 'platform-tools'
           log-accepted-android-sdk-licenses: false
       - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-disabled: true
       - name: Install pinned SDK
-        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0' 'ndk;28.2.13676358' 'cmake;3.22.1'
       - name: Verify device-host orchestration fixtures
         run: python3 -m unittest discover -s scripts/tests -p 'test_device_*.py' 2>&1 | tee "$RUNNER_TEMP/build-evidence/host-regression.log"
       - name: Unit tests, lint, and APK
@@ -83,11 +86,6 @@ jobs:
           printf '%s\n' "${pipeline_status[0]}" > "$RUNNER_TEMP/build-evidence/packaging-exit-code.txt"
           if [ "${pipeline_status[1]}" -ne 0 ]; then exit "${pipeline_status[1]}"; fi
           exit "${pipeline_status[0]}"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: CuteDog-debug-apk
-          path: artifacts/
-          if-no-files-found: error
       - name: Collect current build reports even when verification fails
         if: always()
         env:
@@ -150,7 +148,7 @@ jobs:
           name: verification-reports
           path: ${{ runner.temp }}/build-evidence/
           if-no-files-found: error
-          retention-days: 90
+          retention-days: 7
   device-tests:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
@@ -179,8 +177,10 @@ jobs:
           packages: 'platform-tools'
           log-accepted-android-sdk-licenses: false
       - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-disabled: true
       - name: Install pinned compilation SDK
-        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0' 'ndk;28.2.13676358' 'cmake;3.22.1'
       - name: Enable KVM
         run: |
           set -o pipefail
@@ -194,6 +194,8 @@ jobs:
           target: google_apis
           profile: pixel_2
           disable-animations: true
+          ram-size: 4096M
+          disk-size: 6144M
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot -camera-back none -accel on
           script: bash scripts/run-device-validation.sh
       - name: Retain actual XML, selected logs, and counts even on failure
@@ -203,4 +205,4 @@ jobs:
           name: instrumentation-evidence-api-${{ matrix.api-level }}
           path: ${{ runner.temp }}/instrumentation-evidence/
           if-no-files-found: error
-          retention-days: 90
+          retention-days: 7

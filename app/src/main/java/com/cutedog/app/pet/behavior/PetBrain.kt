@@ -60,7 +60,7 @@ class PetBrain(seed: Long = System.nanoTime()) {
     fun interact(kind: String, source: InteractionSource = InteractionSource.USER): String? {
         val input = Interaction(normalize(kind) ?: return null, source)
         // Coalesce identical touch repeats, without discarding a different, newer user intent.
-        if (input == lastInteraction && clock - lastInteractionAt < .65) return null
+        if (input == lastInteraction && !input.kind.startsWith("touch_") && clock - lastInteractionAt < .65) return null
         lastInteraction = input
         lastInteractionAt = clock
         interactionHoldUntil = clock + 14.0
@@ -170,7 +170,11 @@ class PetBrain(seed: Long = System.nanoTime()) {
     }
 
     private fun emitInteraction(input: Interaction): String? {
-        val selected = interactions.getValue(input.kind).firstOrNull { it in knownAvailable }
+        val choices = interactions.getValue(input.kind).filter { it in knownAvailable }
+        // Explore each retained response for this body part before repeating one.
+        val selected = if (input.kind.startsWith("touch_"))
+            choices.minByOrNull { lastRequested[it] ?: Double.NEGATIVE_INFINITY }
+            else choices.firstOrNull()
         queuedInteraction = null
         if (selected == null) return null // Unavailable art does not cancel an existing valid route.
         val previous = pending
@@ -307,6 +311,9 @@ class PetBrain(seed: Long = System.nanoTime()) {
             p("startled", Family.LOOK, 2.0, 12.0, 0.0, false),
         ).associateBy { it.id }
         private val interactions = mapOf(
+            "touch_head" to listOf("pet_head", "nuzzle", "tilt"),
+            "touch_paw" to listOf("wave", "lick_paw", "stretch"),
+            "touch_tail" to listOf("tail_wag"),
             "head" to listOf("pet_head", "nuzzle", "soothe"), "body" to listOf("cuddle", "belly_up", "relax"),
             "nose" to listOf("curious", "tilt"), "call" to listOf("call", "wave"),
             "happy" to listOf("happy", "tail_wag", "excited"), "calm" to listOf("soothe", "relax", "sit_idle"),

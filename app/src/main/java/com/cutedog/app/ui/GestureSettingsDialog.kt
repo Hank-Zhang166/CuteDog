@@ -31,7 +31,8 @@ internal fun GestureSettingsDialog(onDismiss: () -> Unit) {
         Surface(Modifier.widthIn(max = 640.dp).fillMaxWidth().fillMaxHeight(.9f).padding(14.dp), shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.background) {
             Column(Modifier.padding(22.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(18.dp)) {
                 Text("用你习惯的方式互动", style = MaterialTheme.typography.titleLarge)
-                Text("单击小狗", style = MaterialTheme.typography.titleMedium)
+                Text("轻点身上的动作", style = MaterialTheme.typography.titleMedium)
+                Text("头、爪和尾巴各有自己的反应。这里设置轻点躯干时的动作。", style = MaterialTheme.typography.bodySmall)
                 GestureOptions(tap, listOf("pet" to "摸摸", "wave" to "打招呼", "cuddle" to "抱抱")) { tap = it }
                 Text("双击小狗", style = MaterialTheme.typography.titleMedium)
                 Text("双击打开互动菜单，锁定位置时也可以使用。", style = MaterialTheme.typography.bodyMedium)

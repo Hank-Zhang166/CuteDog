@@ -82,8 +82,10 @@ jobs:
           packages: 'platform-tools'
           log-accepted-android-sdk-licenses: false
       - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-disabled: true
       - name: Install pinned compilation SDK
-        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0' 'ndk;28.2.13676358' 'cmake;3.22.1'
       - name: Build this checkout's application and test APKs
         id: build
         timeout-minutes: 12
@@ -220,6 +222,8 @@ jobs:
           profile: pixel_2
           disable-animations: true
           emulator-boot-timeout: 300
+          ram-size: 4096M
+          disk-size: 6144M
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot -camera-back none -accel on
           script: bash "$RUNNER_TEMP/run-system-recovery.sh"
       - name: Bind actual results and setup failures to this source and workflow attempt
@@ -318,4 +322,4 @@ jobs:
           name: system-recovery-api-${{ matrix.api-level }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/system-recovery-evidence/
           if-no-files-found: error
-          retention-days: 90
+          retention-days: 7

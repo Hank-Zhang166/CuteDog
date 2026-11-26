@@ -103,7 +103,7 @@ internal fun SettingsScreen(onNotificationPermission: () -> Unit, onRefresh: () 
         }
         SoftCard(Modifier.fillMaxWidth()) {
             Text("陪你走出应用", style = MaterialTheme.typography.titleLarge)
-            Text("桌宠会显示在屏幕上层，包括使用本应用时。轻触或轻抚会得到回应，双击可以投球、喂食或选择其他互动。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("轻点小萨的头、腿或尾巴，它会用相应部位回应你。双击可以喂食、投球或聊天。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Button(onClick = { startOverlay() }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) { Text(if (overlay) "召唤小狗" else "授权悬浮窗并召唤") }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                 TextButton(onClick = { OverlayService.hide(context) }) { Text("临时隐藏") }
@@ -176,7 +176,7 @@ internal fun SettingsScreen(onNotificationPermission: () -> Unit, onRefresh: () 
     if (gesturesVisible) GestureSettingsDialog { gesturesVisible = false }
     if (historyVisible) QuoteHistoryDialog { historyVisible = false; onRefresh() }
     if (aiSettings) AiSettingsDialog { aiSettings = false }
-    if (helpVisible) AlertDialog(onDismissRequest = { helpVisible = false }, title = { Text("和小狗相处的小方法") }, text = { Text("轻触或轻抚，小狗会用动作回应。双击打开互动菜单，稍按后开始拖动可移动桌宠。\n\n待办到提醒时间时，点击小狗旁的勾选框即可完成本次事项。\n\n在互动菜单选择「聊聊天」打开桌面聊天小窗，也可以按住麦克风说话，松手发送。点菜单外会收起菜单。临时隐藏可在本页或常驻通知中操作。") }, confirmButton = { TextButton(onClick = { helpVisible = false }) { Text("知道啦") } })
+    if (helpVisible) AlertDialog(onDismissRequest = { helpVisible = false }, title = { Text("和小狗相处的小方法") }, text = { Text("轻点头、腿或尾巴，看看小狗怎么回应。轻点身上的动作可在「手势与默认位置」设置。双击打开互动菜单，按住再拖可以移动桌宠。\n\n待办到提醒时间时，点击小狗旁的勾选框即可完成本次事项。\n\n在互动菜单选择「聊聊天」打开桌面聊天小窗，也可以按住麦克风说话，松手发送。点菜单外会收起菜单。临时隐藏可在本页或常驻通知中操作。") }, confirmButton = { TextButton(onClick = { helpVisible = false }) { Text("知道啦") } })
     if (policyVisible) AlertDialog(onDismissRequest = { policyVisible = false }, title = { Text("你的数据，由你决定") }, text = { Column(Modifier.verticalScroll(rememberScrollState())) { Text("CuteDog 不要求登录，不读取通讯录、位置、其他应用内容或屏幕。\n\n备忘录、设置、聊天和长期记忆保存在应用私有存储。API Key 使用 Android Keystore 加密。卸载或清除应用数据会删除本地内容，请先导出需要的记忆。\n\n只有主动发起联网聊天时，消息和近期上下文才发送给你设置的模型服务商。长期记忆默认关闭，开启后会随请求发送。服务商可能收取费用并按其隐私政策处理数据。\n\n你可以删除聊天、编辑或清空记忆、清除密钥。删除本机数据不会删除服务商已接收的数据。\n\n系统强制停止、通知拒绝、节电限制或设备关机可能影响提醒。重要事项请保留独立提醒渠道。") } }, confirmButton = { TextButton(onClick = { policyVisible = false }) { Text("知道了") } })
 }
 

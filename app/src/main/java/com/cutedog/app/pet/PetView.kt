@@ -18,6 +18,7 @@ import com.cutedog.app.pet.animation.OverlayTravelPolicy
 import com.cutedog.app.pet.behavior.PetBrain
 import com.cutedog.app.pet.behavior.PetContext
 import com.cutedog.app.pet.behavior.GrowthStore
+import com.cutedog.app.R
 
 /** Cached frame renderer and touch target for the floating dog. */
 class PetView(context: Context) : View(context) {
@@ -104,10 +105,20 @@ class PetView(context: Context) : View(context) {
     private var stroked = false
     private var following = false
     private val pointerGaze = PointerGaze()
+    private val touchRegions by lazy { PetTouchRegions(resources.openRawResource(R.raw.pet_touch_regions)) }
+    private var drawnFrame: ClipPlaybackFrame? = null
+    private var drawnWithGaze = false
+    private var pressedPart: PetPart? = null
+    private var pendingPart: PetPart? = null
+    private var lastTouchPart: PetPart? = null
     private var lastTap = 0L
     private var lastTapX = 0f
     private var lastTapY = 0f
-    private val singleTap = Runnable { lastTap = 0; performClick() }
+    private val singleTap = Runnable {
+        lastTap = 0
+        pendingPart?.let(::clickPart)
+        pendingPart = null
+    }
     private val doubleTapSlop = ViewConfiguration.get(context).scaledDoubleTapSlop
     private val slop = ViewConfiguration.get(context).scaledTouchSlop
     private val power = context.getSystemService(PowerManager::class.java)
@@ -212,7 +223,9 @@ class PetView(context: Context) : View(context) {
         interactionAge = 0f
         if (hasRigAssets) {
             brain.interact(when (intent) { "pet" -> "head"; "toy" -> "ball"; else -> intent }, source)?.let { if (rigPlayer?.request(it) == false) brain.requestRejected(it) }
-        } else behavior.react(if (intent == "nuzzle" || intent == "body") "cuddle" else intent)
+        } else behavior.react(when (intent) {
+            "nuzzle", "body" -> "cuddle"; "touch_head" -> "pet"; "touch_tail" -> "happy"; "touch_paw" -> "wave"; else -> intent
+        })
         audio.play(if (intent == "jump" || intent == "toy" || intent == "ball") "ball" else if (intent == "pet" || intent == "cuddle") "breath" else "paw")
         resume()
     }
@@ -246,6 +259,7 @@ class PetView(context: Context) : View(context) {
         pointerGaze.reset()
         frameLifecycle.pause(); touchActive = false; authoredTravel.clear(); authoredTravelAllowed = false
         removeCallbacks(tick); authoredTick?.let(frameClock::removeFrameCallback); authoredTick = null; removeCallbacks(singleTap); lastTap = 0; secondTap = false
+        pendingPart = null; pressedPart = null
         rigPlayer?.setActive(false); lastFrame = 0; lastAuthoredFrameNanos = 0; deferredBrainSeconds = 0f
     }
     fun resume() {
@@ -279,7 +293,7 @@ class PetView(context: Context) : View(context) {
         resume()
     }
     override fun onDetachedFromWindow() {
-        pause(); audio.release(); rigPlayer?.close(); rigPlayer = null; rigFrame = null; observedFrame = null
+        pause(); audio.release(); drawnFrame = null; rigPlayer?.close(); rigPlayer = null; rigFrame = null; observedFrame = null
         context.applicationContext.unregisterComponentCallbacks(memoryCallbacks)
         attachedViews.removeAll { it.get() == null || it.get() === this }
         super.onDetachedFromWindow()
@@ -294,6 +308,8 @@ class PetView(context: Context) : View(context) {
         if (hasRigAssets) {
             val frame = rigFrame
             val pixels = frame?.bitmap
+            drawnFrame = frame
+            drawnWithGaze = false
             if (pixels != null) {
                 val side = min(width, height).toFloat() * spatialDepth
                 source.set(0, 0, pixels.width, pixels.height)
@@ -307,6 +323,7 @@ class PetView(context: Context) : View(context) {
                 paint.alpha = 255
                 if (pointerGaze.active && frame.clipId in pointerPoses && !settings.reducedMotion) {
                     pointerGaze.position(dest.left, dest.top, side, frame.clipId == "stand_right")
+                    drawnWithGaze = true
                     canvas.drawBitmapMesh(pixels, pointerGaze.divisions, pointerGaze.divisions, pointerGaze.vertices, 0, null, 0, paint)
                 } else canvas.drawBitmap(pixels, source, dest, paint)
             } else if (frame?.error != null) {
@@ -355,6 +372,7 @@ class PetView(context: Context) : View(context) {
     override fun onTouchEvent(event: MotionEvent): Boolean {
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                pressedPart = partAt(event.x, event.y) ?: return false
                 touchActive = true; following = false; authoredTravel.clear()
                 downX = event.rawX; downY = event.rawY; lastX = downX; lastY = downY
                 downAt = event.eventTime; dragged = false; stroked = false
@@ -363,7 +381,7 @@ class PetView(context: Context) : View(context) {
                     hypot(downX - lastTapX, downY - lastTapY) <= doubleTapSlop
                 if (lastTap != 0L) {
                     removeCallbacks(singleTap)
-                    if (secondTap) lastTap = 0 else singleTap.run()
+                    if (secondTap) { lastTap = 0; pendingPart = null } else singleTap.run()
                 }
                 brain.setAttentionTarget((event.x / max(1, width)).coerceIn(0f, 1f), (event.y / max(1, height)).coerceIn(0f, 1f))
                 parent?.requestDisallowInterceptTouchEvent(true)
@@ -378,7 +396,7 @@ class PetView(context: Context) : View(context) {
                     pointerGaze.release()
                     onDrag?.invoke(event.rawX - lastX, event.rawY - lastY, false)
                 } else if (!dragged && settings.pettingEnabled && distance > slop && event.eventTime - downAt < settings.dragHoldMs) {
-                    if (!stroked) { interact(if (event.y < height * .6f) "pet" else "body"); if (settings.haptics) performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK) }
+                    if (!stroked) { interact(if (pressedPart == PetPart.HEAD) "pet" else "body"); if (settings.haptics) performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK) }
                     stroked = true
                 }
                 if (stroked && !dragged && distance >= slop * 3f) {
@@ -404,19 +422,40 @@ class PetView(context: Context) : View(context) {
                     if (secondTap) onInteractionMenu?.invoke()
                     else {
                         lastTap = event.eventTime
+                        pendingPart = pressedPart
                         lastTapX = downX; lastTapY = downY
                         postDelayed(singleTap, ViewConfiguration.getDoubleTapTimeout().toLong())
                     }
                 }
-                secondTap = false
+                secondTap = false; pressedPart = null
                 parent?.requestDisallowInterceptTouchEvent(false)
                 return true
             }
-            MotionEvent.ACTION_CANCEL -> { removeCallbacks(singleTap); lastTap = 0; secondTap = false; pointerGaze.release(); touchActive = false; authoredTravel.clear(); if (dragged) onDrag?.invoke(0f, 0f, true); parent?.requestDisallowInterceptTouchEvent(false); return true }
+            MotionEvent.ACTION_CANCEL -> { removeCallbacks(singleTap); lastTap = 0; secondTap = false; pendingPart = null; pressedPart = null; pointerGaze.release(); touchActive = false; authoredTravel.clear(); if (dragged) onDrag?.invoke(0f, 0f, true); parent?.requestDisallowInterceptTouchEvent(false); return true }
         }
         return super.onTouchEvent(event)
     }
-    override fun performClick(): Boolean { super.performClick(); interact(settings.tapAction); return true }
+    private fun partAt(x: Float, y: Float): PetPart? {
+        if (!hasRigAssets) return PetPart.BODY
+        val frame = drawnFrame ?: return null
+        val pixels = frame.bitmap ?: return null
+        if (!dest.contains(x, y)) return null
+        val side = dest.width()
+        val (u, v) = if (drawnWithGaze) pointerGaze.sourceAt(x, y, dest.left, dest.top, side)
+            else ((x - dest.left) / side) to ((y - dest.top) / side)
+        val part = touchRegions.at(frame.clipId, frame.frameIndex, u, v) ?: return null
+        val pixel = pixels.getPixel((u * pixels.width).toInt(), (v * pixels.height).toInt())
+        return part.takeIf { Color.alpha(pixel) >= 65 }
+    }
+
+    private fun clickPart(part: PetPart): Boolean {
+        super.performClick()
+        lastTouchPart = part
+        interact(part.intent ?: settings.tapAction)
+        return true
+    }
+
+    override fun performClick(): Boolean = clickPart(PetPart.BODY)
     /** Shell dumpsys diagnostics contain counters only, never chats, reminders, names or credentials. */
     fun diagnosticSnapshot(): org.json.JSONObject {
         val cache = rigPlayer?.cacheStats()
@@ -427,6 +466,9 @@ class PetView(context: Context) : View(context) {
             put("tickCount", tickCount); put("drawCount", drawCount)
             put("actualFrameChanges", if (hasRigAssets) actualFrameChanges else org.json.JSONObject.NULL)
             put("clipId", rigFrame?.clipId ?: org.json.JSONObject.NULL)
+            put("lastTouchPart", lastTouchPart?.name ?: org.json.JSONObject.NULL)
+            put("displayedFrameIndex", drawnFrame?.frameIndex ?: -1)
+            put("spatialDepth", spatialDepth.toDouble())
             put("canonicalClipId", rigPlayer?.canonicalClipId ?: org.json.JSONObject.NULL)
             put("canTravel", canAuthoredTravel); put("travelHeading", if (canAuthoredTravel) rigPlayer?.travelHeading ?: 0 else 0)
             put("clipFps", if (hasRigAssets) rigPlayer?.requiredTickRate ?: 0 else 0)

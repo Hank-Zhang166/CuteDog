@@ -1,7 +1,18 @@
-# 本地中文播报
+# 手机上的 A 声线
 
-CuteDog 使用 Kokoro v1.1-zh Int8 和 ONNX Runtime 1.22.0 在 Android 设备生成 24 kHz 单声道音频。首次发声会校验安装包内模型并解包到应用私有目录，后续会话直接打开该文件。合成阶段在设备本地处理回复文字。播放支持按句生成、预先合成下一句、打断和停止。
+安装 CuteDog APK 后，长按互动菜单里的麦克风，说完松手。手机完成普通话听写，已配置的 DeepSeek 服务根据文字生成回答，小狗再用 A 声线朗读。朗读与听写可在手机上离线运行。桌面聊天小窗与「陪伴」页都会保留本轮转录和回复。
 
-模型作者说明中文训练录音由 LongMaoData 授权，含 100 位专业数据集说话人。应用将三组公开普通话风格向量按 0.38、0.37、0.25 混合，形成小狗的音色。Kokoro 由 hexgrad 按 Apache-2.0 发布，k2-fsa/sherpa-onnx 提供 ONNX 转换和发音词典。ONNX Runtime 使用 MIT 许可证。完整许可证、第三方声明及来源留在安装包 `assets/dogvoice/`。[原模型说明](https://huggingface.co/hexgrad/Kokoro-82M-v1.1-zh) · [Sherpa 发布说明](https://k2-fsa.github.io/sherpa/onnx/tts/pretrained_models/kokoro.html) · [固定的模型文件](https://huggingface.co/csukuangfj/kokoro-int8-multi-lang-v1_1/tree/1355334be009ccce397060ee639a874137a128fa)
+A 声线来自审阅通过的小萨摩耶原创合成问候。制作时已将这句问候编码为说话人特征、声学编码和转录，三者共约 5.4 KB。手机固定使用这份参考，可朗读实时生成的新句子。仓库留存了原声供维护时复现。[A 声线原始参考](../art/voice/a-reference.flac)
 
-`scripts/prepare-dog-voice.py` 从上述固定版本检查每个输入的 SHA-256，再生成随包音色。模型文件为 114,203,914 字节，SHA-256 为 `05d793700b0b507f760c183c0e39bdd6a97b43d32fdc7bf7b54a5179f1b11222`。构建所需的完整风格库只在开发机缓存。语音打包配置在 `scripts/pet-speech.gradle`。
+## APK 中的语音资源
+
+移动端使用 Qwen3-TTS 0.6B Base 和 12 Hz 解码器的 Q4_K_M 权重。裁剪移除了录入新音色所需的 221 个张量，共节省 101,303,968 字节。用同一随机种子分别合成一条新短句和一条较长的真实聊天回复，裁剪前后的 24 kHz PCM 逐采样相同。模型直接从已签名 APK 的资源区读取，安装后即可使用。支持 64 位 ARM 与 x86 Android，首句生成速度随处理器和可用运行内存变化。
+
+| 包内文件 | 字节 | SHA-256 |
+| --- | ---: | --- |
+| a-voice/talker.gguf | 604,877,696 | `68b0c1b091f668552f6c069a74a8fb5c1a73fd58ce3326f43e90e7c259338371` |
+| a-voice/codec.gguf | 177,698,144 | `2940ea17c13966f18da4fd0b455e4924b0bebc349ac42a08545086c2e0635248` |
+
+## 复现构建
+
+Gradle 在构建机上获取固定修订和 SHA-256 的上游文件，再生成包内权重。仓库仅跟踪固定 A 声线参考、裁剪脚本和许可证。模型使用 Apache-2.0 许可。[模型准备脚本](../scripts/prepare-embedded-voice.py) · [量化权重修订](https://huggingface.co/Serveurperso/Qwen3-TTS-GGUF/tree/b7ee2e8c7459c3bea99da23e3d178125a7d1713c) · [Qwen 官方模型](https://huggingface.co/Qwen/Qwen3-TTS-12Hz-0.6B-Base) · [移动端引擎构建配置](../app/src/main/cpp/CMakeLists.txt)

@@ -79,6 +79,30 @@ internal class PointerGaze {
         }
     }
 
+    /** Invert the mesh last drawn so taps on a turned cheek still use its source pixels. */
+    fun sourceAt(x: Float, y: Float, left: Float, top: Float, side: Float): Pair<Float, Float> {
+        var u = (x - left) / side
+        var v = (y - top) / side
+        repeat(5) {
+            val gx = u.coerceIn(0f, 1f) * divisions
+            val gy = v.coerceIn(0f, 1f) * divisions
+            val col = gx.toInt().coerceAtMost(divisions - 1)
+            val row = gy.toInt().coerceAtMost(divisions - 1)
+            val tl = 2 * (row * stride + col)
+            val tr = tl + 2
+            val bl = tl + 2 * stride
+            val br = bl + 2
+            fun projected(axis: Int): Float {
+                val a = gx - col; val b = gy - row
+                return if (a + b <= 1f) vertices[tl + axis] * (1f-a-b) + vertices[tr + axis] * a + vertices[bl + axis] * b
+                else vertices[br + axis] * (a+b-1f) + vertices[tr + axis] * (1f-b) + vertices[bl + axis] * (1f-a)
+            }
+            u += (x - projected(0)) / side
+            v += (y - projected(1)) / side
+        }
+        return u to v
+    }
+
     private fun smooth(value: Float): Float {
         val t = value.coerceIn(0f, 1f)
         return t * t * (3f - 2f * t)

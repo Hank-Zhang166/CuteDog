@@ -167,7 +167,10 @@ root=Path(sys.argv[1]);values={}
 for label,path in [('application','app/build/outputs/apk/debug/app-debug.apk'),('instrumentation','app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk')]:
     p=Path(path)
     if not p.is_file(): raise SystemExit('Missing actual built APK: '+path)
-    values[label]={'path':path,'bytes':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest()}
+    digest=hashlib.sha256()
+    with p.open('rb') as apk:
+        for block in iter(lambda: apk.read(1024*1024), b''): digest.update(block)
+    values[label]={'path':path,'bytes':p.stat().st_size,'sha256':digest.hexdigest()}
 (root/'tested-apks.json').write_text(json.dumps(values,indent=2)+'\n')
 PY
 stage snapshot_permissions
@@ -241,7 +244,12 @@ from pathlib import Path
 root=Path(sys.argv[1]);phase=sys.argv[2];rc=int(sys.argv[3]);api=int(sys.argv[4]);out=root/phase
 apk_provenance=[]
 for label,original in json.loads((root/'tested-apks.json').read_text()).items():
-    apk=Path(original['path']);actual=hashlib.sha256(apk.read_bytes()).hexdigest() if apk.is_file() else None
+    apk=Path(original['path']);actual=None
+    if apk.is_file():
+        digest=hashlib.sha256()
+        with apk.open('rb') as source:
+            for block in iter(lambda: source.read(1024*1024), b''): digest.update(block)
+        actual=digest.hexdigest()
     apk_provenance.append({'label':label,'path':str(apk),'expectedSha256':original['sha256'],'actualSha256':actual,'unchanged':actual==original['sha256']})
 (out/'tested-apks.json').write_text(json.dumps(apk_provenance,indent=2)+'\n')
 expected_denied=set(sys.argv[5].split(',')); discovered=set()

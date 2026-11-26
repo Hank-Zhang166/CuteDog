@@ -75,9 +75,10 @@ class ReviewedPetDeviceTest {
         }
     }
 
-    private enum class InteractionScene { HOME, DESKTOP_GESTURES, DESKTOP_CHAT, DESKTOP_DISMISSAL }
+    private enum class InteractionScene { HOME, BODY_PARTS, DESKTOP_GESTURES, DESKTOP_CHAT, DESKTOP_DISMISSAL }
 
     @Test fun floatingDogHandlesTapMenuAndDueCheckboxWithHomeInForeground() = checkInteraction(InteractionScene.HOME)
+    @Test fun floatingDogRespondsToHeadPawAndTail() = checkInteraction(InteractionScene.BODY_PARTS)
     @Test fun desktopMenuFeedsTheDogAndHonorsTheDragLock() = checkInteraction(InteractionScene.DESKTOP_GESTURES)
     @Test fun desktopMenuOpensAndClosesTheChatWindow() = checkInteraction(InteractionScene.DESKTOP_CHAT)
     @Test fun desktopMenuClosesOnTheDogAndOnTheLauncher() = checkInteraction(InteractionScene.DESKTOP_DISMISSAL)
@@ -255,6 +256,45 @@ class ReviewedPetDeviceTest {
                     OverlayService.start(it)
                 }
                 await("Floating dog did not attach to WindowManager", 20_000) { dog() != null }
+                if (scene == InteractionScene.BODY_PARTS) {
+                    fun snapshot(): org.json.JSONObject? {
+                        var row: org.json.JSONObject? = null
+                        InstrumentationRegistry.getInstrumentation().runOnMainSync {
+                            val views = PetView.diagnosticSnapshots()
+                            row = (0 until views.length()).map(views::getJSONObject).firstOrNull { it.optString("scope") == "overlay" }
+                        }
+                        return row
+                    }
+                    val initial = growth.snapshot().interactions
+                    val cases = listOf(Triple("HEAD", .27f to .31f, "pet_head"),
+                        Triple("PAW", .37f to .77f, "wave"), Triple("TAIL", .68f to .30f, "tail_wag"))
+                    for ((index, testCase) in cases.withIndex()) {
+                        if (index != 0) {
+                            OverlayService.stop(context)
+                            await("Previous floating view did not close", 8000) { snapshot() == null }
+                            activity.onActivity { OverlayService.start(it) }
+                        }
+                        await("Standing artwork has not been drawn", 20_000) {
+                            snapshot()?.let { it.optString("clipId") == "stand" && it.optInt("displayedFrameIndex", -1) >= 0 } == true
+                        }
+                        val box = bounds()
+                        val side = minOf(box.width(),box.height()) * requireNotNull(snapshot()).getDouble("spatialDepth").toFloat()
+                        fun tapCanvas(u: Float, v: Float) = tap(box.exactCenterX() + side * (u - .5f), box.bottom - side * (1f - v))
+                        if (index == 0) {
+                            tapCanvas(.05f, .05f)
+                            SystemClock.sleep(550)
+                            assertEquals("Clear padding must not trigger a pet reaction", initial, growth.snapshot().interactions)
+                        }
+                        val (part, point, motion) = testCase
+                        tapCanvas(point.first, point.second)
+                        await("System tap did not hit $part", 5000) { snapshot()?.optString("lastTouchPart") == part }
+                        waitForClip(motion)
+                        assertEquals("Each single press must count once", initial + index + 1, growth.snapshot().interactions)
+                        assertNull("Petting opened a menu", label("投球"))
+                        capture("touch-${part.lowercase()}-$motion")
+                    }
+                    return@use
+                }
                 SystemClock.sleep(2100)
                 if (scene == InteractionScene.HOME) {
                     val initial = growth.snapshot().interactions

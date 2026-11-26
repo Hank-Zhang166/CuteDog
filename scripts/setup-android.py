@@ -62,7 +62,7 @@ child_environment = os.environ.copy()
 child_environment.setdefault("ANDROID_USER_HOME", str(root / "android-user"))
 subprocess.run(command + ["--licenses"], input="y\n" * 100, text=True,
                env=child_environment, check=True)
-subprocess.run(command + ["platforms;android-35", "build-tools;35.0.0", "platform-tools"],
+subprocess.run(command + ["platforms;android-35", "build-tools;35.0.0", "platform-tools", "ndk;28.2.13676358", "cmake;3.22.1"],
                env=child_environment, check=True)
 print("SDK installed:", sdk)
 print("Build: ANDROID_HOME=" + str(sdk) + " GRADLE_USER_HOME=" + str(root / "gradle-home")

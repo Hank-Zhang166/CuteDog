@@ -12,31 +12,58 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import org.json.JSONObject
 import org.junit.Assert.*
+import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class PetSpeechDeviceTest {
-    @Test fun bundledChineseVoiceProducesPcmAndStopsAnActiveUtterance() = runBlocking {
+    @Test fun bundledAVoiceSynthesizesAndStops() = runBlocking {
         val app = InstrumentationRegistry.getInstrumentation().targetContext
+        assumeTrue("A speech synthesis requires a 64-bit app process", android.os.Process.is64Bit())
         PetSpeech(app).use { pet ->
-            val pcm = withTimeout(120_000) { pet.renderSamples("我喜欢小狗。") }
-            assertTrue("24 kHz speech duration", pcm.size in 16_000..160_000)
+            val firstStart = SystemClock.elapsedRealtime()
+            assertTrue("The installed APK must contain its A voice models", QwenVoicePack.ready(app))
+            val pcm = withTimeout(360_000) { pet.renderSamples("我喜欢小狗。") }
+            val firstMs = SystemClock.elapsedRealtime() - firstStart
+            assertTrue("24 kHz speech duration", pcm.size in 7_200..192_000)
             val rms = sqrt(pcm.sumOf { it.toDouble() * it } / pcm.size)
             assertTrue("non-silent neural audio", rms > 100)
             val dir = requireNotNull(app.getExternalFilesDir(null))
             writeWav(File(dir, "pet-speech-device.wav"), pcm)
-            val greeting = withTimeout(120_000) {
-                pet.renderSamples("汪！你回来啦？我刚把毛毛梳好，快来摸摸我的小脑袋呀！")
-            }
+            // The second sentence exercises a different sequence of synthesized phonemes.
+            val nextStart = SystemClock.elapsedRealtime()
+            val previewText = "我把小球叼过来了，你还想再玩一次吗？"
+            val greeting = withTimeout(360_000) { pet.renderSamples(previewText) }
+            val nextMs = SystemClock.elapsedRealtime() - nextStart
+            assertFalse("Distinct sentences must produce distinct audio", greeting.contentEquals(pcm))
+            assertTrue("second neural sentence is non-silent", greeting.any { kotlin.math.abs(it.toInt()) > 100 })
             writeWav(File(dir, "pet-speech-preview.wav"), greeting)
+            // Each measured call returns one complete phrase of non-silent PCM. The first call
+            // includes bundled model preparation and loading on the first run after a clean install.
+            val status = File("/proc/self/status").readLines()
+            fun procKiB(key: String): Long? = status.firstOrNull { it.startsWith("$key:") }
+                ?.substringAfter(':')?.trim()?.substringBefore(' ')?.toLongOrNull()
+            val timing = JSONObject().apply {
+                put("sampleRateHz", 24_000)
+                put("firstText", "我喜欢小狗。")
+                put("firstPhrasePcmReadyMs", firstMs)
+                put("firstPcmSamples", pcm.size)
+                put("nextText", previewText)
+                put("nextPhrasePcmReadyMs", nextMs)
+                put("nextPcmSamples", greeting.size)
+                put("processVmRssKiB", procKiB("VmRSS") ?: JSONObject.NULL)
+                put("processVmHwmKiB", procKiB("VmHWM") ?: JSONObject.NULL)
+            }
+            File(dir, "pet-speech-device-timing.json").writeText(timing.toString(2))
             val playing = async { pet.speak("我喜欢小狗。".repeat(8)) }
             delay(500)
             val start = SystemClock.elapsedRealtime()
             pet.stop()
-            try { withTimeout(5000) { playing.await() }; fail("Stopped speech completed normally") }
-            catch (_: CancellationException) { /* speech was interrupted */ }
+            val cancelled = withTimeout(5_000) { runCatching { playing.await() }.exceptionOrNull() }
+            assertTrue("Stopped speech must cancel", cancelled is CancellationException)
             assertTrue("native run and audio stop promptly", SystemClock.elapsedRealtime() - start < 5000)
         }
     }

@@ -4,6 +4,19 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class PointerGazeTest {
+    @Test fun screenTapsInvertTheDrawnMeshAtDifferentDepthsAndHeadings() {
+        val gaze = PointerGaze()
+        gaze.target(.9f,.2f)
+        repeat(12) { gaze.step(1f/24) }
+        for (mirrored in listOf(false,true)) for (side in listOf(96f,240f)) {
+            gaze.position(15f,39f,side,mirrored)
+            val x = if (mirrored) 384 else 128
+            val eye = vertex(gaze,x,160)
+            val (u,v) = gaze.sourceAt(gaze.vertices[eye],gaze.vertices[eye+1],15f,39f,side)
+            assertEquals(x/512f,u,.001f)
+            assertEquals(160/512f,v,.001f)
+        }
+    }
     @Test fun followsFingertipInBothAxesWhilePawsStayPlanted() {
         val gaze = PointerGaze()
         val head = vertex(gaze, 128, 160)

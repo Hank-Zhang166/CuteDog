@@ -1,6 +1,6 @@
 # 可复用构建工具
 
-本机需要完整的 JDK（不只是 Java 运行时）、Android SDK 35 和 build-tools 35.0.0。Gradle Wrapper 已包含并固定为 8.11.1，分发包强制 SHA-256 验证。
+构建使用 JDK 17、Android SDK 35、build-tools 35.0.0、NDK 28.2.13676358 和 CMake 3.22.1。Gradle Wrapper 固定为 8.11.1，下载的分发包经过 SHA-256 验证。
 
 普通开发机（Python 3.11 或以上版本）：
 
@@ -31,4 +31,12 @@ GitHub Actions 包含单元测试、Lint、APK 构建，以及 API 26 / 35 的�
 
 当前小狗的整犬图序、方向与衔接证据由 Cubism 动作工具生成。重建步骤见[动作集成说明](../art/live2d/review2/integration/README.md)。
 
-中文播报在设备上运行 24 kHz 的 Kokoro v1.1-zh。首次构建会按固定提交和 SHA-256 下载模型到 `.gradle/cutedog-dogvoice/`。构建器只把一个混合中文音色、双语读音词典及 Int8 模型编进 APK。安装后不用另装语音服务。模型、数据授权及随包许可证见[语音实现说明](../docs/offline-pet-speech.md)。
+APK 内置 Qwen3-TTS 0.6B Base、音频编解码器、64 位 CPU 朗读引擎和审阅版小萨的 A 声线参考。CMake 首次构建按固定提交和 SHA-256 获取引擎源码。手机首次朗读会在本机准备内置模型，随后可直接合成新回复。[语音实现说明](../docs/offline-pet-speech.md)
+
+默认的设备验证在单台干净的 64 位测试模拟器上运行。要单独复验语音，可在安装应用与测试 APK 后运行下列命令。动作预览版的测试包名为 `com.cutedog.app.motionpreview.test`。测试使用内置 A 声线合成两句不同的 24 kHz 音频，记录得到首句和次句 PCM 的耗时，并验证播放打断、听写、回环 HTTPS 和跨窗口记录。
+
+```sh
+adb shell am instrument -w \
+  -e class com.cutedog.app.voice.PetSpeechDeviceTest,com.cutedog.app.voice.OfflineVoiceDeviceTest#mandarinAudioToHttpsAndSpokenReply \
+  com.cutedog.app.test/androidx.test.runner.AndroidJUnitRunner
+```

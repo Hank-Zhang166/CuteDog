@@ -85,23 +85,23 @@ internal class VoiceConversation(
         }
         onStatus("听到你说「$text」。小狗在想啦…")
         val repository = ChatRepository(activity)
-        val (id, history) = withContext(Dispatchers.IO) {
-            val id = repository.add("user", text).id
-            id to repository.messages().takeWhile { it.id <= id }
-        }
+        val id = withContext(Dispatchers.IO) { repository.add("user", text, voice = true).id }
         coroutineScope {
             val captions = ReplyTyping(!ValueAnimator.areAnimatorsEnabled() ||
                 activity.getSystemService(AccessibilityManager::class.java).isTouchExplorationEnabled)
             val typing = launch { captions.display(onStatus) }
             try {
-                val reply = ChatClient(activity).reply(history, id, captions::preview)
+                val reply = ChatClient(activity).replyAndSave(repository, id, captions::preview) ?: return@coroutineScope
                 ensureActive()
-                withContext(Dispatchers.IO) { repository.add("assistant", reply.text) }
                 reply.intent?.let { PetEvents.modelAction(activity, it) }
                 captions.finish(reply.text)
-                voice.value.speak(reply.text)
+                val playbackProblem = try {
+                    voice.value.speak(reply.text)
+                    null
+                } catch (cancelled: CancellationException) { throw cancelled }
+                catch (failure: Exception) { failure.message ?: "暂时无法播放语音。" }
                 typing.join()
-                onStatus(reply.text)
+                onStatus(if (playbackProblem == null) reply.text else "${reply.text}\n\n$playbackProblem")
             } finally { typing.cancel() }
         }
     }

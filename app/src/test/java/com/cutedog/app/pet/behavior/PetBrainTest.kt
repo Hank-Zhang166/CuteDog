@@ -22,6 +22,21 @@ class PetBrainTest {
         assertEquals("follow", ready().interact("follow"))
     }
 
+    @Test fun regionalTouchesUseOnlyTheRelevantRetainedReactions() {
+        val head = ready()
+        assertEquals("pet_head", head.interact("touch_head"))
+        head.update(.4f, "pet_head", all, day)
+        assertEquals("nuzzle", head.interact("touch_head"))
+        val paw = ready()
+        assertEquals("wave", paw.interact("touch_paw"))
+        paw.update(.4f, "wave", all, day)
+        assertEquals("lick_paw", paw.interact("touch_paw"))
+        val tail = ready()
+        assertEquals("tail_wag", tail.interact("touch_tail"))
+        tail.update(1f, "tail_wag", all, day)
+        assertEquals("tail_wag", tail.interact("touch_tail"))
+    }
+
     @Test fun staleRequestsForRemovedActionsLeaveAnOngoingGestureAlone() {
         val brain = ready()
         assertEquals("wave", brain.interact("wave"))

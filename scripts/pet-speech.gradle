@@ -1,13 +1,33 @@
-def pack = layout.buildDirectory.dir("generated/pet-speech/assets")
-def makeVoice = tasks.register("preparePetSpeech", Exec) {
-    def script = rootProject.file("scripts/prepare-dog-voice.py")
-    inputs.file(script)
-    inputs.dir(rootProject.file("scripts/licenses"))
-    outputs.dir(pack)
-    def python = System.getProperty("os.name").startsWith("Windows") ? "python" : "python3"
-    commandLine(providers.gradleProperty("cuteDogPython").getOrElse(python), script,
-        rootProject.file(".gradle/cutedog-dogvoice"), pack.get().asFile)
+def embeddedVoice = layout.buildDirectory.dir('generated/embedded-voice/assets')
+def prepareVoice = tasks.register('prepareEmbeddedVoice', Exec) {
+    def prepare = rootProject.file('scripts/prepare-embedded-voice.py')
+    inputs.files(prepare, rootProject.file('scripts/compact-qwen-models.py'))
+    outputs.dir(embeddedVoice)
+    def python = System.getProperty('os.name').startsWith('Windows') ? 'python' : 'python3'
+    def cache = providers.gradleProperty('cuteDogQwenCache')
+        .map { rootProject.file(it) }.getOrElse(rootProject.file('.gradle/cutedog-qwen'))
+    commandLine(providers.gradleProperty('cuteDogPython').getOrElse(python), prepare,
+        cache, embeddedVoice.get().asFile)
 }
-android.sourceSets.getByName("main").assets.srcDir(pack)
-tasks.named("preBuild") { dependsOn(makeVoice) }
-dependencies.add("implementation", "com.microsoft.onnxruntime:onnxruntime-android:1.22.0")
+tasks.named('preBuild') { dependsOn(prepareVoice) }
+android {
+    androidResources.noCompress += 'gguf'
+    sourceSets.getByName('main').assets.srcDir(embeddedVoice)
+    sourceSets.getByName('main').assets.srcDir('src/main/voice-assets')
+    ndkVersion '28.2.13676358'
+    externalNativeBuild {
+        cmake {
+            path file('src/main/cpp/CMakeLists.txt')
+            version '3.22.1'
+        }
+    }
+    defaultConfig {
+        externalNativeBuild {
+            cmake {
+                abiFilters 'arm64-v8a', 'x86_64'
+                arguments '-DANDROID_STL=c++_static'
+                targets 'cutedog_voice'
+            }
+        }
+    }
+}

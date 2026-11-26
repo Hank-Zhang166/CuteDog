@@ -1,0 +1,19 @@
+Qwen3-TTS-12Hz-0.6B-Base and Qwen3-TTS-Tokenizer-12Hz by the Qwen team
+License: Apache-2.0 (see Apache-2.0.txt). Original models:
+https://huggingface.co/Qwen/Qwen3-TTS-12Hz-0.6B-Base
+https://huggingface.co/Qwen/Qwen3-TTS-Tokenizer-12Hz
+GGUF conversion by Serveurperso:
+https://huggingface.co/Serveurperso/Qwen3-TTS-GGUF/tree/b7ee2e8c7459c3bea99da23e3d178125a7d1713c
+This APK contains the inference tensors used by the fixed A voice.
+The build removes model components used only to encode new speaker references.
+The signed APK includes the reference transcript and two small acoustic descriptors
+encoded from CuteDog's original, approved synthetic Qwen VoiceDesign A voice.
+
+qwentts.cpp and ggml are used under the MIT license; this build adjusts the
+context and CPU thread limits for the mobile client's maximum phrase length
+and reads the weights directly from their uncompressed APK asset ranges.
+https://github.com/ServeurpersoCom/qwentts.cpp/tree/2edb35f87b709a070b2d5379f77e5c52a1daa585
+https://github.com/ServeurpersoCom/ggml/tree/ef4555b7aede4467a5de803b103615e0a5f30dd8
+
+Sonic library, Copyright 2010 Bill Cox. Licensed under Apache-2.0 (see Apache-2.0.txt).
+https://github.com/waywardgeek/sonic/tree/b93885dcb70aae50c6f76b0fe4e0868f029a077e

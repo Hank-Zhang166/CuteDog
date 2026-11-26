@@ -2,6 +2,9 @@
 .idea/
 .kotlin/
 **/build/
+.cxx/
+*.gguf
+*.apk
 local.properties
 *.iml
 *.jks

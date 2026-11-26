@@ -57,6 +57,8 @@ jobs:
           target: google_apis
           profile: pixel_2
           disable-animations: true
+          ram-size: 4096M
+          disk-size: 6144M
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot -camera-back none -accel on
           script: python3 scripts/prepare-ui-validation.py run-device --apk-dir "$RUNNER_TEMP/published-apk" --output "$RUNNER_TEMP/ui-evidence"
       - name: Upload actual device evidence
@@ -66,3 +68,4 @@ jobs:
           name: published-apk-ui-evidence-${{ github.run_id }}
           path: ${{ runner.temp }}/ui-evidence/
           if-no-files-found: warn
+          retention-days: 7

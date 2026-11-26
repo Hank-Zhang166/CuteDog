@@ -29,8 +29,10 @@ import com.cutedog.app.voice.PetSpeech
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.collect
 import java.net.URI
 
 @Composable
@@ -44,7 +46,6 @@ internal fun ChatScreen(onClose: (() -> Unit)? = null, voiceDraft: String? = nul
     var messages by remember { mutableStateOf<List<ChatMessage>>(emptyList()) }
     var input by rememberSaveable { mutableStateOf(voiceDraft.orEmpty()) }
     var voiceTurn by rememberSaveable { mutableStateOf(voiceDraft != null) }
-    var retryWithVoice by rememberSaveable { mutableStateOf(false) }
     var voiceStatus by remember { mutableStateOf("") }
     var playback by remember { mutableStateOf<Job?>(null) }
     val speaker = remember { PetSpeech(context.applicationContext) { voiceStatus = it } }
@@ -56,6 +57,7 @@ internal fun ChatScreen(onClose: (() -> Unit)? = null, voiceDraft: String? = nul
     var clearConfirm by remember { mutableStateOf(false) }
     var deleteId by rememberSaveable { mutableLongStateOf(0L) }
     var failedUserId by rememberSaveable { mutableLongStateOf(0L) }
+    val pendingReplies by ChatClient.pendingReplies.collectAsStateWithLifecycle()
     var requestGeneration by remember { mutableIntStateOf(0) }
     var truncated by rememberSaveable { mutableStateOf(false) }
     val exportChat = rememberJsonExporter("conversation", "CuteDog-聊天-${LocalDate.now()}.json") { repository.exportConversation() }
@@ -82,19 +84,16 @@ internal fun ChatScreen(onClose: (() -> Unit)? = null, voiceDraft: String? = nul
         lifecycle.addObserver(observer)
         onDispose { lifecycle.removeObserver(observer); stopPlayback(); speaker.close() }
     }
-    val currentlyBusy by rememberUpdatedState(busy)
-    LaunchedEffect(lifecycle, repository) {
-        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-            if (!currentlyBusy) {
-                try {
-                    val records = withContext(Dispatchers.IO) { repository.messages() }
-                    if (!currentlyBusy) {
-                        messages = records
-                        failedUserId = records.lastOrNull()?.takeIf { it.role == "user" }?.id ?: 0L
-                    }
-                } catch (e: CancellationException) { throw e }
-                catch (e: Exception) { error = "无法读取聊天记录，请重新打开本页。" }
-            }
+    LaunchedEffect(lifecycle, repository, busy) {
+        if (busy) return@LaunchedEffect // This window owns the streaming bubble until its reply finishes.
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            try {
+                repository.observeMessages().collect { records ->
+                    messages = records
+                    failedUserId = records.lastOrNull()?.takeIf { it.role == "user" }?.id ?: 0L
+                }
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { error = "无法读取聊天记录，请重新打开本页。" }
         }
     }
     LaunchedEffect(messages.size, busy) { if (messages.isNotEmpty()) listState.scrollToItem(if (busy) messages.size else messages.lastIndex) }
@@ -103,8 +102,8 @@ internal fun ChatScreen(onClose: (() -> Unit)? = null, voiceDraft: String? = nul
         if (!configured) { showSettings = true; return }
         if (!consent.getBoolean("remote_chat", false)) { consentVisible = true; return }
         val text = input.trim()
-        val aloud = if (retry) retryWithVoice else voiceTurn
-        retryWithVoice = aloud; voiceTurn = false; stopPlayback(); voiceStatus = ""
+        val aloud = if (retry) messages.firstOrNull { it.id == failedUserId }?.voice == true else voiceTurn
+        voiceTurn = false; stopPlayback(); voiceStatus = ""
         input = ""; busy = true; error = null
         requestGeneration++
         val generation = requestGeneration
@@ -114,15 +113,13 @@ internal fun ChatScreen(onClose: (() -> Unit)? = null, voiceDraft: String? = nul
         requestJob = scope.launch {
             val typing = launch { speech.display() }
             try {
-                val target = if (!retry) withContext(Dispatchers.IO) { repository.add("user", text) }.id else failedUserId
+                val target = if (!retry) withContext(Dispatchers.IO) { repository.add("user", text, aloud) }.id else failedUserId
                 require(target > 0) { "没有可以重试的消息，请重新发送。" }
                 failedUserId = target
                 messages = withContext(Dispatchers.IO) { repository.messages() }
-                val history = messages.takeWhile { it.id <= target }
-                val reply = client.reply(history, target, speech::preview)
+                val reply = client.replyAndSave(repository, target, speech::preview) ?: return@launch
                 currentCoroutineContext().ensureActive()
                 if (generation != requestGeneration) return@launch
-                withContext(Dispatchers.IO) { currentCoroutineContext().ensureActive(); repository.add("assistant", reply.text) }
                 reply.intent?.let { com.cutedog.app.pet.PetEvents.modelAction(context, it) }
                 failedUserId = 0L
                 truncated = reply.contextTruncated
@@ -152,7 +149,7 @@ internal fun ChatScreen(onClose: (() -> Unit)? = null, voiceDraft: String? = nul
             TextButton(onClick = exportChat, enabled = messages.isNotEmpty()) { Text("导出") }
             TextButton(onClick = { clearConfirm = true }, enabled = messages.isNotEmpty()) { Text("清空聊天") }
         }
-        LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = listState, contentPadding = PaddingValues(horizontal = 22.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("chat_messages"), state = listState, contentPadding = PaddingValues(horizontal = 22.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             if (messages.isEmpty() && !busy) item {
                 SoftCard(Modifier.fillMaxWidth()) {
                     Text("和${name}打个招呼", style = MaterialTheme.typography.titleLarge)
@@ -162,7 +159,13 @@ internal fun ChatScreen(onClose: (() -> Unit)? = null, voiceDraft: String? = nul
             }
             items(messages, key = { it.id }) { item ->
                 val user = item.role == "user"
-                ChatBubble(if (user) "你" else name, item.content, user,
+                val speakerName = if (user) "你" else name
+                val label = when {
+                    !item.voice -> speakerName
+                    user -> "$speakerName · 语音输入"
+                    else -> "$speakerName · 语音回复"
+                }
+                ChatBubble(label, item.content, user,
                     onDelete = { deleteId = item.id }, deleteTag = "chat_delete_${item.id}")
             }
             speaking?.let { speech ->
@@ -195,10 +198,10 @@ internal fun ChatScreen(onClose: (() -> Unit)? = null, voiceDraft: String? = nul
                 Surface(color = MaterialTheme.colorScheme.errorContainer, shape = RoundedCornerShape(18.dp)) {
                     Column(Modifier.padding(16.dp)) {
                         Text(error!!, style = MaterialTheme.typography.bodyMedium)
-                        TextButton(onClick = { send(true) }, enabled = !busy && messages.any { it.id == failedUserId && it.role == "user" }) { Text("重试上一条") }
+                        TextButton(onClick = { send(true) }, enabled = !busy && failedUserId !in pendingReplies && messages.any { it.id == failedUserId && it.role == "user" }) { Text("重试上一条") }
                     }
                 }
-            } else if (!busy && failedUserId > 0 && messages.any { it.id == failedUserId }) item {
+            } else if (!busy && failedUserId > 0 && failedUserId !in pendingReplies && messages.any { it.id == failedUserId }) item {
                 TextButton(onClick = { send(true) }) { Text("继续请求上一条回复") }
             }
         }

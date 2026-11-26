@@ -36,7 +36,11 @@
 
 ## 记忆与数据
 
-双击桌宠打开互动菜单，或在陪伴页按住麦克风说话。首次使用由 Android 申请麦克风权限。松手后，Vosk 在手机上识别最多 30 秒的普通话。录音仅在内存中短暂保留。滑出按钮会清除本次录音。用户同意联网对话后才向自己的模型服务发送文字。回复正文交给手机内置的中文 Kokoro 音色朗读，文本聊天支持逐字显示。菜单中的「停止播放」和输入栏的「停止朗读」可随时打断。[Vosk 模型](https://alphacephei.com/vosk/models) · [Kokoro 中文音色](https://huggingface.co/hexgrad/Kokoro-82M-v1.1-zh)
+双击桌宠打开互动菜单，或在陪伴页按住麦克风说话。首次使用由 Android 申请麦克风权限。松手后，Vosk 在手机上识别最多 30 秒的普通话。录音在内存中处理，手指滑出按钮即可取消。用户同意联网对话后，应用才向配置的模型服务发送听写文字。[Vosk 模型](https://alphacephei.com/vosk/models)
+
+桌宠麦克风、桌面聊天小窗和陪伴页共用聊天记录。发送成功进入会话的听写标为「语音输入」，完整的模型回复标为「语音回复」。打开或重新进入任一聊天窗口都可阅读同一段对话。语音播放是否成功独立于文字保存。联网失败时可以对同一条听写重试，取消录音或空白听写不会新增记录。旧版已有消息保留原文。
+
+APK 内置审阅版小萨的 A 声线。支持的 64 位设备会在首次朗读时从已安装的 APK 准备模型，用 Qwen3-TTS 在本机朗读语音提问的回复；气泡逐字展示正文。不同回复共用来自审阅版小萨问候的发音参考。菜单中的「停止播放」或聊天输入栏的「停止朗读」可以打断声音。[本机语音实现](offline-pet-speech.md)
 
 - `companion.db` 保存对话和用户明确编辑的长期记忆；采用 SQLite WAL 与参数化语句。记忆不是自动抓取或提取。
 - 长期记忆上传开关默认关闭。用户打开后，当前最多前 20 条、总计 8000 字符的记忆作为单独的低权限用户背景数据发送；不会拼入 system 指令。
@@ -60,7 +64,8 @@
 | `ChatPolicyTest` | HTTPS 地址、含凭据地址拒绝、动作白名单、角色过滤、完整消息上下文边界、过长回复明确失败 |
 | `ChatRequestFactoryTest` | 模型/Unicode/角色 JSON 序列化、密钥不出现在正文和对象日志、记忆默认不发送/低权限发送、重试绑定用户 ID、不带未来消息、删除后的新请求不包含记忆、上下文裁剪信号 |
 | `ChatHttpsTransportTest` | 本地真实 HTTPS POST/Authorization/JSON；拒绝重定向泄露、401/403/404/429/503错误脱敏、非法 JSON/null content/响应上限、读取超时和总期限、取消后不交付迟到回复、默认 TLS 拒绝测试证书、连接失败 |
-| `ChatPrivacyPersistenceTest`（Android） | 独立测试 Keystore 别名下真实加密/解密/随机 IV/清除/密文损坏；独立 SQLite 文件的消息与记忆 CRUD、导出一致性；记忆默认关闭、启用、删除与禁用后每次出站载荷检查 |
+| `ChatPrivacyPersistenceTest`（Android） | Keystore 加解密、随机 IV 和密文损坏。SQLite 旧版聊天与记忆迁移、语音标记、重复回复和删除后的迟到回复，以及记忆授权对出站载荷的影响 |
+| `OfflineVoiceDeviceTest`（Android） | 真实语音样本听写、HTTPS 回答入库与 A 声线朗读、桌面与陪伴页互读、网络失败后的重试 |
 
 HTTPS 回环夹具使用 `src/test/resources/chat/localhost.p12`，由 JVM 测试和独立 Android 测试 APK 使用。设备上的窗口、录音和朗读测试在专用测试模拟器运行。应用的发行 APK 使用系统 TLS 信任，且不含该测试证书。测试问答用于验证传输、界面与播放。[设备上的语音对话测试](../app/src/androidTest/java/com/cutedog/app/voice/OfflineVoiceDeviceTest.kt)
 
@@ -73,7 +78,7 @@ HTTPS 回环夹具使用 `src/test/resources/chat/localhost.p12`，由 JVM 测�
 
 云环境使用 `python3 scripts/cloud-gradle.py` 替代命令开头的 `./gradlew`。
 
-本轮已经实际执行 JVM 测试：`ChatPolicyTest` 7 项、`ChatRequestFactoryTest` 5 项、`ChatHttpsTransportTest` 8 项，共 20 项通过，失败/错误/跳过均为 0；报告位于 `app/build/test-results/testDebugUnitTest/`。这包括真实本地 TLS 连接与证书校验，但不包含外部模型账户的回答质量。Android 5 项隔离测试已编写，须以后续设备执行报告确认结果。
+JVM 测试报告在 `app/build/test-results/testDebugUnitTest/`。各版本的窗口、语音和数据迁移验证见[设备验收记录](interaction-review.md)。
 
 **没有服务凭据时，中文对话质量、多轮回复、服务计费、真实限流与端到端联网成功不能标记为通过。** Keystore/SQLite 由独立的 Android instrumentation 测试验证；其实际执行结果见测试报告。HTTPS 取消目前由 JVM 真连接夹具覆盖，仍应验证各 Android 厂商网络栈。纯 JVM 规则测试不能替代设备验证。模型生成文字无法保证总是遵循人格或没有事实错误，应把它视为交流与辅助信息。
 

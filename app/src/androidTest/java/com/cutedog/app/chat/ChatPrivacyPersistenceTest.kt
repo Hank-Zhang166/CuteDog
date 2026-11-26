@@ -75,6 +75,40 @@ class ChatPrivacyPersistenceTest {
         assertTrue(reopened.messages().isEmpty())
     }
 
+    @Test fun upgradePreservesOldConversationAndStoresOnlyOneReplyPerVoiceTurn() {
+        val name = "legacy-voice-instrumentation-fixture.db"
+        context.deleteDatabase(name)
+        context.openOrCreateDatabase(name, Context.MODE_PRIVATE, null).use { db ->
+            db.execSQL("CREATE TABLE messages (id INTEGER PRIMARY KEY AUTOINCREMENT, role TEXT NOT NULL, content TEXT NOT NULL, created_at INTEGER NOT NULL)")
+            db.execSQL("CREATE TABLE memories (id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT NOT NULL)")
+            db.execSQL("INSERT INTO messages VALUES (7, 'user', '旧的聊天消息', 1234)")
+            db.execSQL("INSERT INTO memories VALUES (3, '原来的记忆')")
+            db.version = 1
+        }
+        val updated = ChatRepository(context, name)
+        try {
+            assertEquals(listOf(ChatMessage(7L, "user", "旧的聊天消息", 1234L)), updated.messages())
+            assertEquals(listOf(Memory(3L, "原来的记忆")), updated.memories())
+            val user = updated.add("user", "语音问题", voice = true)
+            val answer = updated.saveReply(user.id, "完成后的真实回复")!!
+            assertTrue(answer.voice)
+            assertNull(updated.saveReply(user.id, "迟到的重复回复"))
+            val pending = updated.add("user", "已删除的问题", voice = true)
+            updated.deleteMessage(pending.id)
+            assertNull(updated.saveReply(pending.id, "已删除后返回的回复"))
+            val reopened = ChatRepository(context, name)
+            assertEquals(listOf(user, answer), reopened.messages().drop(1))
+            val items = JSONObject(reopened.exportConversation()).getJSONArray("messages")
+            assertEquals(3, items.length())
+            assertFalse(items.getJSONObject(0).has("voice"))
+            assertTrue(items.getJSONObject(1).getBoolean("voice"))
+            assertTrue(items.getJSONObject(2).getBoolean("voice"))
+        } finally {
+            updated.clear()
+            updated.clearMemories()
+        }
+    }
+
     @Test fun memoriesPersistEditDeleteExportAndClear() {
         val id = repository.saveMemory(text = "想学习陶艺")
         val second = repository.saveMemory(text = "喜欢散步")
