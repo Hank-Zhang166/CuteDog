@@ -362,18 +362,22 @@ class Host:
             if not BOOT_ID.fullmatch(previous): raise Blocked("Cannot record a valid kernel boot ID before reboot")
             self.adb("reboot", label="actual-adb-reboot")
             deadline = time.monotonic() + self.args.reboot_timeout
+            observed_reboot = False
             while time.monotonic() < deadline:
                 state = self.adb("get-state", label="reboot-adb-state", timeout=10, check=False)
                 if state.returncode == 0 and state.stdout.strip() == "device":
                     boot = self.shell("getprop", "sys.boot_completed", label="reboot-boot-completed", check=False).stdout.strip()
                     current = self.shell("cat", "/proc/sys/kernel/random/boot_id", label="reboot-new-boot-id", check=False).stdout.strip()
                     if boot == "1" and BOOT_ID.fullmatch(current) and current != previous:
+                        observed_reboot = True
                         user = self.shell("dumpsys", "user", label="reboot-user-state").stdout
-                        if not owner_user_unlocked(user):
-                            raise Blocked("Real reboot completed but credential-protected user storage is still locked")
-                        return {"method": "adb reboot", "beforeBootId": previous, "afterBootId": current,
-                                "bootCompleted": True, "userUnlocked": True}
+                        # Android 15 can report boot_completed during RUNNING_UNLOCKING.
+                        if owner_user_unlocked(user):
+                            return {"method": "adb reboot", "beforeBootId": previous, "afterBootId": current,
+                                    "bootCompleted": True, "userUnlocked": True}
                 time.sleep(2)
+            if observed_reboot:
+                raise Blocked("Real reboot completed but owner storage did not unlock before the deadline")
             raise Blocked("Real reboot did not complete with a changed kernel boot ID within the deadline")
         if scenario == "doze":
             idle = self.shell("dumpsys", "deviceidle", label="doze-before-state").stdout

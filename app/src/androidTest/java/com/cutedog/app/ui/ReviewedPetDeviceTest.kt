@@ -78,10 +78,11 @@ class ReviewedPetDeviceTest {
         }
     }
 
-    private enum class InteractionScene { HOME, BODY_PARTS, DESKTOP_GESTURES, DESKTOP_CHAT, DESKTOP_DISMISSAL }
+    private enum class InteractionScene { HOME, BODY_PARTS, DOUBLE_TAP_EDGE, DESKTOP_GESTURES, DESKTOP_CHAT, DESKTOP_DISMISSAL }
 
     @Test fun floatingDogHandlesTapMenuAndDueCheckboxWithHomeInForeground() = checkInteraction(InteractionScene.HOME)
     @Test fun floatingDogRespondsToHeadPawAndTail() = checkInteraction(InteractionScene.BODY_PARTS)
+    @Test fun aSecondTapJustOutsideThePaintedFurStillOpensTheMenu() = checkInteraction(InteractionScene.DOUBLE_TAP_EDGE)
     @Test fun desktopMenuFeedsTheDogAndHonorsTheDragLock() = checkInteraction(InteractionScene.DESKTOP_GESTURES)
     @Test fun desktopMenuOpensAndClosesTheChatWindow() = checkInteraction(InteractionScene.DESKTOP_CHAT)
     @Test fun desktopMenuClosesOnTheDogAndOnTheLauncher() = checkInteraction(InteractionScene.DESKTOP_DISMISSAL)
@@ -108,6 +109,7 @@ class ReviewedPetDeviceTest {
         }
         val title = "Dog checkbox ${UUID.randomUUID()}"
         var id = 0L
+        var lastPress = ""
         fun capture(name: String) {
             if (InstrumentationRegistry.getArguments().getString("cuteDogDisposable") != "true") return
             val directory = java.io.File(context.getExternalFilesDir(null), "overlay-gesture-evidence").apply { mkdirs() }
@@ -128,11 +130,13 @@ class ReviewedPetDeviceTest {
         fun dog() = node { it.contentDescription?.contains("双击打开互动菜单") == true }
         fun label(value: String) = node { it.text?.toString() == value }
         fun sendTouch(kind: Int, down: Long, x: Float, y: Float, sync: Boolean = true) {
+            if (kind == MotionEvent.ACTION_DOWN) lastPress = "$x,$y"
             val event = MotionEvent.obtain(down, SystemClock.uptimeMillis(), kind, x, y, 0)
             event.source = InputDevice.SOURCE_TOUCHSCREEN
             try { assertTrue(automation.injectInputEvent(event, sync)) } finally { event.recycle() }
         }
         fun tap(x: Float, y: Float) {
+            lastPress = "$x,$y"
             // A button can dismiss or replace its own window. Send a real system tap;
             // the caller verifies the resulting UI, database, activity or rendered clip.
             shell("input tap ${x.toInt()} ${y.toInt()}")
@@ -165,29 +169,39 @@ class ReviewedPetDeviceTest {
             System.currentTimeMillis() - growthPrefs.getLong("last_interaction", 0) >= 2050
         }
         val touchRegions by lazy { PetTouchRegions(context.resources.openRawResource(R.raw.pet_touch_regions)) }
+        fun screenPoint(current: org.json.JSONObject, u: Float, v: Float): Pair<Float,Float> {
+            val side = current.getDouble("canvasSide").toFloat()
+            return (current.getDouble("canvasScreenLeft").toFloat() + u * side) to
+                (current.getDouble("canvasScreenTop").toFloat() + v * side)
+        }
         // The centre of the overlay window can be clear sky when the dog lies down. For
         // menu/drag smoke tests press interior coat. The region-specific test uses hand-picked
         // artwork coordinates independently of this table and checks the actually played clip.
-        fun bodyPoint(box: Rect): Pair<Float,Float> {
+        fun bodyPoint(preferCenter: Boolean = false): Pair<Float,Float> {
             var point: Pair<Float,Float>? = null
             await("No visible painted body target in the floating window", 8000) {
                 val current = snapshot() ?: return@await false
                 val frame = current.optInt("displayedFrameIndex", -1)
-                val clip = current.optString("clipId")
-                val side = minOf(box.width(),box.height()) * current.optDouble("spatialDepth", 1.0).toFloat()
+                val clip = current.optString("displayedClip")
+                if (current.optDouble("canvasSide",0.0) <= 0) return@await false
+                // The centre of a standing dog is the stable double-tap and drag target.
+                if (preferCenter && touchRegions.at(clip,frame,.5f,.5f) != null) {
+                    point = screenPoint(current,.5f,.5f)
+                    return@await true
+                }
                 val cell = (5..20).flatMap { y -> (4..20).map { x -> x to y } }.filter { (x,y) ->
                     listOf(0 to 0, -1 to 0, 1 to 0, 0 to -1, 0 to 1).all { (dx,dy) ->
                         touchRegions.at(clip,frame,(x+dx)/24f,(y+dy)/24f) == PetPart.BODY
                     }
                 }.minByOrNull { (x,y) -> (x-12)*(x-12) + (y-12)*(y-12) } ?: return@await false
-                point = (box.exactCenterX() + side*(cell.first/24f-.5f)) to (box.bottom - side*(1f-cell.second/24f))
+                point = screenPoint(current,cell.first/24f,cell.second/24f)
                 true
             }
             return requireNotNull(point)
         }
         fun dragVertically() {
             val box = bounds()
-            val (x,y) = bodyPoint(box)
+            val (x,y) = bodyPoint(preferCenter = true)
             val dy = if (y > context.resources.displayMetrics.heightPixels / 2f) -box.height() * .45f else box.height() * .45f
             val down = SystemClock.uptimeMillis()
             sendTouch(MotionEvent.ACTION_DOWN, down, x, y)
@@ -220,10 +234,9 @@ class ReviewedPetDeviceTest {
                 if (!ready) usableSince = 0 else if (usableSince == 0L) usableSince = now
                 usableSince != 0L && now - usableSince >= 700
             }
-            val box = bounds()
             // Dispatch each physical event to Android. UiAutomation's shell command API
             // does not provide an interactive shell for a compound "tap; sleep; tap".
-            val (x,y) = bodyPoint(box)
+            val (x,y) = bodyPoint(preferCenter = twice)
             repeat(if (twice) 2 else 1) { step ->
                 val down = SystemClock.uptimeMillis()
                 sendTouch(MotionEvent.ACTION_DOWN, down, x, y, sync = false)
@@ -291,6 +304,26 @@ class ReviewedPetDeviceTest {
                     OverlayService.start(it)
                 }
                 await("Floating dog did not attach to WindowManager", 20_000) { dog() != null }
+                if (scene == InteractionScene.DOUBLE_TAP_EDGE) {
+                    await("Standing artwork has not been drawn", 20_000) {
+                        snapshot()?.let { it.optString("clipId") == "stand" && it.optInt("displayedFrameIndex", -1) >= 0 } == true
+                    }
+                    val current = requireNotNull(snapshot())
+                    val initial = growth.snapshot().interactions
+                    // Throughout the standing loop, (115,145) is painted cheek. (100,145)
+                    // is transparent, a few screen pixels from the first point after scaling.
+                    for (sourceX in listOf(115,100)) {
+                        val (x,y) = screenPoint(current,sourceX/512f,145/512f)
+                        val down = SystemClock.uptimeMillis()
+                        sendTouch(MotionEvent.ACTION_DOWN,down,x,y,false)
+                        SystemClock.sleep(28)
+                        sendTouch(MotionEvent.ACTION_UP,down,x,y,false)
+                        if (sourceX == 115) SystemClock.sleep(68)
+                    }
+                    choose("取消")
+                    assertEquals("Opening a menu must not also pet the dog",initial,growth.snapshot().interactions)
+                    return@use
+                }
                 if (scene == InteractionScene.BODY_PARTS) {
                     val initial = growth.snapshot().interactions
                     val cases = listOf(Triple("HEAD", .27f to .31f, "pet_head"),
@@ -305,9 +338,10 @@ class ReviewedPetDeviceTest {
                         await("Standing artwork has not been drawn", 20_000) {
                             snapshot()?.let { it.optString("clipId") == "stand" && it.optInt("displayedFrameIndex", -1) >= 0 } == true
                         }
-                        val box = bounds()
-                        val side = minOf(box.width(),box.height()) * requireNotNull(snapshot()).getDouble("spatialDepth").toFloat()
-                        fun tapCanvas(u: Float, v: Float) = tap(box.exactCenterX() + side * (u - .5f), box.bottom - side * (1f - v))
+                        fun tapCanvas(u: Float, v: Float) {
+                            val (x,y) = screenPoint(requireNotNull(snapshot()),u,v)
+                            tap(x,y)
+                        }
                         if (index == 0) {
                             tapCanvas(.05f, .05f)
                             SystemClock.sleep(550)
@@ -443,7 +477,6 @@ class ReviewedPetDeviceTest {
                 }
                 if (scene == InteractionScene.DESKTOP_CHAT) {
                     touchDog(true)
-                    await("Chat entry is missing on desktop", 8000) { label("聊聊天") != null }
                     choose("聊聊天")
                     await("Desktop chat shortcut did not open its chat window", 10_000) {
                         label("收起聊天") != null && shell("dumpsys activity activities").lineSequence().any {
@@ -487,6 +520,10 @@ class ReviewedPetDeviceTest {
                 }
                 capture("outside-touch-restores-launcher")
             }
+        } catch (failure: AssertionError) {
+            capture("failure-${scene.name.lowercase()}")
+            val focused = shell("dumpsys window windows").lineSequence().filter { "mCurrentFocus=" in it }.firstOrNull()
+            throw AssertionError("${failure.message}; last system press $lastPress, $focused, pet ${snapshot()}", failure)
         } finally {
             OverlayService.stop(context)
             InstrumentationRegistry.getInstrumentation().waitForIdleSync()

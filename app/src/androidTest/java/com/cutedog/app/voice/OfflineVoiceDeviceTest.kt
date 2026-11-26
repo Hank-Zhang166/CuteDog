@@ -33,6 +33,25 @@ class OfflineVoiceDeviceTest {
         assertEquals("", OfflineSpeechInput.transcribe(context, ByteArray(32_000)))
     }
 
+    @Test fun liveMandarinBlocksMatchTheRecordingAndCancelledAudioIsDiscarded() = runBlocking {
+        val recording = device.context.assets.open("like-dogs-16k.pcm").use { it.readBytes() }
+        val cancelled = OfflineSpeechInput.listen(context,this)
+        cancelled.offer(recording,3200)
+        cancelled.cancel()
+        assertTrue(runCatching { cancelled.finish() }.exceptionOrNull() is CancellationException)
+        val listener = OfflineSpeechInput.listen(context,this)
+        try {
+            var offset = 0
+            while (offset < recording.size) {
+                val end = minOf(offset+3200,recording.size)
+                listener.offer(recording.copyOfRange(offset,end))
+                delay((end-offset)*1000L/(MicCapture.RATE*2))
+                offset = end
+            }
+            assertEquals("我喜欢小狗",listener.finish())
+        } finally { listener.cancel() }
+    }
+
     @Test fun realMicrophoneCanRecordStopAndRestartInForeground() {
         assumeTrue(Build.HARDWARE.contains("ranchu") || Build.HARDWARE.contains("goldfish"))
         val permission = Manifest.permission.RECORD_AUDIO
@@ -77,11 +96,11 @@ class OfflineVoiceDeviceTest {
         val followUp = "我们来玩球吧。"
         val followUpAnswer = "好呀，我来接！"
         val requests = AtomicInteger()
-        fun waitForText(value: String) = compose.waitUntil(15_000) {
-            compose.onAllNodesWithText(value).fetchSemanticsNodes().isNotEmpty()
-        }
         fun showMessage(value: String) =
             compose.onNodeWithTag("chat_messages").performScrollToNode(hasText(value))
+        fun waitForMessage(value: String) = compose.waitUntil(25_000) {
+            runCatching { showMessage(value); compose.onNodeWithText(value).assertIsDisplayed() }.isSuccess
+        }
         try {
             server.createContext("/chat/completions") { exchange ->
                 val body = JSONObject(exchange.requestBody.bufferedReader().readText()).getJSONArray("messages")
@@ -90,11 +109,16 @@ class OfflineVoiceDeviceTest {
                     exchange.sendResponseHeaders(503, 0L)
                     return@createContext
                 }
-                val spoken = if (asked.get() == expected) answer else followUpAnswer
-                val response = """{"choices":[{"message":{"content":"$spoken <action:happy>"}}]}""".toByteArray()
-                exchange.responseHeaders.set("Content-Type", "application/json")
-                exchange.sendResponseHeaders(200, response.size.toLong())
-                exchange.responseBody.write(response)
+                val voiceRequest = asked.get() == expected
+                val response = if (voiceRequest) {
+                    listOf("我也", answer.removePrefix("我也"), " <action:happy>").joinToString("") { fragment ->
+                        "data: {\"choices\":[{\"delta\":{\"content\":${JSONObject.quote(fragment)}}}]}\n\n"
+                    } + "data: [DONE]\n\n"
+                } else """{"choices":[{"message":{"content":"$followUpAnswer <action:happy>"}}]}"""
+                exchange.responseHeaders.set("Content-Type", if (voiceRequest) "text/event-stream" else "application/json")
+                val bytes = response.toByteArray()
+                exchange.sendResponseHeaders(200, bytes.size.toLong())
+                exchange.responseBody.write(bytes)
             }
             server.start()
             HttpsURLConnection.setDefaultSSLSocketFactory(tls.socketFactory)
@@ -106,7 +130,10 @@ class OfflineVoiceDeviceTest {
             ActivityScenario.launch(PetChatActivity::class.java).use { scenario ->
                 lateinit var session: VoiceConversation
                 val status = mutableListOf<String>()
-                scenario.onActivity { session = VoiceConversation(it, status::add) }
+                scenario.onActivity {
+                    it.window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                    session = VoiceConversation(it, status::add)
+                }
                 try {
                     val pcm = device.context.assets.open("like-dogs-16k.pcm").use { it.readBytes() }
                     // Keep the chat visible as a desktop microphone session writes through its own repository instance.
@@ -123,7 +150,7 @@ class OfflineVoiceDeviceTest {
                     val saved = repository.messages()
                     assertEquals(listOf(expected, answer), saved.map { it.content })
                     assertTrue(saved.all { it.voice })
-                    waitForText(answer)
+                    waitForMessage(answer)
                     showMessage("你 · 语音输入")
                     showMessage(expected)
                 } finally { scenario.onActivity { session.close() } }
@@ -131,7 +158,7 @@ class OfflineVoiceDeviceTest {
             val mainChat = Intent(context, MainActivity::class.java).putExtra("open_chat", true)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             ActivityScenario.launch<MainActivity>(mainChat).use {
-                waitForText(answer)
+                waitForMessage(answer)
                 showMessage(expected)
                 compose.onNodeWithText("设置").performClick()
                 compose.onNodeWithText("连接你的模型").assertExists()
@@ -143,10 +170,10 @@ class OfflineVoiceDeviceTest {
                 showMessage("重试上一条")
                 assertEquals(listOf(expected, answer, followUp), repository.messages().map { m -> m.content })
                 compose.onNodeWithText("重试上一条").performClick()
-                waitForText(followUpAnswer)
+                waitForMessage(followUpAnswer)
             }
             ActivityScenario.launch(PetChatActivity::class.java).use {
-                waitForText(followUpAnswer)
+                waitForMessage(followUpAnswer)
                 showMessage(expected)
                 showMessage(answer)
                 val saved = ChatRepository(context).messages()

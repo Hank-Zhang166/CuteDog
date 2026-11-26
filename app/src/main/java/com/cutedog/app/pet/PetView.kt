@@ -372,13 +372,17 @@ class PetView(context: Context) : View(context) {
     override fun onTouchEvent(event: MotionEvent): Boolean {
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                pressedPart = partAt(event.x, event.y) ?: return false
+                val gap = event.eventTime - lastTap
+                val nearPreviousTap = lastTap != 0L && gap in 0..ViewConfiguration.getDoubleTapTimeout().toLong()
+                val tapDistance = hypot(event.rawX - lastTapX, event.rawY - lastTapY)
+                // A moving paw or tail can leave the original fingertip between the two taps.
+                val hit = partAt(event.x, event.y)
+                pressedPart = hit ?: pendingPart?.takeIf { nearPreviousTap && tapDistance <= slop } ?: return false
                 touchActive = true; following = false; authoredTravel.clear()
                 downX = event.rawX; downY = event.rawY; lastX = downX; lastY = downY
                 downAt = event.eventTime; dragged = false; stroked = false
                 movedBeyondSlop = false
-                secondTap = lastTap != 0L && downAt - lastTap in 0..ViewConfiguration.getDoubleTapTimeout().toLong() &&
-                    hypot(downX - lastTapX, downY - lastTapY) <= doubleTapSlop
+                secondTap = nearPreviousTap && tapDistance <= doubleTapSlop
                 if (lastTap != 0L) {
                     removeCallbacks(singleTap)
                     if (secondTap) { lastTap = 0; pendingPart = null } else singleTap.run()
@@ -456,9 +460,10 @@ class PetView(context: Context) : View(context) {
     }
 
     override fun performClick(): Boolean = clickPart(PetPart.BODY)
-    /** Shell dumpsys diagnostics contain counters only, never chats, reminders, names or credentials. */
+    /** Rendering counters, touch-region identifiers and the painted canvas position for device QA. */
     fun diagnosticSnapshot(): org.json.JSONObject {
         val cache = rigPlayer?.cacheStats()
+        val origin = IntArray(2).also(::getLocationOnScreen)
         return org.json.JSONObject().apply {
             put("viewId", diagnosticId); put("scope", if (onDrag != null) "overlay" else "activity")
             put("renderMode", if (hasRigAssets) "authored_frames" else "legacy")
@@ -468,6 +473,10 @@ class PetView(context: Context) : View(context) {
             put("clipId", rigFrame?.clipId ?: org.json.JSONObject.NULL)
             put("lastTouchPart", lastTouchPart?.name ?: org.json.JSONObject.NULL)
             put("displayedFrameIndex", drawnFrame?.frameIndex ?: -1)
+            put("displayedClip", drawnFrame?.clipId ?: org.json.JSONObject.NULL)
+            put("canvasScreenLeft", (origin[0] + dest.left).toDouble())
+            put("canvasScreenTop", (origin[1] + dest.top).toDouble())
+            put("canvasSide", dest.width().toDouble())
             put("spatialDepth", spatialDepth.toDouble())
             put("canonicalClipId", rigPlayer?.canonicalClipId ?: org.json.JSONObject.NULL)
             put("canTravel", canAuthoredTravel); put("travelHeading", if (canAuthoredTravel) rigPlayer?.travelHeading ?: 0 else 0)

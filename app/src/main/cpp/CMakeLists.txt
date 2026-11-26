@@ -46,16 +46,68 @@ file(READ "${QWEN_SRC}/pipeline-tts.cpp" pipeline)
 string(REPLACE "pt->talker.head_dim, 4096, pt->max_batch" "pt->talker.head_dim, 1024, pt->max_batch" pipeline "${pipeline}")
 string(REPLACE "pt->has_speaker_encoder = (pt->model_type == \"base\");" "pt->has_speaker_encoder = false;" pipeline "${pipeline}")
 file(WRITE "${QWEN_SRC}/pipeline-tts.cpp" "${pipeline}")
+# Prime exactly the same fixed-voice decoder snapshot that live synthesis restores.
+file(APPEND "${QWEN_SRC}/pipeline-tts.cpp" [=[
+bool cutedog_prime_codec(PipelineTTS *pt, const int32_t *codes, int frames) {
+    TtsEngine staging{};
+    staging.pt = pt;
+    TtsSlot voice{};
+    voice.ref_codes_ptr = codes;
+    voice.ref_codes_T = frames;
+    return tts_engine_codec_admit(&staging, &voice);
+}
+]=])
+file(READ "${qwentts_SOURCE_DIR}/src/qwen.cpp" facade)
+file(WRITE "${QWEN_SRC}/qwen.cpp" "${facade}\n" [=[
+bool cutedog_prime_codec(PipelineTTS *, const int32_t *, int);
+bool cutedog_prime_voice(qt_context *q, const int32_t *codes, int frames) {
+    return q && cutedog_prime_codec(&q->pt, codes, frames);
+}
+]=])
 # Android CPU cores and emulator vCPUs are already independently schedulable.
 file(READ "${QWEN_SRC}/backend.h" backend)
 string(REPLACE "std::thread::hardware_concurrency() / 2" "std::thread::hardware_concurrency()" backend "${backend}")
 string(REPLACE "return n > 0 ? n : 1;" "return n > 4 ? 4 : (n > 0 ? n : 1);" backend "${backend}")
 file(WRITE "${QWEN_SRC}/backend.h" "${backend}")
-add_library(cutedog_voice SHARED pet_voice.cpp cutedog_assets.cpp
+add_library(cutedog_cpu SHARED cpu_dispatch.cpp)
+target_link_options(cutedog_cpu PRIVATE "-Wl,-z,max-page-size=16384")
+add_library(cutedog_synthesis OBJECT pet_voice.cpp cutedog_assets.cpp a_codec_state.cpp
     "${sonic_SOURCE_DIR}/sonic.c"
     "${QWEN_SRC}/qwen.cpp"
     "${QWEN_SRC}/pipeline-tts.cpp"
     "${QWEN_SRC}/pipeline-codec.cpp")
-target_include_directories(cutedog_voice PRIVATE "${QWEN_SRC}" "${sonic_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}")
-target_link_libraries(cutedog_voice PRIVATE ggml ggml-cpu ggml-base log android)
-target_link_options(cutedog_voice PRIVATE "-Wl,--exclude-libs,ALL" "-Wl,-z,max-page-size=16384")
+target_include_directories(cutedog_synthesis PRIVATE "${QWEN_SRC}" "${sonic_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}" "${ggml_SOURCE_DIR}/include")
+
+# Only the CPU kernels vary. Each selected JNI library resolves ggml's static
+# registry to precisely one kernel archive, so older CPUs retain the base ABI.
+function(cutedog_engine name kernels)
+    add_library(${name} SHARED $<TARGET_OBJECTS:cutedog_synthesis>)
+    add_dependencies(${name} ggml)
+    target_link_libraries(${name} PRIVATE "$<TARGET_FILE:ggml>" ${kernels} ggml-base log android dl z)
+    target_link_options(${name} PRIVATE "-Wl,--exclude-libs,ALL" "-Wl,-z,max-page-size=16384")
+endfunction()
+cutedog_engine(cutedog_voice ggml-cpu)
+
+function(cutedog_fast_engine suffix)
+    get_target_property(kernel_root ggml-cpu SOURCE_DIR)
+    get_target_property(sources ggml-cpu SOURCES)
+    list(TRANSFORM sources PREPEND "${kernel_root}/")
+    set(kernels cutedog_kernels_${suffix})
+    add_library(${kernels} STATIC ${sources} "${kernel_root}/ggml-cpu/llamafile/sgemm.cpp")
+    target_include_directories(${kernels} PRIVATE $<TARGET_PROPERTY:ggml-cpu,INCLUDE_DIRECTORIES>)
+    target_compile_definitions(${kernels} PRIVATE $<TARGET_PROPERTY:ggml-cpu,COMPILE_DEFINITIONS> GGML_USE_LLAMAFILE)
+    target_link_libraries(${kernels} PRIVATE ggml-base)
+    if(ANDROID_ABI STREQUAL "x86_64")
+        target_compile_options(${kernels} PRIVATE -msse4.2 -mavx -mavx2 -mfma -mf16c -mbmi2)
+        target_compile_definitions(${kernels} PRIVATE GGML_SSE42 GGML_AVX GGML_AVX2 GGML_FMA GGML_F16C GGML_BMI2)
+    elseif(suffix STREQUAL "i8mm")
+        target_compile_options(${kernels} PRIVATE -march=armv8.2-a+fp16+dotprod+i8mm)
+    else()
+        target_compile_options(${kernels} PRIVATE -march=armv8.2-a+fp16+dotprod)
+    endif()
+    cutedog_engine(cutedog_voice_${suffix} ${kernels})
+endfunction()
+cutedog_fast_engine(fast)
+if(ANDROID_ABI STREQUAL "arm64-v8a")
+    cutedog_fast_engine(i8mm)
+endif()

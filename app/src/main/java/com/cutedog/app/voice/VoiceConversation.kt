@@ -34,7 +34,8 @@ internal class VoiceConversation(
             return false
         }
         return try {
-            capture = MicCapture.start(activity, scope)
+            capture = MicCapture.start(activity, scope, transcribe = true)
+            voice.value.prewarm()
             onStatus("在听啦…松手发送，滑出取消。最多说 30 秒。")
             true
         } catch (e: Exception) {
@@ -50,16 +51,20 @@ internal class VoiceConversation(
         val current = generation
         turn = scope.launch {
             try {
-                processAudio(recording.finish())
+                onStatus("正在整理刚才的话…")
+                processTranscript(recording.finishTranscript())
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (e: Exception) { onStatus(e.message?.take(180) ?: "语音对话暂时遇到了问题，请再试一次。") }
-            finally { if (generation == current) turn = null }
+            finally { recording.discard(); if (generation == current) turn = null }
         }
     }
 
     internal suspend fun processAudio(pcm: ByteArray) {
         onStatus("在本机听写刚才的话…")
-        val text = OfflineSpeechInput.transcribe(activity, pcm)
+        processTranscript(OfflineSpeechInput.transcribe(activity, pcm))
+    }
+
+    internal suspend fun processTranscript(text: String) {
         currentCoroutineContext().ensureActive()
         if (text.isBlank()) { onStatus("没听清呢，再按住麦克风说一次吧。"); return }
         if (onTranscript != null) onTranscript.invoke(text) else converse(text)
@@ -87,22 +92,27 @@ internal class VoiceConversation(
         val repository = ChatRepository(activity)
         val id = withContext(Dispatchers.IO) { repository.add("user", text, voice = true).id }
         coroutineScope {
+            voice.value.prewarm()
+            val preparation = VoiceReplyPreparation(this, voice.value::renderSamples)
             val captions = ReplyTyping(!ValueAnimator.areAnimatorsEnabled() ||
                 activity.getSystemService(AccessibilityManager::class.java).isTouchExplorationEnabled)
             val typing = launch { captions.display(onStatus) }
             try {
-                val reply = ChatClient(activity).replyAndSave(repository, id, captions::preview) ?: return@coroutineScope
+                val reply = ChatClient(activity).replyAndSave(repository, id) { textSoFar ->
+                    captions.preview(textSoFar)
+                    preparation.preview(textSoFar)
+                } ?: return@coroutineScope
                 ensureActive()
                 reply.intent?.let { PetEvents.modelAction(activity, it) }
                 captions.finish(reply.text)
                 val playbackProblem = try {
-                    voice.value.speak(reply.text)
+                    voice.value.speak(reply.text, preparation.confirmed(reply.text))
                     null
                 } catch (cancelled: CancellationException) { throw cancelled }
                 catch (failure: Exception) { failure.message ?: "暂时无法播放语音。" }
                 typing.join()
                 onStatus(if (playbackProblem == null) reply.text else "${reply.text}\n\n$playbackProblem")
-            } finally { typing.cancel() }
+            } finally { preparation.cancel(); typing.cancel() }
         }
     }
 
@@ -118,7 +128,7 @@ internal class VoiceConversation(
 
     fun cancel() {
         generation++
-        capture?.end()
+        capture?.discard()
         capture = null
         turn?.cancel()
         turn = null

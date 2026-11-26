@@ -10,6 +10,8 @@
 #include <string>
 #include <vector>
 
+bool cutedog_prime_voice(qt_context *, const int32_t *, int);
+
 namespace {
 // The upstream model runs callbacks on an internal compute thread, while JNI render() blocks.
 struct Sink {
@@ -17,6 +19,9 @@ struct Sink {
     jobject target;
     jmethodID stopped;
     jmethodID accept;
+    sonicStream tempo{};
+    bool voiced = false;
+    std::vector<short> quiet;
 };
 
 struct ScopedEnv {
@@ -39,22 +44,50 @@ bool cancelled(void *opaque) {
     return stopped;
 }
 
-bool samples(const float *input, int count, void *opaque) {
-    auto *sink = static_cast<Sink *>(opaque);
+bool send_pcm(Sink *sink) {
+    const int count = sonicSamplesAvailable(sink->tempo);
+    if (count <= 0) return true;
     ScopedEnv thread(sink->vm);
-    if (!thread.env || !input || count <= 0) return false;
+    if (!thread.env) return false;
     JNIEnv *env = thread.env;
     jshortArray data = env->NewShortArray(count);
     if (!data) { env->ExceptionClear(); return false; }
     auto *pcm = env->GetShortArrayElements(data, nullptr);
     if (!pcm) { env->ExceptionClear(); env->DeleteLocalRef(data); return false; }
-    for (int i = 0; i < count; ++i)
-        pcm[i] = static_cast<jshort>(std::lround(std::clamp(input[i], -1.0f, 1.0f) * 32767.f));
+    sonicReadShortFromStream(sink->tempo, pcm, count);
     env->ReleaseShortArrayElements(data, pcm, 0);
     const bool keep = env->CallBooleanMethod(sink->target, sink->accept, data);
     env->DeleteLocalRef(data);
     if (env->ExceptionCheck()) { env->ExceptionClear(); return false; }
     return keep;
+}
+
+// All chunks use one pitch-preserving tempo stream. Hold only silent 10ms windows
+// so a chunk boundary can never cut a syllable or restart an envelope.
+bool samples(const float *input, int count, void *opaque) {
+    auto *s = static_cast<Sink *>(opaque);
+    std::vector<short> out;
+    out.reserve(count + s->quiet.size());
+    for (int i = 0; i < count; i += 240) {
+        const int stop = std::min(i + 240, count);
+        double energy = 0;
+        for (int j = i; j < stop; ++j) energy += input[j] * input[j];
+        const float cutoff = s->voiced ? .0038f : .0010f;
+        const bool audible = energy > (stop - i) * cutoff * cutoff;
+        if (audible) {
+            out.insert(out.end(), s->quiet.begin(), s->quiet.end());
+            s->quiet.clear();
+            s->voiced = true;
+        }
+        if (!audible && s->quiet.size() >= (s->voiced ? 8640u : 960u)) continue;
+        auto &write = audible ? out : s->quiet;
+        for (int j = i; j < stop; ++j) {
+            const float x = 1.12f * input[j], a = std::abs(x);
+            const float peak = a > .94f ? std::copysign(.94f + .06f * (a - .94f) / (a - .88f), x) : x;
+            write.push_back(static_cast<short>(std::lround(peak * 32767.f)));
+        }
+    }
+    return (out.empty() || sonicWriteShortToStream(s->tempo, out.data(), out.size())) && send_pcm(s);
 }
 
 std::string utf8(JNIEnv *env, jbyteArray bytes) {
@@ -63,6 +96,20 @@ std::string utf8(JNIEnv *env, jbyteArray bytes) {
     env->GetByteArrayRegion(bytes, 0, length, reinterpret_cast<jbyte *>(text.data()));
     return text;
 }
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_cutedog_app_voice_QwenNative_prime(JNIEnv *env, jobject, jlong engine, jbyteArray reference) {
+    if (!engine || env->GetArrayLength(reference) != 1232) return false;
+    try {
+        std::vector<uint8_t> packed(1232);
+        env->GetByteArrayRegion(reference, 0, 1232, reinterpret_cast<jbyte *>(packed.data()));
+        int frames = 0;
+        std::vector<int32_t> codes;
+        auto *model = reinterpret_cast<qt_context *>(engine);
+        return !env->ExceptionCheck() && rvq_read_buf(packed.data(), packed.size(), qt_num_codebooks(model), 11, codes, &frames)
+            && cutedog_prime_voice(model, codes.data(), frames);
+    } catch (const std::exception &) { return false; }
 }
 
 extern "C" JNIEXPORT jlong JNICALL
@@ -86,7 +133,7 @@ Java_com_cutedog_app_voice_QwenNative_open(JNIEnv *env, jobject, jobject assets,
 extern "C" JNIEXPORT jint JNICALL
 Java_com_cutedog_app_voice_QwenNative_render(JNIEnv *env, jobject, jlong handle, jbyteArray text,
                                            jbyteArray reference, jbyteArray embedding, jbyteArray codecReference,
-                                           jint limit, jobject target) {
+                                           jint limit, jfloat speed, jobject target) {
     try {
         const auto line = utf8(env, text), transcript = utf8(env, reference);
         if (!handle || env->ExceptionCheck()) return QT_STATUS_INVALID_PARAMS;
@@ -112,6 +159,9 @@ Java_com_cutedog_app_voice_QwenNative_render(JNIEnv *env, jobject, jlong handle,
         if (env->ExceptionCheck()) return QT_STATUS_INVALID_PARAMS;
         sink.target = env->NewGlobalRef(target);
         if (!sink.target) return QT_STATUS_OOM;
+        sink.tempo = sonicCreateStream(24000, 1);
+        if (!sink.tempo) { env->DeleteGlobalRef(sink.target); return QT_STATUS_OOM; }
+        sonicSetSpeed(sink.tempo, speed);
         qt_tts_params p{};
         qt_tts_default_params(&p);
         p.text = line.c_str();
@@ -130,11 +180,16 @@ Java_com_cutedog_app_voice_QwenNative_render(JNIEnv *env, jobject, jlong handle,
         p.subtalker_temperature = .86f;
         p.cancel = cancelled;
         p.cancel_user_data = &sink;
-        // A continuous clause is played as soon as it is ready. Decoding the clause
-        // in one codec pass is considerably faster on mobile CPUs than per-frame decode.
+        p.on_chunk = samples;
+        p.on_chunk_user_data = &sink;
         qt_audio out{};
         auto code = qt_synthesize(model, &p, &out);
-        if (code == QT_STATUS_OK && !samples(out.samples, out.n_samples, &sink)) code = QT_STATUS_CANCELLED;
+        if (code == QT_STATUS_OK) {
+            const int tail = std::min<int>(sink.quiet.size(), 1920);
+            if (tail) sonicWriteShortToStream(sink.tempo, sink.quiet.data(), tail);
+            if (!sonicFlushStream(sink.tempo) || !send_pcm(&sink)) code = QT_STATUS_CANCELLED;
+        }
+        sonicDestroyStream(sink.tempo);
         qt_audio_free(&out);
         env->DeleteGlobalRef(sink.target);
         return code;
@@ -144,27 +199,4 @@ Java_com_cutedog_app_voice_QwenNative_render(JNIEnv *env, jobject, jlong handle,
 extern "C" JNIEXPORT void JNICALL
 Java_com_cutedog_app_voice_QwenNative_release(JNIEnv *, jobject, jlong handle) {
     if (handle) qt_free(reinterpret_cast<qt_context *>(handle));
-}
-
-extern "C" JNIEXPORT jshortArray JNICALL
-Java_com_cutedog_app_voice_QwenNative_tempo(JNIEnv *env, jobject, jshortArray input, jfloat speed) {
-    sonicStream s = sonicCreateStream(24000, 1);
-    if (!s) return nullptr;
-    sonicSetSpeed(s, speed);
-    const auto count = env->GetArrayLength(input);
-    jshort *pcm = env->GetShortArrayElements(input, nullptr);
-    if (!pcm) { sonicDestroyStream(s); return nullptr; }
-    const bool ok = sonicWriteShortToStream(s, pcm, count) && sonicFlushStream(s);
-    env->ReleaseShortArrayElements(input, pcm, JNI_ABORT);
-    const auto n = ok ? sonicSamplesAvailable(s) : 0;
-    auto out = n > 0 ? env->NewShortArray(n) : nullptr;
-    if (out) {
-        auto buffer = env->GetShortArrayElements(out, nullptr);
-        if (buffer) {
-            sonicReadShortFromStream(s, buffer, n);
-            env->ReleaseShortArrayElements(out, buffer, 0);
-        }
-    }
-    sonicDestroyStream(s);
-    return out;
 }

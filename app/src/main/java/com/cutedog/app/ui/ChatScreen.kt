@@ -26,6 +26,7 @@ import androidx.compose.ui.window.DialogProperties
 import com.cutedog.app.chat.*
 import com.cutedog.app.pet.PetSettings
 import com.cutedog.app.voice.PetSpeech
+import com.cutedog.app.voice.VoiceReplyPreparation
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -67,14 +68,21 @@ internal fun ChatScreen(onClose: (() -> Unit)? = null, voiceDraft: String? = nul
     val consent = remember { context.getSharedPreferences("ai_ui_consent", 0) }
     val name = remember { PetSettings(context).name }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
-    fun stopPlayback() { playback?.cancel(); playback = null; speaker.stop() }
-    fun readAnswer(answer: String) {
-        stopPlayback()
+    var preparingVoice by remember { mutableStateOf<VoiceReplyPreparation?>(null) }
+    fun stopPlayback() {
+        preparingVoice?.cancel(); preparingVoice = null
+        playback?.cancel(); playback = null; speaker.stop()
+    }
+    fun readAnswer(answer: String, draft: VoiceReplyPreparation) {
         playback = scope.launch {
-            try { voiceStatus = "小狗在说话…"; speaker.speak(answer); voiceStatus = "" }
+            try { speaker.speak(answer, draft.confirmed(answer)); voiceStatus = "" }
             catch (e: CancellationException) { throw e }
             catch (e: Exception) { voiceStatus = e.message ?: "暂时无法播放语音。" }
-            finally { if (playback == coroutineContext[Job]) playback = null }
+            finally {
+                draft.cancel()
+                if (preparingVoice === draft) preparingVoice = null
+                if (playback == coroutineContext[Job]) playback = null
+            }
         }
     }
     DisposableEffect(lifecycle, speaker) {
@@ -104,6 +112,9 @@ internal fun ChatScreen(onClose: (() -> Unit)? = null, voiceDraft: String? = nul
         val text = input.trim()
         val aloud = if (retry) messages.firstOrNull { it.id == failedUserId }?.voice == true else voiceTurn
         voiceTurn = false; stopPlayback(); voiceStatus = ""
+        val draft = if (aloud) VoiceReplyPreparation(scope, speaker::renderSamples).also {
+            speaker.prewarm(); preparingVoice = it
+        } else null
         input = ""; busy = true; error = null
         requestGeneration++
         val generation = requestGeneration
@@ -112,24 +123,37 @@ internal fun ChatScreen(onClose: (() -> Unit)? = null, voiceDraft: String? = nul
         speaking = speech
         requestJob = scope.launch {
             val typing = launch { speech.display() }
+            var passedToPlayer = false
             try {
                 val target = if (!retry) withContext(Dispatchers.IO) { repository.add("user", text, aloud) }.id else failedUserId
                 require(target > 0) { "没有可以重试的消息，请重新发送。" }
                 failedUserId = target
                 messages = withContext(Dispatchers.IO) { repository.messages() }
-                val reply = client.replyAndSave(repository, target, speech::preview) ?: return@launch
+                val reply = client.replyAndSave(repository, target) { textSoFar ->
+                    speech.preview(textSoFar)
+                    draft?.preview(textSoFar)
+                } ?: return@launch
                 currentCoroutineContext().ensureActive()
                 if (generation != requestGeneration) return@launch
                 reply.intent?.let { com.cutedog.app.pet.PetEvents.modelAction(context, it) }
                 failedUserId = 0L
                 truncated = reply.contextTruncated
                 speech.finish(reply.text)
-                if (aloud && lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) readAnswer(reply.text)
+                if (draft != null && preparingVoice === draft && lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
+                    passedToPlayer = true
+                    readAnswer(reply.text, draft)
+                }
                 typing.join()
                 messages = withContext(Dispatchers.IO) { repository.messages() }
             } catch (cancelled: CancellationException) { error = "这次请求已取消。你可以稍后重试。"; throw cancelled }
             catch (e: Exception) { error = e.message ?: "暂时没有连接上，请稍后重试。" }
-            finally { typing.cancel(); speaking = null; busy = false; requestJob = null }
+            finally {
+                if (!passedToPlayer) {
+                    draft?.cancel()
+                    if (preparingVoice === draft) preparingVoice = null
+                }
+                typing.cancel(); speaking = null; busy = false; requestJob = null
+            }
         }
     }
     Column(Modifier.fillMaxSize().imePadding().testTag("chat_screen")) {

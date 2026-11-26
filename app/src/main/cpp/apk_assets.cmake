@@ -33,3 +33,12 @@ file(WRITE "${QWEN_SRC}/gguf-weights.h" "#include \"cutedog_assets.h\"\n${weight
 file(READ "${qwentts_SOURCE_DIR}/src/bpe.h" tokenizer)
 replace_loader_text(tokenizer "gguf_init_from_file(gguf_path, gp)" "cutedog_read_metadata(gguf_path, gp)")
 file(WRITE "${QWEN_SRC}/bpe.h" "#include \"cutedog_assets.h\"\n${tokenizer}")
+
+file(READ "${qwentts_SOURCE_DIR}/src/pipeline-codec.cpp" codec)
+replace_loader_text(codec "bool pipeline_codec_stream_restore(" "static bool restore_cached_codec_state(")
+file(WRITE "${QWEN_SRC}/pipeline-codec.cpp" "${codec}\n" [=[
+#include "a_codec_state.h"
+bool pipeline_codec_stream_restore(PipelineCodec *pc, uint64_t key, int set) {
+    return restore_cached_codec_state(pc, key, set) || cutedog_restore_a_state(pc, key, set);
+}
+]=])

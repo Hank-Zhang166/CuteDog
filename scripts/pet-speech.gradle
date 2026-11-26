@@ -12,6 +12,7 @@ def prepareVoice = tasks.register('prepareEmbeddedVoice', Exec) {
 tasks.named('preBuild') { dependsOn(prepareVoice) }
 android {
     androidResources.noCompress += 'gguf'
+    androidResources.noCompress += 'cda'
     sourceSets.getByName('main').assets.srcDir(embeddedVoice)
     sourceSets.getByName('main').assets.srcDir('src/main/voice-assets')
     ndkVersion '28.2.13676358'
@@ -26,7 +27,6 @@ android {
             cmake {
                 abiFilters 'arm64-v8a', 'x86_64'
                 arguments '-DANDROID_STL=c++_static'
-                targets 'cutedog_voice'
             }
         }
     }
