@@ -111,6 +111,10 @@ class PetView(context: Context) : View(context) {
     private var pressedPart: PetPart? = null
     private var pendingPart: PetPart? = null
     private var lastTouchPart: PetPart? = null
+    private var downCount = 0
+    private var previousDownPart: PetPart? = null
+    private var lastDownPart: PetPart? = null
+    private var lastDownUsedEdge = false
     private var lastTap = 0L
     private var lastTapX = 0f
     private var lastTapY = 0f
@@ -377,7 +381,11 @@ class PetView(context: Context) : View(context) {
                 val tapDistance = hypot(event.rawX - lastTapX, event.rawY - lastTapY)
                 // A moving paw or tail can leave the original fingertip between the two taps.
                 val hit = partAt(event.x, event.y)
-                pressedPart = hit ?: pendingPart?.takeIf { nearPreviousTap && tapDistance <= slop } ?: return false
+                downCount++
+                previousDownPart = lastDownPart
+                lastDownPart = hit
+                lastDownUsedEdge = hit == null && pendingPart != null && nearPreviousTap && tapDistance <= slop
+                pressedPart = hit ?: pendingPart?.takeIf { lastDownUsedEdge } ?: return false
                 touchActive = true; following = false; authoredTravel.clear()
                 downX = event.rawX; downY = event.rawY; lastX = downX; lastY = downY
                 downAt = event.eventTime; dragged = false; stroked = false
@@ -472,10 +480,16 @@ class PetView(context: Context) : View(context) {
             put("actualFrameChanges", if (hasRigAssets) actualFrameChanges else org.json.JSONObject.NULL)
             put("clipId", rigFrame?.clipId ?: org.json.JSONObject.NULL)
             put("lastTouchPart", lastTouchPart?.name ?: org.json.JSONObject.NULL)
+            put("touchDownCount", downCount)
+            put("previousDownPart", previousDownPart?.name ?: org.json.JSONObject.NULL)
+            put("lastDownPart", lastDownPart?.name ?: org.json.JSONObject.NULL)
+            put("lastDownUsedEdge", lastDownUsedEdge)
             put("displayedFrameIndex", drawnFrame?.frameIndex ?: -1)
             put("displayedClip", drawnFrame?.clipId ?: org.json.JSONObject.NULL)
             put("canvasScreenLeft", (origin[0] + dest.left).toDouble())
             put("canvasScreenTop", (origin[1] + dest.top).toDouble())
+            put("canvasLocalLeft", dest.left.toDouble())
+            put("canvasLocalTop", dest.top.toDouble())
             put("canvasSide", dest.width().toDouble())
             put("spatialDepth", spatialDepth.toDouble())
             put("canonicalClipId", rigPlayer?.canonicalClipId ?: org.json.JSONObject.NULL)

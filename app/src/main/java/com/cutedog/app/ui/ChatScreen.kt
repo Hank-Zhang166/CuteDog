@@ -112,7 +112,7 @@ internal fun ChatScreen(onClose: (() -> Unit)? = null, voiceDraft: String? = nul
         val text = input.trim()
         val aloud = if (retry) messages.firstOrNull { it.id == failedUserId }?.voice == true else voiceTurn
         voiceTurn = false; stopPlayback(); voiceStatus = ""
-        val draft = if (aloud) VoiceReplyPreparation(scope, speaker::renderSamples).also {
+        val draft = if (aloud) VoiceReplyPreparation(scope, speaker::streamSamples).also {
             speaker.prewarm(); preparingVoice = it
         } else null
         input = ""; busy = true; error = null

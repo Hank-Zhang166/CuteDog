@@ -4,7 +4,7 @@ CuteDog 是一只 Android 桌面萨摩耶。可以轻抚、喂零食、投球、
 
 [下载 Android APK](https://github.com/Hank-Zhang166/CuteDog/releases/download/v0.2.1-preview.4/CuteDog-0.2.1-preview.4.apk) · [观看 56 项动作与左右追球 MP4](https://github.com/Hank-Zhang166/CuteDog/releases/download/v0.2.1-preview.4/CuteDog-actions.mp4) · [可编辑的 Live2D 工程](https://github.com/Hank-Zhang166/CuteDog/releases/download/v0.2.1-preview.4/CuteDog-Live2D-project.zip)
 
-一个 APK 包含桌宠动作、普通话听写和固定 A 声线。安装后即可在支持的设备上合成新句子。
+安装包共 1,048.68 MB（1,000.10 MiB），包含桌宠动作、普通话听写和固定 A 声线。安装后即可在支持的设备上合成新句子。
 
 ![萨摩耶站姿](art/live2d/poses/Stand.png)
 

@@ -11,6 +11,7 @@
 #include <vector>
 
 bool cutedog_prime_voice(qt_context *, const int32_t *, int);
+void cutedog_bind_cpu_pool(qt_context *);
 
 namespace {
 // The upstream model runs callbacks on an internal compute thread, while JNI render() blocks.
@@ -35,21 +36,28 @@ struct ScopedEnv {
     ~ScopedEnv() { if (attached) vm->DetachCurrentThread(); }
 };
 
+JNIEnv *model_env(JavaVM *vm) {
+    // qwentts owns one long-lived compute worker. Repeatedly attaching that
+    // thread to ART for cancellation and detaching it at every frame disrupts
+    // generation. Its thread-local destructor detaches when qt_free joins it.
+    thread_local ScopedEnv attached(vm);
+    return attached.env;
+}
+
 bool cancelled(void *opaque) {
     const auto *sink = static_cast<Sink *>(opaque);
-    ScopedEnv thread(sink->vm);
-    if (!thread.env) return true;
-    bool stopped = thread.env->CallBooleanMethod(sink->target, sink->stopped);
-    if (thread.env->ExceptionCheck()) { thread.env->ExceptionClear(); return true; }
+    auto *env = model_env(sink->vm);
+    if (!env) return true;
+    bool stopped = env->CallBooleanMethod(sink->target, sink->stopped);
+    if (env->ExceptionCheck()) { env->ExceptionClear(); return true; }
     return stopped;
 }
 
 bool send_pcm(Sink *sink) {
     const int count = sonicSamplesAvailable(sink->tempo);
     if (count <= 0) return true;
-    ScopedEnv thread(sink->vm);
-    if (!thread.env) return false;
-    JNIEnv *env = thread.env;
+    JNIEnv *env = model_env(sink->vm);
+    if (!env) return false;
     jshortArray data = env->NewShortArray(count);
     if (!data) { env->ExceptionClear(); return false; }
     auto *pcm = env->GetShortArrayElements(data, nullptr);
@@ -126,7 +134,9 @@ Java_com_cutedog_app_voice_QwenNative_open(JNIEnv *env, jobject, jobject assets,
         p.codec_path = c.c_str();
         p.device = "CPU";
         p.codec_chunk_sec = 8.0f;
-        return reinterpret_cast<jlong>(qt_init(&p));
+        auto *context = qt_init(&p);
+        cutedog_bind_cpu_pool(context);
+        return reinterpret_cast<jlong>(context);
     } catch (const std::exception &) { return 0; }
 }
 

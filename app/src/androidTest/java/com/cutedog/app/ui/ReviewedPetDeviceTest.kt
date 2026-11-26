@@ -12,6 +12,7 @@ import android.graphics.Rect
 import android.os.ParcelFileDescriptor
 import android.view.InputDevice
 import android.view.MotionEvent
+import android.view.ViewConfiguration
 import android.view.accessibility.AccessibilityNodeInfo
 import com.cutedog.app.pet.OverlayService
 import com.cutedog.app.pet.PetMenuActivity
@@ -111,8 +112,13 @@ class ReviewedPetDeviceTest {
         var id = 0L
         var lastPress = ""
         fun capture(name: String) {
-            if (InstrumentationRegistry.getArguments().getString("cuteDogDisposable") != "true") return
-            val directory = java.io.File(context.getExternalFilesDir(null), "overlay-gesture-evidence").apply { mkdirs() }
+            val args = InstrumentationRegistry.getArguments()
+            if (args.getString("cuteDogDisposable") != "true") return
+            val phase = args.getString("cuteDogEvidencePhase")
+            val folder = if (name.startsWith("failure-") && phase in setOf("granted","denied")) {
+                "ui-test-evidence/$phase/overlay"
+            } else "overlay-gesture-evidence"
+            val directory = java.io.File(context.getExternalFilesDir(null), folder).apply { mkdirs() }
             val bitmap = automation.takeScreenshot() ?: return
             try {
                 java.io.File(directory, "$name.png").outputStream().use { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
@@ -169,10 +175,26 @@ class ReviewedPetDeviceTest {
             System.currentTimeMillis() - growthPrefs.getLong("last_interaction", 0) >= 2050
         }
         val touchRegions by lazy { PetTouchRegions(context.resources.openRawResource(R.raw.pet_touch_regions)) }
+        fun inputWindowFrame(): Rect? {
+            // InputDispatcher exposes the surface origin in the coordinate system
+            // UiAutomation injects into, including status bar offsets on older ROMs.
+            val dump = shell("dumpsys input")
+            val overlay = Regex("""\btype=(?:0x0*7f6|2038|APPLICATION_OVERLAY)\b""", RegexOption.IGNORE_CASE)
+            val frame = Regex("""\bframe=\[(-?\d+),\s*(-?\d+)\]\[(-?\d+),\s*(-?\d+)\]""")
+            for (line in dump.lineSequence()) {
+                if (!line.contains(pkg) || !overlay.containsMatchIn(line) || line.contains("visible=false") ||
+                    line.contains("NOT_TOUCHABLE") || line.contains("NOT_VISIBLE") || line.contains("touchableRegion=<empty>")) continue
+                val (l,t,r,b) = frame.find(line)?.destructured ?: continue
+                val rect = Rect(l.toInt(),t.toInt(),r.toInt(),b.toInt())
+                if (!rect.isEmpty) return rect
+            }
+            return null
+        }
         fun screenPoint(current: org.json.JSONObject, u: Float, v: Float): Pair<Float,Float> {
             val side = current.getDouble("canvasSide").toFloat()
-            return (current.getDouble("canvasScreenLeft").toFloat() + u * side) to
-                (current.getDouble("canvasScreenTop").toFloat() + v * side)
+            val frame = inputWindowFrame() ?: bounds()
+            return (frame.left + current.getDouble("canvasLocalLeft").toFloat() + u * side) to
+                (frame.top + current.getDouble("canvasLocalTop").toFloat() + v * side)
         }
         // The centre of the overlay window can be clear sky when the dog lies down. For
         // menu/drag smoke tests press interior coat. The region-specific test uses hand-picked
@@ -221,19 +243,20 @@ class ReviewedPetDeviceTest {
                 visible
             }
         }
-        fun touchDog(twice: Boolean) {
+        fun awaitDogInput() {
             var usableSince = 0L
+            var previousFrame: Rect? = null
             await("Dog window did not receive touch ownership after the menu closed", 9000) {
-                val input = shell("dumpsys input")
-                val petInput = input.lineSequence().filter { it.contains(" $pkg,") && it.contains("frame=[") }
-                    .firstOrNull()
-                val ready = if (petInput != null) {
-                    !petInput.contains("NOT_TOUCHABLE") && !petInput.contains("NOT_VISIBLE")
-                } else dog() != null
+                val frame = inputWindowFrame()
                 val now = SystemClock.uptimeMillis()
-                if (!ready) usableSince = 0 else if (usableSince == 0L) usableSince = now
+                if (frame == null) usableSince = 0L
+                else if (frame != previousFrame || usableSince == 0L) usableSince = now
+                previousFrame = frame
                 usableSince != 0L && now - usableSince >= 700
             }
+        }
+        fun touchDog(twice: Boolean) {
+            awaitDogInput()
             // Dispatch each physical event to Android. UiAutomation's shell command API
             // does not provide an interactive shell for a compound "tap; sleep; tap".
             val (x,y) = bodyPoint(preferCenter = twice)
@@ -305,21 +328,32 @@ class ReviewedPetDeviceTest {
                 }
                 await("Floating dog did not attach to WindowManager", 20_000) { dog() != null }
                 if (scene == InteractionScene.DOUBLE_TAP_EDGE) {
+                    awaitDogInput()
                     await("Standing artwork has not been drawn", 20_000) {
-                        snapshot()?.let { it.optString("clipId") == "stand" && it.optInt("displayedFrameIndex", -1) >= 0 } == true
+                        snapshot()?.let { it.optString("displayedClip") == "stand" && it.optDouble("canvasSide") > 0 && !it.optBoolean("loading") } == true
                     }
                     val current = requireNotNull(snapshot())
                     val initial = growth.snapshot().interactions
-                    // Throughout the standing loop, (115,145) is painted cheek. (100,145)
-                    // is transparent, a few screen pixels from the first point after scaling.
-                    for (sourceX in listOf(115,100)) {
-                        val (x,y) = screenPoint(current,sourceX/512f,145/512f)
+                    // Both coordinates remain on the same side of the painted outline in all 96 frames.
+                    val cheek = screenPoint(current,110/512f,145/512f)
+                    val outside = screenPoint(current,100/512f,145/512f)
+                    assertTrue("The second press must be within the real device touch slop",
+                        kotlin.math.hypot(cheek.first-outside.first,cheek.second-outside.second) <= ViewConfiguration.get(context).scaledTouchSlop)
+                    for ((index,point) in listOf(cheek,outside).withIndex()) {
+                        val (x,y) = point
                         val down = SystemClock.uptimeMillis()
                         sendTouch(MotionEvent.ACTION_DOWN,down,x,y,false)
                         SystemClock.sleep(28)
                         sendTouch(MotionEvent.ACTION_UP,down,x,y,false)
-                        if (sourceX == 115) SystemClock.sleep(68)
+                        if (index == 0) SystemClock.sleep(68)
                     }
+                    await("Both system presses must reach the floating window; cheek=$cheek, outside=$outside",2500) {
+                        (snapshot()?.optInt("touchDownCount") ?: 0) == current.getInt("touchDownCount") + 2
+                    }
+                    val presses = requireNotNull(snapshot())
+                    assertEquals("First press must land on the drawn cheek", "HEAD", presses.optString("previousDownPart"))
+                    assertTrue("Second press must land outside the drawn fur", presses.isNull("lastDownPart"))
+                    assertTrue("The second press must use the edge tolerance", presses.getBoolean("lastDownUsedEdge"))
                     choose("取消")
                     assertEquals("Opening a menu must not also pet the dog",initial,growth.snapshot().interactions)
                     return@use

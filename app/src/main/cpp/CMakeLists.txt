@@ -21,6 +21,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 # APK previews use the debug Android variant. Neural kernels still need normal optimisation.
 add_compile_options(-O3)
+add_compile_definitions(NDEBUG)
 set(BUILD_SHARED_LIBS OFF)
 set(GGML_NATIVE OFF CACHE BOOL "")
 set(GGML_OPENMP OFF CACHE BOOL "")
@@ -58,7 +59,19 @@ bool cutedog_prime_codec(PipelineTTS *pt, const int32_t *codes, int frames) {
 }
 ]=])
 file(READ "${qwentts_SOURCE_DIR}/src/qwen.cpp" facade)
-file(WRITE "${QWEN_SRC}/qwen.cpp" "${facade}\n" [=[
+string(REPLACE "struct qt_context {" [=[struct qt_context {
+    ggml_threadpool_t mobile_cpu_pool = nullptr;
+    ~qt_context() { if (mobile_cpu_pool) ggml_threadpool_free(mobile_cpu_pool); }
+]=] facade "${facade}")
+file(WRITE "${QWEN_SRC}/qwen.cpp" "#include \"ggml-cpu.h\"\n${facade}\n" [=[
+void cutedog_bind_cpu_pool(qt_context *q) {
+    if (!q || !q->bp.cpu_backend) return;
+    auto config = ggml_threadpool_params_default(backend_cpu_n_threads());
+    config.poll = 20;
+    q->mobile_cpu_pool = ggml_threadpool_new(&config);
+    if (q->mobile_cpu_pool)
+        ggml_backend_cpu_set_threadpool(q->bp.cpu_backend, q->mobile_cpu_pool);
+}
 bool cutedog_prime_codec(PipelineTTS *, const int32_t *, int);
 bool cutedog_prime_voice(qt_context *q, const int32_t *codes, int frames) {
     return q && cutedog_prime_codec(&q->pt, codes, frames);

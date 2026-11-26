@@ -29,7 +29,8 @@ class PetSpeech(context: Context, private val onStatus: (String) -> Unit = {}) :
     }
     private val lock = Any()
     @Volatile private var closed = false
-    private var active: Job? = null
+    private val owners = mutableSetOf<Job>()
+    private var playback: Job? = null
 
     private fun status(text: String) { main.post { if (!closed) onStatus(text) } }
 
@@ -52,18 +53,25 @@ class PetSpeech(context: Context, private val onStatus: (String) -> Unit = {}) :
         }
     }
 
-    internal suspend fun renderSamples(text: String): ShortArray = runUtterance { model, job ->
+    internal suspend fun renderSamples(text: String): ShortArray {
         val rendered = ArrayList<ShortArray>()
-        for (line in parts(text)) synthesize(model, job, line) { rendered.add(it) }
-        flatten(rendered)
+        streamSamples(text) { rendered.add(it) }
+        return flatten(rendered)
     }
 
-    private data class Wave(val pcm: ShortArray, val readyMs: Long, val estimate: Double)
-    suspend fun speak(text: String, preparedPrefix: Pair<String, ShortArray>? = null): Unit = runUtterance { model, job ->
+    internal suspend fun streamSamples(text: String, output: (ShortArray) -> Unit) = owned(false) { job ->
+        withEngine(job) { model ->
+            for (phrase in parts(text)) synthesize(model, job, phrase) { pcm -> output(pcm); true }
+        }
+    }
+
+    private data class Wave(val pcm: ShortArray, val readyMs: Long, val estimatedSeconds: Double)
+    internal suspend fun speak(text: String, preparedPrefix: PreparedVoicePrefix? = null): Unit = owned(true) { job ->
         val line = text.trim()
-        if (line.isEmpty()) return@runUtterance
-        val prefix = preparedPrefix?.takeIf { it.first.isNotBlank() && it.second.isNotEmpty() && line.startsWith(it.first) }
-        val phrases = parts(line.substring(prefix?.first?.length ?: 0))
+        if (line.isEmpty()) return@owned
+        val prefix = preparedPrefix?.takeIf { it.text.isNotBlank() && line.startsWith(it.text) }
+        val letters = line.count { it.isLetterOrDigit() }
+        status("小狗在准备声音…")
         val minimum = AudioTrack.getMinBufferSize(RATE, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
         check(minimum > 0) { "未找到可用的声音输出设备" }
         val player = AudioTrack.Builder().setAudioAttributes(AudioAttributes.Builder()
@@ -77,67 +85,111 @@ class PetSpeech(context: Context, private val onStatus: (String) -> Unit = {}) :
                 val queue = Channel<Wave>(Channel.UNLIMITED)
                 launch(Dispatchers.Default) {
                     try {
-                        if (prefix != null) queue.send(Wave(prefix.second, SystemClock.elapsedRealtime(), 0.0))
-                        for (phrase in phrases) {
-                            val estimate = maxOf(.5, phrase.codePointCount(0, phrase.length) / 4.5)
-                            synthesize(model, job, phrase) { pcm ->
-                                queue.trySend(Wave(pcm, SystemClock.elapsedRealtime(), estimate)).isSuccess
+                        var tail = line
+                        var predicted = maxOf(.5, letters / 4.9)
+                        var spokenLetters = 0
+                        var spokenSamples = 0
+                        fun completed(phrase: String, samples: Int) {
+                            spokenLetters += phrase.count { it.isLetterOrDigit() }
+                            spokenSamples += samples
+                            if (spokenLetters < 4 || spokenSamples == 0) return
+                            val seconds = spokenSamples.toDouble() / RATE
+                            val pace = (spokenLetters / seconds).coerceIn(3.6, 6.2)
+                            predicted = seconds + maxOf(0, letters - spokenLetters) / pace
+                        }
+                        if (prefix != null) {
+                            var prefixSamples = 0
+                            try {
+                                for (pcm in prefix.audio) {
+                                    prefixSamples += pcm.size
+                                    queue.send(Wave(pcm, SystemClock.elapsedRealtime(), predicted))
+                                }
+                                if (prefixSamples > 0) {
+                                    completed(prefix.text, prefixSamples)
+                                    tail = line.substring(prefix.text.length).trim()
+                                }
+                            } catch (failed: Exception) {
+                                job.ensureActive()
+                                if (prefixSamples > 0) throw failed
                             }
-                            queue.send(Wave(ShortArray(0), SystemClock.elapsedRealtime(), 0.0))
+                        }
+                        if (tail.isNotEmpty()) withEngine(job) { model ->
+                            for (phrase in parts(tail)) {
+                                var samples = 0
+                                synthesize(model, job, phrase) { pcm ->
+                                    samples += pcm.size
+                                    queue.trySend(Wave(pcm, SystemClock.elapsedRealtime(), predicted)).isSuccess
+                                }
+                                completed(phrase, samples)
+                            }
                         }
                     } finally { queue.close() }
                 }
                 var written = 0L
                 var firstVoicedWritten = false
+                var playing = false
+                var underrunsAtLastWrite = 0
+                fun startIfReady(force: Boolean = false) {
+                    if (playing || written == 0L || (!force && written < minOf(2400, player.bufferSizeInFrames / 2))) return
+                    player.play()
+                    playing = true
+                    status("小狗在说话…")
+                }
                 suspend fun write(pcm: ShortArray) {
                     var offset = 0
                     while (offset < pcm.size) {
                         job.ensureActive()
                         val n = player.write(pcm, offset, pcm.size - offset, AudioTrack.WRITE_NON_BLOCKING)
                         check(n >= 0) { "小狗的声音输出中断" }
-                        if (n == 0) { delay(4); continue }
-                        if (written == 0L) { player.play(); status("小狗在说话…") }
+                        if (n == 0) {
+                            startIfReady(force = true)
+                            delay(4)
+                            continue
+                        }
                         if (!firstVoicedWritten && (offset until offset + n).any { abs(pcm[it].toInt()) > 140 }) {
                             firstVoicedWritten = true
                             Log.i("CuteDogVoiceTiming", "first_voiced_write elapsedMs=" + SystemClock.elapsedRealtime())
                         }
                         offset += n
                         written += n
+                        startIfReady()
+                        underrunsAtLastWrite = player.underrunCount
                     }
                 }
+                // Hold one continuous reservoir across the in-flight prefix and its suffix.
+                // Once playback starts, all later chunks flow directly to the same AudioTrack.
                 val waiting = ArrayList<ShortArray>()
                 var held = 0
                 var firstChunkMs = 0L
                 var firstChunkSize = 0
-                var startedPhrase = false
+                var released = false
                 for (chunk in queue) {
                     job.ensureActive()
-                    if (chunk.pcm.isEmpty()) {
-                        for (pcm in waiting) write(pcm)
-                        waiting.clear(); held = 0; startedPhrase = false
-                        continue
+                    if (Log.isLoggable(CHUNK_LOG_TAG, Log.DEBUG)) {
+                        Log.d(CHUNK_LOG_TAG, "samples=" + chunk.pcm.size + " readyMs=" + chunk.readyMs)
                     }
-                    if (startedPhrase || chunk.estimate == 0.0) { write(chunk.pcm); continue }
+                    if (released) { write(chunk.pcm); continue }
                     if (waiting.isEmpty()) { firstChunkMs = chunk.readyMs; firstChunkSize = chunk.pcm.size }
                     waiting.add(chunk.pcm)
                     held += chunk.pcm.size
                     if (held <= firstChunkSize) continue
                     val producedSeconds = (held - firstChunkSize).toDouble() / RATE
-                    val realtimeFactor = (chunk.readyMs - firstChunkMs) / (1000.0 * producedSeconds)
-                    // Keep enough audio in hand for the next codec block and the measured
-                    // production deficit. Very slow CPUs safely wait for a complete clause.
-                    val reserve = .88 + chunk.estimate * maxOf(0.0, 1.0 - 1.0 / maxOf(.1, realtimeFactor * 1.15))
-                    if (realtimeFactor <= 1.65 && held.toDouble() / RATE >= reserve) {
-                        startedPhrase = true
+                    val factor = (chunk.readyMs - firstChunkMs) / (1000.0 * producedSeconds)
+                    val reserve = maxOf(.48, .15 + chunk.estimatedSeconds *
+                        maxOf(0.0, 1.0 - 1.0 / maxOf(.1, factor * 1.04)))
+                    if (held.toDouble() / RATE >= reserve) {
+                        released = true
                         for (pcm in waiting) write(pcm)
-                        waiting.clear(); held = 0
+                        waiting.clear()
                     }
                 }
+                for (pcm in waiting) write(pcm)
+                startIfReady(force = true)
                 withTimeout(6000) {
                     while ((player.playbackHeadPosition.toLong() and 0xffffffffL) < written) delay(8)
                 }
                 Log.i("CuteDogVoiceTiming", "playback_drained elapsedMs=" + SystemClock.elapsedRealtime() +
-                    " underruns=" + player.underrunCount)
+                    " underruns=" + player.underrunCount + " beforeLastWrite=" + underrunsAtLastWrite)
                 Unit
             }
         } finally {
@@ -156,29 +208,34 @@ class PetSpeech(context: Context, private val onStatus: (String) -> Unit = {}) :
         app.noBackupFilesDir.resolve("kokoro-05d793700b0b.onnx").delete()
     }
 
-    private suspend fun <T> runUtterance(block: suspend (Long, Job) -> T): T = coroutineScope {
+    private suspend fun <T> owned(isPlayback: Boolean, block: suspend (Job) -> T): T = coroutineScope {
         val job = currentCoroutineContext().job
-        synchronized(lock) { check(!closed); active?.cancel(); active = job }
-        // Independent worker keeps the native handle alive through an uninterruptible
-        // matrix multiply. Cancelling this screen still immediately cancels await().
+        synchronized(lock) {
+            check(!closed)
+            if (isPlayback) { playback?.cancel(); playback = job }
+            owners.add(job)
+        }
+        try { withContext(Dispatchers.IO) { block(job) } }
+        finally {
+            synchronized(lock) { owners.remove(job); if (playback === job) playback = null }
+        }
+    }
+
+    private suspend fun <T> withEngine(job: Job, block: (Long) -> T): T {
+        // Waiting for a native matrix multiplication must never delay stopping playback.
         val work = housekeeper.async {
             engineGate.withLock {
                 releaseJob?.cancel()
                 try {
                     job.ensureActive()
-                    ensureEngine(quiet = false)
+                    ensureEngine(quiet = true)
                     job.ensureActive()
-                    status("小狗在准备声音…")
-                    block(engine, job)
+                    block(engine)
                 } finally { scheduleIdleRelease() }
             }
         }
-        try {
-            work.await()
-        } finally {
-            work.cancel()
-            synchronized(lock) { if (active === job) active = null }
-        }
+        try { return work.await() }
+        finally { work.cancel() }
     }
 
     private fun synthesize(model: Long, job: Job, line: String, consume: (ShortArray) -> Boolean) {
@@ -201,11 +258,15 @@ class PetSpeech(context: Context, private val onStatus: (String) -> Unit = {}) :
         primed = true
     }
 
-    fun stop() { synchronized(lock) { active?.cancel() } }
-    override fun close() { synchronized(lock) { closed = true; active?.cancel() } }
+    fun stop() { synchronized(lock) { owners.toList() }.forEach { it.cancel() } }
+    override fun close() {
+        synchronized(lock) { closed = true }
+        stop()
+    }
 
     companion object {
         private const val RATE = 24_000
+        private const val CHUNK_LOG_TAG = "CuteDogVoiceChunks"
         private val engineGate = Mutex()
         private val housekeeper = CoroutineScope(Dispatchers.IO + SupervisorJob())
         private var engine = 0L

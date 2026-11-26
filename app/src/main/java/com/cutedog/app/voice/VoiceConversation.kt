@@ -93,7 +93,7 @@ internal class VoiceConversation(
         val id = withContext(Dispatchers.IO) { repository.add("user", text, voice = true).id }
         coroutineScope {
             voice.value.prewarm()
-            val preparation = VoiceReplyPreparation(this, voice.value::renderSamples)
+            val preparation = VoiceReplyPreparation(this, voice.value::streamSamples)
             val captions = ReplyTyping(!ValueAnimator.areAnimatorsEnabled() ||
                 activity.getSystemService(AccessibilityManager::class.java).isTouchExplorationEnabled)
             val typing = launch { captions.display(onStatus) }

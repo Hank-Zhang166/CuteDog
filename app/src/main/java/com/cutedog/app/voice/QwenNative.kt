@@ -13,6 +13,8 @@ internal object QwenNative {
             else -> "cutedog_voice"
         }
         System.loadLibrary(library)
+        android.util.Log.i("CuteDogVoiceTiming", "engine=" + library +
+            " cpus=" + Runtime.getRuntime().availableProcessors())
     }
     private external fun cpuLevel(): Int
 

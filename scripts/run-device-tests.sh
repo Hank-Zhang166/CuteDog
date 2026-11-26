@@ -226,7 +226,7 @@ run_phase() {
   result_code=$?
   set -e
   stage "${phase}_collect"
-  adb_cmd logcat -d -v brief -s CuteDogPerformance:I CuteDogFrameCache:I CuteDogUiEvidence:I AndroidRuntime:E '*:S' >"$output_phase/selected-logcat.txt" 2>&1 || true
+  adb_cmd logcat -d -v brief -s CuteDogPerformance:I CuteDogFrameCache:I CuteDogUiEvidence:I AndroidRuntime:E libc:F DEBUG:F lmkd:I lowmemorykiller:I '*:S' >"$output_phase/selected-logcat.txt" 2>&1 || true
   adb_cmd shell dumpsys meminfo "$package" >"$output_phase/process-memory.txt" 2>&1 || true
   # Failure capture runs inside the test body before UI/fixture teardown. Pull only this phase's
   # test-specific directory; no unrelated app files, settings, chats or credentials are collected.
