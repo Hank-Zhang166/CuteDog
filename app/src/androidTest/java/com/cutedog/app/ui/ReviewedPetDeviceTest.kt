@@ -26,6 +26,9 @@ import com.cutedog.app.MainActivity
 import com.cutedog.app.data.Reminder
 import com.cutedog.app.data.ReminderRepository
 import com.cutedog.app.pet.PetView
+import com.cutedog.app.pet.PetPart
+import com.cutedog.app.pet.PetTouchRegions
+import com.cutedog.app.R
 import com.cutedog.app.pet.animation.FrameClipPlayer
 import com.cutedog.app.reminder.ReminderScheduler
 import org.junit.Assert.*
@@ -150,10 +153,41 @@ class ReviewedPetDeviceTest {
             }
             return rect
         }
+        fun snapshot(): org.json.JSONObject? {
+            var row: org.json.JSONObject? = null
+            InstrumentationRegistry.getInstrumentation().runOnMainSync {
+                val views = PetView.diagnosticSnapshots()
+                row = (0 until views.length()).map(views::getJSONObject).firstOrNull { it.optString("scope") == "overlay" }
+            }
+            return row
+        }
+        fun waitForGrowthDebounce() = await("Previous growth event is still within its two-second debounce", 3500) {
+            System.currentTimeMillis() - growthPrefs.getLong("last_interaction", 0) >= 2050
+        }
+        val touchRegions by lazy { PetTouchRegions(context.resources.openRawResource(R.raw.pet_touch_regions)) }
+        // The centre of the overlay window can be clear sky when the dog lies down. For
+        // menu/drag smoke tests press interior coat. The region-specific test uses hand-picked
+        // artwork coordinates independently of this table and checks the actually played clip.
+        fun bodyPoint(box: Rect): Pair<Float,Float> {
+            var point: Pair<Float,Float>? = null
+            await("No visible painted body target in the floating window", 8000) {
+                val current = snapshot() ?: return@await false
+                val frame = current.optInt("displayedFrameIndex", -1)
+                val clip = current.optString("clipId")
+                val side = minOf(box.width(),box.height()) * current.optDouble("spatialDepth", 1.0).toFloat()
+                val cell = (5..20).flatMap { y -> (4..20).map { x -> x to y } }.filter { (x,y) ->
+                    listOf(0 to 0, -1 to 0, 1 to 0, 0 to -1, 0 to 1).all { (dx,dy) ->
+                        touchRegions.at(clip,frame,(x+dx)/24f,(y+dy)/24f) == PetPart.BODY
+                    }
+                }.minByOrNull { (x,y) -> (x-12)*(x-12) + (y-12)*(y-12) } ?: return@await false
+                point = (box.exactCenterX() + side*(cell.first/24f-.5f)) to (box.bottom - side*(1f-cell.second/24f))
+                true
+            }
+            return requireNotNull(point)
+        }
         fun dragVertically() {
             val box = bounds()
-            val x = box.exactCenterX()
-            val y = box.exactCenterY()
+            val (x,y) = bodyPoint(box)
             val dy = if (y > context.resources.displayMetrics.heightPixels / 2f) -box.height() * .45f else box.height() * .45f
             val down = SystemClock.uptimeMillis()
             sendTouch(MotionEvent.ACTION_DOWN, down, x, y)
@@ -189,11 +223,12 @@ class ReviewedPetDeviceTest {
             val box = bounds()
             // Dispatch each physical event to Android. UiAutomation's shell command API
             // does not provide an interactive shell for a compound "tap; sleep; tap".
+            val (x,y) = bodyPoint(box)
             repeat(if (twice) 2 else 1) { step ->
                 val down = SystemClock.uptimeMillis()
-                sendTouch(MotionEvent.ACTION_DOWN, down, box.exactCenterX(), box.exactCenterY(), sync = false)
+                sendTouch(MotionEvent.ACTION_DOWN, down, x, y, sync = false)
                 SystemClock.sleep(28)
-                sendTouch(MotionEvent.ACTION_UP, down, box.exactCenterX(), box.exactCenterY(), sync = false)
+                sendTouch(MotionEvent.ACTION_UP, down, x, y, sync = false)
                 if (twice && step == 0) SystemClock.sleep(68)
             }
         }
@@ -257,18 +292,11 @@ class ReviewedPetDeviceTest {
                 }
                 await("Floating dog did not attach to WindowManager", 20_000) { dog() != null }
                 if (scene == InteractionScene.BODY_PARTS) {
-                    fun snapshot(): org.json.JSONObject? {
-                        var row: org.json.JSONObject? = null
-                        InstrumentationRegistry.getInstrumentation().runOnMainSync {
-                            val views = PetView.diagnosticSnapshots()
-                            row = (0 until views.length()).map(views::getJSONObject).firstOrNull { it.optString("scope") == "overlay" }
-                        }
-                        return row
-                    }
                     val initial = growth.snapshot().interactions
                     val cases = listOf(Triple("HEAD", .27f to .31f, "pet_head"),
                         Triple("PAW", .37f to .77f, "wave"), Triple("TAIL", .68f to .30f, "tail_wag"))
                     for ((index, testCase) in cases.withIndex()) {
+                        waitForGrowthDebounce()
                         if (index != 0) {
                             OverlayService.stop(context)
                             await("Previous floating view did not close", 8000) { snapshot() == null }
@@ -298,6 +326,7 @@ class ReviewedPetDeviceTest {
                 SystemClock.sleep(2100)
                 if (scene == InteractionScene.HOME) {
                     val initial = growth.snapshot().interactions
+                    waitForGrowthDebounce()
                     touchDog(false)
                     await("Single tap did not pet the dog", 5_000) { growth.snapshot().interactions == initial + 1 }
                     assertNull(label("投球"))
