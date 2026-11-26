@@ -1,8 +1,11 @@
 package com.cutedog.app.pet
 
+import android.Manifest
 import android.app.*
 import android.content.*
 import android.content.pm.ServiceInfo
+import android.content.pm.PackageManager
+import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.os.*
@@ -16,6 +19,7 @@ import com.cutedog.app.reminder.DogReminder
 import com.cutedog.app.reminder.completeFromDog
 import com.cutedog.app.reminder.dogReminders
 import com.cutedog.app.reminder.clock
+import com.cutedog.app.voice.doubao.DoubaoSettings
 import kotlinx.coroutines.*
 import kotlin.math.*
 
@@ -30,7 +34,8 @@ class OverlayService : Service() {
     private var attached = false
     private var hidden = false
     private var menu: PetMenuView? = null
-    private var outsideMenuDown = -1L
+    private var menuOutsideTouch: View? = null
+    private var microphoneReady = false
     private val menuOpen get() = menu != null
     private var menuMovementUntil = 0L
     private val menuAllowsTravel get() = !menuOpen || SystemClock.uptimeMillis() < menuMovementUntil
@@ -234,14 +239,6 @@ class OverlayService : Service() {
         prefs = PetSettings(this); wm = getSystemService(WindowManager::class.java)
         pet = PetView(this)
         pet.onInteractionMenu = ::showInteractionMenu
-        var consumePetGesture = false
-        pet.setOnTouchListener { _, event ->
-            if (event.actionMasked == MotionEvent.ACTION_DOWN) {
-                consumePetGesture = menu?.isShown == true || event.downTime == outsideMenuDown
-                if (consumePetGesture) dismissInteractionMenu()
-            }
-            consumePetGesture
-        }
         androidx.core.view.ViewCompat.addAccessibilityAction(pet, "打开互动菜单") { _, _ -> showInteractionMenu() }
         pet.onAuthoredFrameCommitted = ::consumeAuthoredMovement
         pet.onAuthoredStepAllowed = ::allowAuthoredStep
@@ -267,10 +264,12 @@ class OverlayService : Service() {
         configure()
         bubbleScope.launch {
             PetInteractionMenu.chatVisible.collect { visible ->
+                val visibility = if (visible) View.INVISIBLE else View.VISIBLE
                 menu?.let {
                     if (visible) it.stopVoice()
-                    it.visibility = if (visible) View.INVISIBLE else View.VISIBLE
+                    it.visibility = visibility
                 }
+                menuOutsideTouch?.visibility = visibility
             }
         }
         bubbleScope.launch {
@@ -359,30 +358,45 @@ class OverlayService : Service() {
     }
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) { super.onConfigurationChanged(newConfig); legacyInsets = null; dismissBubble(); configure(); safelyUpdate(); pet.requestApplyInsets() }
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == STOP) { stopSelf(); return START_NOT_STICKY }
-        if (intent?.action == RESET) { prefs.xFraction = prefs.defaultX; prefs.yFraction = prefs.defaultY; configure(resetPosition = true) }
+        val action = intent?.action
+        if (action == STOP || (action == PREPARE_VOICE && !attached)) { stopSelf(); return START_NOT_STICKY }
+        if (action == RESET) { prefs.xFraction = prefs.defaultX; prefs.yFraction = prefs.defaultY; configure(resetPosition = true) }
         if (!Settings.canDrawOverlays(this)) { stopSelf(); return START_NOT_STICKY }
         val manager = getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(NotificationChannel(CHANNEL, "桌宠运行状态", NotificationManager.IMPORTANCE_LOW).apply { setSound(null, null) })
         val open = PendingIntent.getActivity(this, 200, Intent(this, MainActivity::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val toggle = PendingIntent.getService(this, 201, Intent(this, OverlayService::class.java).setAction(TOGGLE), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val close = PendingIntent.getService(this, 202, Intent(this, OverlayService::class.java).setAction(STOP), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        val notification = Notification.Builder(this, CHANNEL).setSmallIcon(com.cutedog.app.R.drawable.ic_notification)
-            .setContentTitle("${prefs.name}在身边").setContentText("轻抚互动 · 双击选动作 · 点此通知打开应用")
+        fun notification(voice: Boolean) = Notification.Builder(this, CHANNEL)
+            .setSmallIcon(com.cutedog.app.R.drawable.ic_notification)
+            .setContentTitle("${prefs.name}在身边")
+            .setContentText(if (voice) "桌宠语音已就绪 · 按住麦克风时录音" else "轻抚互动 · 双击选动作 · 点此通知打开应用")
             .setContentIntent(open).setOngoing(true).setCategory(Notification.CATEGORY_SERVICE)
             .addAction(Notification.Action.Builder(null, "显示 / 隐藏", toggle).build())
             .addAction(Notification.Action.Builder(null, "结束陪伴", close).build()).build()
-        if (Build.VERSION.SDK_INT >= 34) startForeground(200, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
-        else startForeground(200, notification)
-        hidden = when (intent?.action) { HIDE -> true; TOGGLE -> !hidden; else -> false }
+        val wantsVoice = (microphoneReady || action == START_FROM_APP || action == PREPARE_VOICE) && canPrepareVoice(this)
+        microphoneReady = wantsVoice && runCatching {
+            showForeground(notification(true), microphone = true)
+        }.isSuccess
+        if (!microphoneReady) showForeground(notification(false), microphone = false)
+        hidden = when (action) { HIDE -> true; TOGGLE -> !hidden; PREPARE_VOICE -> hidden; else -> false }
         if (!attached) {
             try { wm.addView(pet, params); attached = true } catch (_: SecurityException) { stopSelf(); return START_NOT_STICKY }
             catch (_: WindowManager.BadTokenException) { stopSelf(); return START_NOT_STICKY }
             catch (_: WindowManager.InvalidDisplayException) { stopSelf(); return START_NOT_STICKY }
         }
         reconcileVisibleState()
+        activeOverlay = this
         pet.requestApplyInsets()
         return START_NOT_STICKY // The user starts again; no endless restart after revoking permission.
+    }
+
+    private fun showForeground(notification: Notification, microphone: Boolean) {
+        if (Build.VERSION.SDK_INT >= 29) {
+            var type = if (Build.VERSION.SDK_INT >= 34) ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0
+            if (Build.VERSION.SDK_INT >= 30 && microphone) type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+            startForeground(200, notification, type)
+        } else startForeground(200, notification)
     }
     private fun safelyUpdate() {
         if (!attached) return
@@ -421,16 +435,13 @@ class OverlayService : Service() {
         val dog = Rect(origin[0], origin[1], origin[0] + pet.width, origin[1] + pet.height)
         val viewport = Rect(insetLeft, insetTop, screenWidth - insetRight, screenHeight - insetBottom)
         val themed = ContextThemeWrapper(this, android.R.style.Theme_Material_Light_NoActionBar)
-        val panel = PetMenuView(themed, prefs.name, onOutside = { time ->
-            outsideMenuDown = time
-            dismissInteractionMenu()
-        },
-            onAction = ::selectMenuAction, onVoiceSetup = { openPanelChat(voiceSetup = true) })
+        val panel = PetMenuView(themed, prefs.name, onAction = ::selectMenuAction,
+            voiceReady = { microphoneReady })
         val bounds = panel.place(viewport, dog) ?: return false
         val window = WindowManager.LayoutParams(bounds.width(), bounds.height(),
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT).apply {
             setTitle("CuteDog interaction panel")
             gravity = Gravity.TOP or Gravity.LEFT
@@ -442,15 +453,36 @@ class OverlayService : Service() {
         route.clear()
         menuMovementUntil = 0L
         pet.setAuthoredTravelAllowed(false)
+        // Some Android skins don't send ACTION_OUTSIDE to application overlays.
+        // A separate invisible touch target below the panel receives outside taps.
+        val outside = View(themed).apply {
+            setBackgroundColor(Color.TRANSPARENT)
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            setOnTouchListener { _, event ->
+                if (event.actionMasked == MotionEvent.ACTION_DOWN) dismissInteractionMenu()
+                true
+            }
+        }
+        val outsideWindow = WindowManager.LayoutParams(screenWidth, screenHeight,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY, window.flags, PixelFormat.TRANSLUCENT).apply {
+            setTitle("CuteDog outside touch")
+            gravity = Gravity.TOP or Gravity.LEFT
+            if (Build.VERSION.SDK_INT >= 30) setFitInsetsTypes(0)
+        }
         return try {
+            wm.addView(outside, outsideWindow)
+            menuOutsideTouch = outside
             wm.addView(panel, window)
             menu = panel
             true
         } catch (_: SecurityException) {
+            dismissInteractionMenu()
             false
         } catch (_: WindowManager.BadTokenException) {
+            dismissInteractionMenu()
             false
         } catch (_: WindowManager.InvalidDisplayException) {
+            dismissInteractionMenu()
             false
         }
     }
@@ -465,19 +497,23 @@ class OverlayService : Service() {
         pet.interact(action)
     }
 
-    private fun openPanelChat(voiceSetup: Boolean = false) {
+    private fun openPanelChat() {
         val intent = Intent(this, PetChatActivity::class.java)
             .putExtra(PetChatActivity.FROM_PET_PANEL, true)
-            .putExtra(PetChatActivity.VOICE_SETUP, voiceSetup)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_NO_ANIMATION)
         runCatching { startActivity(intent) }
     }
 
     private fun dismissInteractionMenu() {
-        val panel = menu ?: return
+        val panel = menu
+        val outside = menuOutsideTouch
         menu = null
-        panel.stopVoice()
-        runCatching { wm.removeViewImmediate(panel) }
+        menuOutsideTouch = null
+        if (panel != null) {
+            panel.stopVoice()
+            runCatching { wm.removeViewImmediate(panel) }
+        }
+        if (outside != null) runCatching { wm.removeViewImmediate(outside) }
     }
 
     private fun updateReminder(display: DogReminder?) {
@@ -549,6 +585,7 @@ class OverlayService : Service() {
         else { bubble = null; runCatching { wm.removeView(view) } }
     }
     override fun onDestroy() {
+        if (activeOverlay === this) activeOverlay = null
         bubbleScope.cancel()
         dogReminders.setVisible(false)
         dismissInteractionMenu()
@@ -565,9 +602,23 @@ class OverlayService : Service() {
     }
     override fun onBind(intent: Intent?): IBinder? = null
     companion object {
+        private var activeOverlay: OverlayService? = null
+        internal val voiceReady get() = activeOverlay?.microphoneReady == true
+        private const val START_FROM_APP = "pet.start_from_app"
+        private const val PREPARE_VOICE = "pet.prepare_voice"
         private const val CHANNEL = "pet_status"
         private const val STOP = "pet.stop"; private const val HIDE = "pet.hide"; private const val TOGGLE = "pet.toggle"; private const val RESET = "pet.reset"
         fun start(context: Context) { context.startForegroundService(Intent(context, OverlayService::class.java)) }
+        internal fun startFromActivity(context: Context) {
+            context.startForegroundService(Intent(context, OverlayService::class.java).setAction(START_FROM_APP))
+        }
+        internal fun prepareVoiceIfRunning(context: Context) {
+            if (activeOverlay == null || voiceReady || !canPrepareVoice(context)) return
+            runCatching { context.startService(Intent(context, OverlayService::class.java).setAction(PREPARE_VOICE)) }
+        }
+        private fun canPrepareVoice(context: Context): Boolean =
+            context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED &&
+                DoubaoSettings(context).microphoneUploadAccepted
         fun stop(context: Context) { val request = Intent(context, OverlayService::class.java); context.stopService(request) }
         fun hide(context: Context) { context.startService(Intent(context, OverlayService::class.java).setAction(HIDE)) }
         fun show(context: Context) = start(context)

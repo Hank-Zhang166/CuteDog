@@ -1,8 +1,6 @@
 package com.cutedog.app.ui
 
 import android.content.Context
-import android.Manifest
-import android.content.pm.PackageManager
 import android.os.SystemClock
 import android.util.Log
 import android.view.View
@@ -21,8 +19,8 @@ import com.cutedog.app.pet.PetSettings
 import com.cutedog.app.pet.behavior.GrowthStore
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
+import androidx.test.filters.SdkSuppress
 import androidx.test.platform.app.InstrumentationRegistry
-import com.cutedog.app.BuildConfig
 import com.cutedog.app.MainActivity
 import com.cutedog.app.data.Reminder
 import com.cutedog.app.data.ReminderRepository
@@ -32,6 +30,8 @@ import com.cutedog.app.pet.PetTouchRegions
 import com.cutedog.app.R
 import com.cutedog.app.pet.animation.FrameClipPlayer
 import com.cutedog.app.reminder.ReminderScheduler
+import com.cutedog.app.voice.OverlayVoiceController
+import com.cutedog.app.voice.OverlayVoiceTestFixture
 import org.junit.Assert.*
 import org.junit.Assume.assumeTrue
 import org.junit.Test
@@ -42,6 +42,7 @@ class ReviewedPetDeviceTest {
 
     private companion object {
         const val MENU_WINDOW = "CuteDog interaction panel"
+        const val OUTSIDE_TOUCH_WINDOW = "CuteDog outside touch"
         val windowFrame = Regex("""\b(?:mFrame|frame)=\[(-?\d+),\s*(-?\d+)\]\[(-?\d+),\s*(-?\d+)\]""")
         val overlayType = Regex("""\b(?:ty|type)=(?:0x0*7f6|2038|APPLICATION_OVERLAY)\b""", RegexOption.IGNORE_CASE)
     }
@@ -85,7 +86,9 @@ class ReviewedPetDeviceTest {
         }
     }
 
-    private enum class InteractionScene { HOME, BODY_PARTS, DOUBLE_TAP_EDGE, DESKTOP_GESTURES, DESKTOP_CHAT, DESKTOP_DISMISSAL }
+    private enum class InteractionScene {
+        HOME, BODY_PARTS, DOUBLE_TAP_EDGE, DESKTOP_GESTURES, DESKTOP_CHAT, DESKTOP_DISMISSAL, DESKTOP_MICROPHONE,
+    }
 
     @Test fun floatingDogHandlesTapMenuAndDueCheckboxWithHomeInForeground() = checkInteraction(InteractionScene.HOME)
     @Test fun floatingDogRespondsToHeadPawAndTail() = checkInteraction(InteractionScene.BODY_PARTS)
@@ -93,6 +96,8 @@ class ReviewedPetDeviceTest {
     @Test fun desktopMenuFeedsTheDogAndHonorsTheDragLock() = checkInteraction(InteractionScene.DESKTOP_GESTURES)
     @Test fun desktopMenuOpensAndClosesTheChatWindow() = checkInteraction(InteractionScene.DESKTOP_CHAT)
     @Test fun desktopMenuClosesOnTheDogAndOnTheLauncher() = checkInteraction(InteractionScene.DESKTOP_DISMISSAL)
+    @SdkSuppress(minSdkVersion = 35)
+    @Test fun desktopVoiceKeepsLauncherVisibleWhileRecording() = checkInteraction(InteractionScene.DESKTOP_MICROPHONE)
 
     private fun checkInteraction(scene: InteractionScene) {
         val scheduler = ReminderScheduler(context)
@@ -102,8 +107,8 @@ class ReviewedPetDeviceTest {
         val pkg = context.packageName
         fun shell(command: String) = ParcelFileDescriptor.AutoCloseInputStream(automation.executeShellCommand(command)).bufferedReader().use { it.readText() }
         fun windowStates(): List<String> = shell("dumpsys window windows").split(Regex("(?m)^  Window #\\d+"))
-        fun namedMenuWindow(): String? = windowStates().firstOrNull {
-            it.lineSequence().firstOrNull()?.contains(MENU_WINDOW) == true
+        fun namedMenuWindow(title: String = MENU_WINDOW): String? = windowStates().firstOrNull {
+            it.lineSequence().firstOrNull()?.contains(title) == true
         }
         fun frameOf(state: String): Rect? = windowFrame.find(state)?.destructured?.let { (l, t, r, b) ->
             Rect(l.toInt(), t.toInt(), r.toInt(), b.toInt()).takeUnless { it.isEmpty }
@@ -124,6 +129,7 @@ class ReviewedPetDeviceTest {
         val originalY = settings.yFraction
         val growth = GrowthStore(context)
         val growthPrefs = context.getSharedPreferences("pet_growth", 0)
+        val voice = if (scene == InteractionScene.DESKTOP_MICROPHONE) OverlayVoiceTestFixture(context) else null
         val originalGrowth = listOf("first_met", "last_interaction", "interactions").associateWith {
             if (growthPrefs.contains(it)) growthPrefs.getLong(it, 0) else null
         }
@@ -174,7 +180,8 @@ class ReviewedPetDeviceTest {
                     // Launcher and a non-focusable overlay may publish their accessibility
                     // windows at different times. Ask WindowManager for the actual surface.
                     val petWindow = windowStates().firstOrNull {
-                        it.contains(pkg) && !it.contains(MENU_WINDOW) && overlayType.containsMatchIn(it)
+                        it.contains(pkg) && !it.contains(MENU_WINDOW) && !it.contains(OUTSIDE_TOUCH_WINDOW) &&
+                            overlayType.containsMatchIn(it)
                     }
                     petWindow?.let(::frameOf)?.let(rect::set)
                     !rect.isEmpty
@@ -199,7 +206,8 @@ class ReviewedPetDeviceTest {
             // UiAutomation injects into, including status bar offsets on older ROMs.
             val dump = shell("dumpsys input")
             for (line in dump.lineSequence()) {
-                if (!line.contains(pkg) || line.contains(MENU_WINDOW) || !overlayType.containsMatchIn(line) || line.contains("visible=false") ||
+                if (!line.contains(pkg) || line.contains(MENU_WINDOW) || line.contains(OUTSIDE_TOUCH_WINDOW) ||
+                    !overlayType.containsMatchIn(line) || line.contains("visible=false") ||
                     line.contains("NOT_TOUCHABLE") || line.contains("NOT_VISIBLE") || line.contains("touchableRegion=<empty>")) continue
                 frameOf(line)?.let { return it }
             }
@@ -208,7 +216,8 @@ class ReviewedPetDeviceTest {
             val surface = windowStates()
                 .firstOrNull { window ->
                     window.lineSequence().firstOrNull()?.contains(pkg) == true &&
-                        !window.contains(MENU_WINDOW) && overlayType.containsMatchIn(window) && window.contains("Surface: shown=true") &&
+                        !window.contains(MENU_WINDOW) && !window.contains(OUTSIDE_TOUCH_WINDOW) &&
+                        overlayType.containsMatchIn(window) && window.contains("Surface: shown=true") &&
                         window.contains("isVisible=true") && !window.contains("NOT_TOUCHABLE")
                 }
             return surface?.let(::frameOf)
@@ -337,11 +346,11 @@ class ReviewedPetDeviceTest {
             }
             tap(rect.exactCenterX(), rect.exactCenterY())
         }
-        fun tapOutsideMenu() {
+        fun tapOutsideMenu(verticalTargets: List<Float> = listOf(.52f, .64f, .38f, .22f, .82f)) {
             val menu = menuBounds()
             val dog = bounds()
             val display = context.resources.displayMetrics
-            val point = listOf(.52f, .64f, .38f, .22f, .82f).flatMap { y ->
+            val point = verticalTargets.flatMap { y ->
                 listOf(.1f, .5f, .9f).map { x -> x * display.widthPixels to y * display.heightPixels }
             }.firstOrNull { (x, y) ->
                 val px = x.toInt()
@@ -362,6 +371,7 @@ class ReviewedPetDeviceTest {
             val display = context.resources.displayMetrics
             val state = requireNotNull(namedMenuWindow()) { "Missing named interaction overlay" }
             assertTrue("The menu must have TYPE_APPLICATION_OVERLAY", overlayType.containsMatchIn(state))
+            assertNotNull("Missing separate outside-touch receiver", namedMenuWindow(OUTSIDE_TOUCH_WINDOW))
             assertEquals("Opening the menu changed the resumed activity", foreground, foregroundActivity())
             assertTrue("Menu $panel occupied a full screen", panel.height() < display.heightPixels * .70f)
             assertFalse("Menu $panel covers the dog $dogPanel", Rect.intersects(panel, dogPanel))
@@ -405,12 +415,28 @@ class ReviewedPetDeviceTest {
             shell("appops set $pkg SYSTEM_ALERT_WINDOW allow")
             prefs.edit().putBoolean("completed", true).commit()
             settings.locked = true
+            if (voice != null) {
+                voice.install()
+                OverlayVoiceController.clientForDeviceTest = voice.client
+            }
             ActivityScenario.launch(MainActivity::class.java).use { activity ->
+                if (voice != null) {
+                    await("CuteDog must be visible before preparing its foreground microphone", 8000) {
+                        var focused = false
+                        activity.onActivity { focused = it.window.decorView.isShown && it.hasWindowFocus() }
+                        focused
+                    }
+                }
                 activity.onActivity {
                     assertTrue(descendants(it.window.decorView).none { view -> view is PetView })
-                    OverlayService.start(it)
+                    if (voice != null) OverlayService.startFromActivity(it) else OverlayService.start(it)
                 }
                 await("Floating dog did not attach to WindowManager", 20_000) { dog() != null }
+                if (voice != null) await("Visible CuteDog activity did not prepare desktop microphone", 8000) {
+                    var ready = false
+                    activity.onActivity { ready = OverlayService.voiceReady }
+                    ready
+                }
                 if (scene == InteractionScene.DOUBLE_TAP_EDGE) {
                     awaitDogInput()
                     await("Standing artwork has not been drawn", 20_000) {
@@ -498,66 +524,21 @@ class ReviewedPetDeviceTest {
                     assertBoundedOverlay(underlying)
                     capture("menu-above-home")
                     assertEquals("Opening the menu must not also pet or cuddle", initial + 1, growth.snapshot().interactions)
-                    val freshPermission = context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED
-                    if (BuildConfig.LEGACY_SPEECH && freshPermission &&
-                        InstrumentationRegistry.getArguments().getString("cuteDogDisposable") == "true") {
-                        val permissionButton = menuBounds("按住说话")
-                        // Android takes input focus on DOWN when it opens its permission dialog.
-                        // The system may cancel the matching UP sent to the former window.
-                        shell("input tap ${permissionButton.centerX()} ${permissionButton.centerY()}")
-                        fun allowMicrophone() = node(false) {
-                            val key = it.viewIdResourceName.orEmpty().substringAfterLast('/')
-                            val text = it.text?.toString().orEmpty()
-                            val pkgName = it.packageName?.toString().orEmpty()
-                            (pkgName.contains("permissioncontroller") || pkgName.contains("packageinstaller")) &&
-                                (key in setOf("permission_allow_foreground_only_button", "permission_allow_button")
-                                    || text in setOf("While using the app", "使用应用时", "仅在使用中允许", "Allow", "允许"))
-                        }
-                        await("Android microphone permission was not requested from menu", 8000) { allowMicrophone() != null }
-                        val permissionBounds = Rect()
-                        requireNotNull(allowMicrophone()).getBoundsInScreen(permissionBounds)
-                        tap(permissionBounds.exactCenterX(), permissionBounds.exactCenterY())
-                        await("Menu did not return after permission grant", 8000) {
-                            label("请重新按住麦克风说话。") != null && label("按住说话") != null
-                        }
-                        assertEquals(PackageManager.PERMISSION_GRANTED, context.checkSelfPermission(Manifest.permission.RECORD_AUDIO))
-                        awaitMenuInput()
-                        capture("microphone-permission-granted")
-                    }
-                    if (BuildConfig.LEGACY_SPEECH && context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED &&
-                        InstrumentationRegistry.getArguments().getString("cuteDogDisposable") == "true") {
-                        // The headless AVD supplies silent input. Verify capture, cancellation and submission
-                        // without accessing a host microphone or transmitting private speech.
-                        val microphone = menuBounds("按住说话")
-                        fun beginRecording(): Long {
-                            val start = SystemClock.uptimeMillis()
-                            sendTouch(MotionEvent.ACTION_DOWN, start, microphone.exactCenterX(), microphone.exactCenterY())
-                            await("Visible menu did not start actual microphone capture", 5000) {
-                                node { it.text?.toString()?.startsWith("在听啦") == true } != null
-                            }
-                            return start
-                        }
-                        val cancelDown = beginRecording()
-                        val outsideY = microphone.bottom + 18f
-                        sendTouch(MotionEvent.ACTION_MOVE, cancelDown, microphone.exactCenterX(), outsideY)
-                        sendTouch(MotionEvent.ACTION_UP, cancelDown, microphone.exactCenterX(), outsideY)
-                        await("Slide-out did not cancel recording", 5000) { label("已取消录音。") != null }
-                        val submitDown = beginRecording()
-                        SystemClock.sleep(650)
-                        sendTouch(MotionEvent.ACTION_UP, submitDown, microphone.exactCenterX(), microphone.exactCenterY())
-                        await("Release did not submit audio to the local recognizer", 8000) { label("停止播放") != null }
-                        choose("停止播放")
-                        await("Stop did not cancel the voice turn", 5000) { label("已停止语音。") != null }
-                    }
                     choose("投球")
                     await("Ball selection did not dispatch", 5_000) { growth.snapshot().interactions == initial + 2 }
                     waitForClip("play_ball")
                     assertNotNull("The menu should stay visible after selection", label("投球"))
                     tapOutsideMenu()
-                    await("Outside tap did not close the menu", 5_000) { namedMenuWindow() == null }
-                    val dogNode = requireNotNull(dog())
-                    val action = dogNode.actionList.first { it.label?.toString() == "打开互动菜单" }
-                    assertTrue(dogNode.performAction(action.id))
+                    await("Outside tap did not remove both menu windows", 5_000) {
+                        namedMenuWindow() == null && namedMenuWindow(OUTSIDE_TOUCH_WINDOW) == null
+                    }
+                    awaitDogInput()
+                    await("The dog did not regain its accessible open-menu action", 8000) {
+                        val dogNode = dog() ?: return@await false
+                        val action = dogNode.actionList.firstOrNull { it.label?.toString() == "打开互动菜单" }
+                            ?: return@await false
+                        dogNode.performAction(action.id)
+                    }
                     await("Accessible menu did not appear", 5_000) { label("喂食") != null }
                     val due = System.currentTimeMillis() + 1800
                     id = repo.save(Reminder(title = title, dueAt = due))
@@ -565,7 +546,9 @@ class ReviewedPetDeviceTest {
                     await("Due checkbox was not shown by floating dog above home", 25_000) {
                         node { it.isCheckable && it.text?.toString() == title } != null
                     }
-                    assertNull("Reminder must supersede the menu", namedMenuWindow())
+                    await("Reminder must supersede both menu windows", 5_000) {
+                        namedMenuWindow() == null && namedMenuWindow(OUTSIDE_TOUCH_WINDOW) == null
+                    }
                     capture("due-checkbox-above-home")
                     choose(title, inPetMenu = false)
                     await("Checkbox did not persist completion", 8000) { repo.get(id)?.completed == true }
@@ -580,6 +563,40 @@ class ReviewedPetDeviceTest {
                 automation.waitForIdle(250, 5000)
                 val launcher = requireNotNull(foregroundActivity())
                 assertTrue("Expected Launcher beneath the overlay: $launcher", launcher.contains("launcher", ignoreCase = true))
+                if (voice != null) {
+                    val baseline = screenshotForPixelComparison()
+                    try {
+                        val dogBefore = bounds()
+                        touchDog(true)
+                        val panel = assertBoundedOverlay(launcher)
+                        assertLauncherPixelsUnchanged(baseline, panel, dogBefore)
+                        val mic = menuBounds("按住说话")
+                        val down = SystemClock.uptimeMillis()
+                        val x = mic.exactCenterX()
+                        val y = mic.exactCenterY()
+                        sendTouch(MotionEvent.ACTION_DOWN, down, x, y, sync = false)
+                        try {
+                            await("Real unsilenced microphone did not deliver audio to the local fixture", 8000) {
+                                voice.frames.get() >= 8 && voice.hasRecording(unsilenced = true)
+                            }
+                            assertEquals("Recording must leave Launcher in the foreground", launcher, foregroundActivity())
+                            assertEquals("A held microphone must not send yet", 0, voice.commits.get())
+                            assertLauncherPixelsUnchanged(baseline, panel, dogBefore)
+                            capture("desktop-microphone-hold")
+                        } finally { sendTouch(MotionEvent.ACTION_UP, down, x, y, sync = false) }
+                        await("Released microphone did not save both messages or stop capturing", 8000) {
+                            voice.commits.get() == 1 && voice.hasSavedTurn() &&
+                                !voice.hasRecording() && label(voice.answer) != null
+                        }
+                        assertEquals("Reply playback must leave Launcher in the foreground", launcher, foregroundActivity())
+                        assertEquals("Releasing microphone must keep the same menu", panel, menuBounds())
+                        assertLauncherPixelsUnchanged(baseline, panel, dogBefore)
+                        capture("desktop-microphone-reply")
+                    } finally { baseline.recycle() }
+                    tapOutsideMenu()
+                    await("Outside tap did not close menu after voice reply", 5000) { namedMenuWindow() == null }
+                    return@use
+                }
                 if (scene == InteractionScene.DESKTOP_GESTURES) {
                     val lockedBounds = bounds()
                     dragVertically()
@@ -641,9 +658,17 @@ class ReviewedPetDeviceTest {
                     assertLauncherPixelsUnchanged(baseline, panel, dogBefore)
                     capture("menu-does-not-cover-launcher")
                 } finally { baseline.recycle() }
-                tapOutsideMenu()
-                await("Tapping outside did not dismiss the menu and restore Launcher", 7000) {
-                    namedMenuWindow() == null && foregroundActivity() == launcher
+                tapOutsideMenu(listOf(.24f, .32f, .40f))
+                await("Tapping the upper desktop did not dismiss the menu", 7000) {
+                    namedMenuWindow() == null && namedMenuWindow(OUTSIDE_TOUCH_WINDOW) == null &&
+                        foregroundActivity() == launcher
+                }
+                touchDog(true)
+                assertBoundedOverlay(launcher)
+                tapOutsideMenu(listOf(.64f, .73f, .82f))
+                await("Tapping the lower desktop did not dismiss the reopened menu", 7000) {
+                    namedMenuWindow() == null && namedMenuWindow(OUTSIDE_TOUCH_WINDOW) == null &&
+                        foregroundActivity() == launcher
                 }
                 capture("outside-touch-restores-launcher")
             }
@@ -654,6 +679,10 @@ class ReviewedPetDeviceTest {
         } finally {
             OverlayService.stop(context)
             InstrumentationRegistry.getInstrumentation().waitForIdleSync()
+            if (voice != null) {
+                OverlayVoiceController.clientForDeviceTest = null
+                voice.close()
+            }
             if (id != 0L) { repo.delete(id); scheduler.cancel(id) }
             settings.locked = locked
             settings.xFraction = originalX

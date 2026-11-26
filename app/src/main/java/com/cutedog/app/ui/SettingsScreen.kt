@@ -31,6 +31,8 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.cutedog.app.daily.*
 import com.cutedog.app.pet.*
+import com.cutedog.app.voice.doubao.DoubaoSettings
+import com.cutedog.app.voice.showRealtimeMicrophoneConsent
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -57,6 +59,7 @@ internal fun SettingsScreen(onNotificationPermission: () -> Unit, onRefresh: () 
     var quietEnd by remember { mutableStateOf(daily.quietEnd.toString()) }
     var historyVisible by remember { mutableStateOf(false) }
     var aiSettings by remember { mutableStateOf(false) }
+    var microphoneSetup by remember { mutableStateOf(false) }
     var helpVisible by remember { mutableStateOf(false) }
     var policyVisible by remember { mutableStateOf(false) }
     var regionsVisible by rememberSaveable { mutableStateOf(false) }
@@ -75,7 +78,7 @@ internal fun SettingsScreen(onNotificationPermission: () -> Unit, onRefresh: () 
     val precise = remember(permissionRevision) { Build.VERSION.SDK_INT < 31 || context.getSystemService(AlarmManager::class.java).canScheduleExactAlarms() }
     fun summon() {
         try {
-            OverlayService.start(context)
+            OverlayService.startFromActivity(context)
             onNotificationPermission()
             context.message("桌宠已启动。双击桌宠可以选择互动。")
         } catch (_: IllegalStateException) {
@@ -92,6 +95,23 @@ internal fun SettingsScreen(onNotificationPermission: () -> Unit, onRefresh: () 
         if (Settings.canDrawOverlays(context)) summon()
         else overlayPermission.launch(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}")))
     }
+    fun finishMicrophoneSetup() {
+        if (DoubaoSettings(context).microphoneUploadAccepted) startOverlay()
+        else showRealtimeMicrophoneConsent(context) { accepted -> if (accepted) startOverlay() }
+    }
+    val microphonePermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) finishMicrophoneSetup()
+        else context.message("请在系统设置中允许使用麦克风。")
+    }
+    fun prepareMicrophone() {
+        if (!DoubaoSettings(context).hasVoiceKey) {
+            microphoneSetup = true
+        } else if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            finishMicrophoneSetup()
+        } else {
+            microphonePermission.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp).testTag("pet_settings_screen"), verticalArrangement = Arrangement.spacedBy(20.dp)) {
         Spacer(Modifier.height(4.dp))
         Text("你的小狗，你的节奏", style = MaterialTheme.typography.headlineMedium)
@@ -107,9 +127,10 @@ internal fun SettingsScreen(onNotificationPermission: () -> Unit, onRefresh: () 
             Button(onClick = { startOverlay() }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) { Text(if (overlay) "召唤小狗" else "授权悬浮窗并召唤") }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                 TextButton(onClick = { OverlayService.hide(context) }) { Text("临时隐藏") }
-                TextButton(onClick = { if (Settings.canDrawOverlays(context)) OverlayService.show(context) else startOverlay() }) { Text("恢复显示") }
+                TextButton(onClick = { if (Settings.canDrawOverlays(context)) OverlayService.startFromActivity(context) else startOverlay() }) { Text("恢复显示") }
                 TextButton(onClick = { OverlayService.stop(context); context.message("桌宠已停止。备忘提醒仍会保留。") }) { Text("停止桌宠") }
             }
+            TextButton(onClick = ::prepareMicrophone) { Text("启用桌宠麦克风") }
             HorizontalDivider()
             Text("显示大小", style = MaterialTheme.typography.labelLarge)
             Slider(size, { size = it }, valueRange = 96f..220f, onValueChangeFinished = { prefs.size = size.toInt() })
@@ -172,6 +193,10 @@ internal fun SettingsScreen(onNotificationPermission: () -> Unit, onRefresh: () 
         Text("CuteDog · 用温柔陪伴日常\nAndroid 原生 · 本地优先", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.align(Alignment.CenterHorizontally))
         Spacer(Modifier.height(12.dp))
     }
+    if (microphoneSetup) DoubaoSettingsDialog(onDismiss = {
+        microphoneSetup = false
+        if (DoubaoSettings(context).hasVoiceKey) prepareMicrophone()
+    })
     if (regionsVisible) PetRegionEditor { regionsVisible = false }
     if (gesturesVisible) GestureSettingsDialog { gesturesVisible = false }
     if (historyVisible) QuoteHistoryDialog { historyVisible = false; onRefresh() }

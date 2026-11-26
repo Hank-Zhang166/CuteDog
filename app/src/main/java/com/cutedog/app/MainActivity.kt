@@ -7,6 +7,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.cutedog.app.pet.OverlayService
 import com.cutedog.app.ui.CuteDogApp
 import com.cutedog.app.ui.CuteDogTheme
 
@@ -28,6 +29,11 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         consumeIntent(intent)
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus && !isFinishing) OverlayService.prepareVoiceIfRunning(this)
     }
 
     private fun consumeIntent(intent: Intent) {

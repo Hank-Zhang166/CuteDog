@@ -32,7 +32,18 @@ internal class VoiceConversation(
     realtimeClient: DoubaoRealtimeClient = DoubaoRealtimeClient(),
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    private val realtime = RealtimeVoiceConversation(activity, scope, onStatus, onSetup, realtimeClient, onTurnEnd)
+    private var realtimeConsent: AlertDialog? = null
+    private val realtime = RealtimeVoiceConversation(
+        activity, scope, onStatus, onSetup, realtimeClient, onTurnEnd,
+        onConsentRequired = {
+            if (realtimeConsent?.isShowing != true) {
+                realtimeConsent = showRealtimeMicrophoneConsent(activity) { accepted ->
+                    realtimeConsent = null
+                    if (accepted) onStatus("请重新按住麦克风说话。")
+                }
+            }
+        },
+    )
     private var capture: MicCapture? = null
     private var turn: Job? = null
     private var generation = 0
@@ -157,6 +168,7 @@ internal class VoiceConversation(
 
     fun close() {
         cancel()
+        realtimeConsent?.dismiss()
         realtime.close()
         scope.cancel()
         if (voice.isInitialized()) voice.value.close()

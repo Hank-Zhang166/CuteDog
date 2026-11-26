@@ -9,6 +9,7 @@
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <application android:allowBackup="false" android:fullBackupContent="false" android:dataExtractionRules="@xml/data_extraction_rules" android:label="CuteDog" android:icon="@drawable/ic_launcher"
         android:supportsRtl="true" android:theme="@style/Theme.CuteDog" android:usesCleartextTraffic="false">
         <activity android:name=".MainActivity" android:exported="true" android:windowSoftInputMode="adjustResize">
@@ -20,9 +21,7 @@
         <activity android:name=".PetChatActivity" android:exported="false" android:excludeFromRecents="true"
             android:taskAffinity="${applicationId}.petChat" android:launchMode="singleTop"
             android:theme="@style/Theme.CuteDog.PetChat" android:windowSoftInputMode="stateAlwaysHidden|adjustResize" />
-        <activity android:name=".voice.OverlayMicrophoneActivity" android:exported="false" android:excludeFromRecents="true"
-            android:taskAffinity="${applicationId}.overlayMicrophone" android:theme="@style/Theme.CuteDog.OverlayMic" />
-        <service android:name=".pet.OverlayService" android:exported="false" android:foregroundServiceType="specialUse">
+        <service android:name=".pet.OverlayService" android:exported="false" android:foregroundServiceType="specialUse|microphone">
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="User-started interactive companion pet in a small overlay window with persistent notification and explicit stop control" />
         </service>
         <receiver android:name=".reminder.ReminderReceiver" android:exported="false" />

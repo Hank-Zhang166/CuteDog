@@ -22,21 +22,18 @@ import kotlin.math.roundToInt
 internal class PetMenuView(
     context: Context,
     name: String,
-    private val onOutside: (Long) -> Unit,
     onAction: (String) -> Unit,
-    onVoiceSetup: () -> Unit,
+    voiceReady: () -> Boolean,
 ) : ScrollView(context) {
     private val mic = Button(context)
     private val status = TextView(context)
     private val stop = Button(context)
     private var holding = false
     private val voice = OverlayVoiceController(context, onStatus = { status.text = it },
-        onSetup = onVoiceSetup, onTurnEnd = {
+        voiceReady = voiceReady, onTurnEnd = {
             holding = false
             resetMic()
             stop.visibility = View.GONE
-        }, onAuthorizationVisible = { authorizing ->
-            if (isAttachedToWindow) visibility = if (authorizing) View.INVISIBLE else View.VISIBLE
         })
 
     init {
@@ -111,14 +108,6 @@ internal class PetMenuView(
             panel.addView(row)
         }
         addView(panel)
-    }
-
-    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
-        if (event.actionMasked == MotionEvent.ACTION_OUTSIDE) {
-            onOutside(event.downTime)
-            return true
-        }
-        return super.dispatchTouchEvent(event)
     }
 
     fun stopVoice() {

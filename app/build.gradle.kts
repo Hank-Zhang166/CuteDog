@@ -41,8 +41,8 @@ android {
         applicationId = "com.cutedog.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 8
-        versionName = "0.2.1-preview.6"
+        versionCode = 9
+        versionName = "0.2.1-preview.7"
         buildConfigField("boolean", "LEGACY_SPEECH", bundleLegacySpeech.toString())
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

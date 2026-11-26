@@ -4,7 +4,6 @@ import android.app.AlertDialog
 import android.content.Context
 import android.os.SystemClock
 import android.util.Log
-import androidx.activity.ComponentActivity
 import com.cutedog.app.chat.ChatPolicy
 import com.cutedog.app.chat.ChatRepository
 import com.cutedog.app.pet.PetSettings
@@ -24,16 +23,16 @@ import org.json.JSONObject
 import java.io.IOException
 
 internal class RealtimeVoiceConversation(
-    private val activity: ComponentActivity,
+    private val context: Context,
     private val scope: CoroutineScope,
     private val onStatus: (String) -> Unit,
     private val onSetup: () -> Unit,
     private val client: DoubaoRealtimeClient = DoubaoRealtimeClient(),
     private val onTurnEnd: () -> Unit = {},
+    private val onConsentRequired: () -> Unit = {},
 ) {
-    private val settings = DoubaoSettings(activity)
+    private val settings = DoubaoSettings(context)
     private var active: Capture? = null
-    private var consent: AlertDialog? = null
 
     private class Capture(val recorder: MicCapture, val input: Channel<ByteArray>) {
         var turn: Job? = null
@@ -46,11 +45,7 @@ internal class RealtimeVoiceConversation(
             return false
         }
         if (!settings.microphoneUploadAccepted) {
-            if (consent?.isShowing != true) {
-                consent = showRealtimeMicrophoneConsent(activity) { accepted ->
-                    if (accepted) onStatus("请重新按住麦克风说话。")
-                }
-            }
+            onConsentRequired()
             return false
         }
 
@@ -58,7 +53,7 @@ internal class RealtimeVoiceConversation(
         // TLS connects, so the first word is preserved even on a cold connection.
         val input = Channel<ByteArray>(Channel.UNLIMITED)
         val recorder = try {
-            MicCapture.start(activity, scope, onPcm = { input.trySend(it) })
+            MicCapture.start(context, scope, onPcm = { input.trySend(it) })
         } catch (_: Exception) {
             input.cancel()
             onStatus("暂时打不开麦克风，请检查权限或其他正在录音的应用。")
@@ -119,19 +114,16 @@ internal class RealtimeVoiceConversation(
         }
     }
 
-    fun close() {
-        cancel()
-        consent?.dismiss()
-    }
+    fun close() = cancel()
 
     private suspend fun exchange(capture: Capture) = coroutineScope {
-        val repository = ChatRepository(activity)
+        val repository = ChatRepository(context)
         val (voiceKey, searchKey, history) = withContext(Dispatchers.IO) {
             Triple(settings.voiceApiKey, settings.searchApiKey, recentTurns(repository))
         }
         val instructions = buildString {
             append(ChatPolicy.PERSONA)
-            append("\n你的显示名字是 ").append(JSONObject.quote(PetSettings(activity).name.take(20)))
+            append("\n你的显示名字是 ").append(JSONObject.quote(PetSettings(context).name.take(20)))
             append("。回答用于直接口播，用短句自然停顿。用户问时效信息时请查询，能核实来源时说出来源。")
         }
         val audio = Channel<ByteArray>(capacity = 128)
