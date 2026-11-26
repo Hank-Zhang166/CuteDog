@@ -13,6 +13,7 @@ import com.cutedog.app.PetChatActivity
 import com.cutedog.app.chat.*
 import com.cutedog.app.pet.PetEvents
 import com.cutedog.app.ui.ReplyTyping
+import com.cutedog.app.voice.doubao.DoubaoRealtimeClient
 import com.cutedog.app.voice.doubao.DoubaoSettings
 import kotlinx.coroutines.*
 import kotlin.coroutines.resume
@@ -27,9 +28,11 @@ internal class VoiceConversation(
             .putExtra(PetChatActivity.VOICE_SETUP, true)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP))
     },
+    private val onTurnEnd: () -> Unit = {},
+    realtimeClient: DoubaoRealtimeClient = DoubaoRealtimeClient(),
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    private val realtime = RealtimeVoiceConversation(activity, scope, onStatus, onSetup)
+    private val realtime = RealtimeVoiceConversation(activity, scope, onStatus, onSetup, realtimeClient, onTurnEnd)
     private var capture: MicCapture? = null
     private var turn: Job? = null
     private var generation = 0
@@ -65,7 +68,13 @@ internal class VoiceConversation(
                 processTranscript(recording.finishTranscript())
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (e: Exception) { onStatus(e.message?.take(180) ?: "语音对话暂时遇到了问题，请再试一次。") }
-            finally { recording.discard(); if (generation == current) turn = null }
+            finally {
+                recording.discard()
+                if (generation == current) {
+                    turn = null
+                    onTurnEnd()
+                }
+            }
         }
     }
 

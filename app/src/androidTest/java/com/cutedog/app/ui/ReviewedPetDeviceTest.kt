@@ -8,6 +8,8 @@ import android.util.Log
 import android.view.View
 import android.view.ViewGroup
 import android.accessibilityservice.AccessibilityServiceInfo
+import android.graphics.Bitmap
+import android.graphics.Color
 import android.graphics.Rect
 import android.os.ParcelFileDescriptor
 import android.view.InputDevice
@@ -15,9 +17,6 @@ import android.view.MotionEvent
 import android.view.ViewConfiguration
 import android.view.accessibility.AccessibilityNodeInfo
 import com.cutedog.app.pet.OverlayService
-import com.cutedog.app.pet.PetMenuActivity
-import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
-import androidx.test.runner.lifecycle.Stage
 import com.cutedog.app.pet.PetSettings
 import com.cutedog.app.pet.behavior.GrowthStore
 import androidx.test.core.app.ActivityScenario
@@ -40,6 +39,12 @@ import java.util.UUID
 
 class ReviewedPetDeviceTest {
     private val context: Context get() = ApplicationProvider.getApplicationContext()
+
+    private companion object {
+        const val MENU_WINDOW = "CuteDog interaction panel"
+        val windowFrame = Regex("""\b(?:mFrame|frame)=\[(-?\d+),\s*(-?\d+)\]\[(-?\d+),\s*(-?\d+)\]""")
+        val overlayType = Regex("""\b(?:ty|type)=(?:0x0*7f6|2038|APPLICATION_OVERLAY)\b""", RegexOption.IGNORE_CASE)
+    }
 
     private fun await(message: String, timeout: Long, condition: () -> Boolean) {
         val until = SystemClock.elapsedRealtime() + timeout
@@ -96,6 +101,19 @@ class ReviewedPetDeviceTest {
         val flags = automation.serviceInfo.flags
         val pkg = context.packageName
         fun shell(command: String) = ParcelFileDescriptor.AutoCloseInputStream(automation.executeShellCommand(command)).bufferedReader().use { it.readText() }
+        fun windowStates(): List<String> = shell("dumpsys window windows").split(Regex("(?m)^  Window #\\d+"))
+        fun namedMenuWindow(): String? = windowStates().firstOrNull {
+            it.lineSequence().firstOrNull()?.contains(MENU_WINDOW) == true
+        }
+        fun frameOf(state: String): Rect? = windowFrame.find(state)?.destructured?.let { (l, t, r, b) ->
+            Rect(l.toInt(), t.toInt(), r.toInt(), b.toInt()).takeUnless { it.isEmpty }
+        }
+        fun foregroundActivity(): String? = shell("dumpsys activity activities").lineSequence()
+            .firstOrNull {
+                it.contains("ActivityRecord{") && (it.contains("mResumedActivity") || it.contains("topResumedActivity"))
+            }
+            ?.substringAfter("ActivityRecord{")
+            ?.substringBefore('}')
         val originalOp = Regex("SYSTEM_ALERT_WINDOW: (allow|deny|ignore|default|foreground)").find(shell("appops get $pkg SYSTEM_ALERT_WINDOW"))?.groupValues?.get(1) ?: "default"
         val repo = ReminderRepository(context)
         val prefs = context.getSharedPreferences("onboarding", 0)
@@ -155,10 +173,10 @@ class ReviewedPetDeviceTest {
                 if (!rect.isEmpty) true else {
                     // Launcher and a non-focusable overlay may publish their accessibility
                     // windows at different times. Ask WindowManager for the actual surface.
-                    val petWindow = shell("dumpsys window windows").split(Regex("(?m)^  Window #\\d+"))
-                        .firstOrNull { it.contains(pkg) && Regex("(?:ty|type)=(?:2038|APPLICATION_OVERLAY)").containsMatchIn(it) }
-                    val frame = petWindow?.let { Regex("(?:mFrame|(?<!\\w)frame)=\\[(-?\\d+),(-?\\d+)\\]\\[(-?\\d+),(-?\\d+)\\]").find(it) }
-                    frame?.destructured?.let { (l,t,r,b) -> rect.set(l.toInt(),t.toInt(),r.toInt(),b.toInt()) }
+                    val petWindow = windowStates().firstOrNull {
+                        it.contains(pkg) && !it.contains(MENU_WINDOW) && overlayType.containsMatchIn(it)
+                    }
+                    petWindow?.let(::frameOf)?.let(rect::set)
                     !rect.isEmpty
                 }
             }
@@ -180,29 +198,20 @@ class ReviewedPetDeviceTest {
             // InputDispatcher exposes the surface origin in the coordinate system
             // UiAutomation injects into, including status bar offsets on older ROMs.
             val dump = shell("dumpsys input")
-            val overlay = Regex("""\btype=(?:0x0*7f6|2038|APPLICATION_OVERLAY)\b""", RegexOption.IGNORE_CASE)
-            val frame = Regex("""\bframe=\[(-?\d+),\s*(-?\d+)\]\[(-?\d+),\s*(-?\d+)\]""")
             for (line in dump.lineSequence()) {
-                if (!line.contains(pkg) || !overlay.containsMatchIn(line) || line.contains("visible=false") ||
+                if (!line.contains(pkg) || line.contains(MENU_WINDOW) || !overlayType.containsMatchIn(line) || line.contains("visible=false") ||
                     line.contains("NOT_TOUCHABLE") || line.contains("NOT_VISIBLE") || line.contains("touchableRegion=<empty>")) continue
-                val (l,t,r,b) = frame.find(line)?.destructured ?: continue
-                val rect = Rect(l.toInt(),t.toInt(),r.toInt(),b.toInt())
-                if (!rect.isEmpty) return rect
+                frameOf(line)?.let { return it }
             }
             // Some Android builds group InputDispatcher's metadata over multiple lines.
             // WindowManager exposes the same display-pixel frame for a drawn, touchable surface.
-            val surface = shell("dumpsys window windows").split(Regex("(?m)^  Window #\\d+"))
+            val surface = windowStates()
                 .firstOrNull { window ->
                     window.lineSequence().firstOrNull()?.contains(pkg) == true &&
-                        window.contains("ty=APPLICATION_OVERLAY") && window.contains("Surface: shown=true") &&
+                        !window.contains(MENU_WINDOW) && overlayType.containsMatchIn(window) && window.contains("Surface: shown=true") &&
                         window.contains("isVisible=true") && !window.contains("NOT_TOUCHABLE")
                 }
-            surface?.let { window ->
-                val groups = frame.find(window)?.groupValues ?: return@let
-                val rect = Rect(groups[1].toInt(),groups[2].toInt(),groups[3].toInt(),groups[4].toInt())
-                if (!rect.isEmpty) return rect
-            }
-            return null
+            return surface?.let(::frameOf)
         }
         fun screenPoint(current: org.json.JSONObject, u: Float, v: Float): Pair<Float,Float> {
             val side = current.getDouble("canvasSide").toFloat()
@@ -282,55 +291,45 @@ class ReviewedPetDeviceTest {
                 if (twice && step == 0) SystemClock.sleep(68)
             }
         }
-        fun awaitMenuInput() {
-            var focusSince = 0L
-            await("The displayed menu did not acquire a stable input window", 8000) {
-                var focused = false
-                InstrumentationRegistry.getInstrumentation().runOnMainSync {
-                    focused = ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(Stage.RESUMED)
-                        .filterIsInstance<PetMenuActivity>().any { it.window.decorView.hasWindowFocus() }
+        fun menuInputFrame(): Rect? {
+            val input = shell("dumpsys input").lineSequence()
+                .firstNotNullOfOrNull {
+                    if (it.contains(MENU_WINDOW) && overlayType.containsMatchIn(it) &&
+                        !it.contains("visible=false") && !it.contains("NOT_VISIBLE") && !it.contains("NOT_TOUCHABLE")) frameOf(it)
+                    else null
                 }
-                val now = SystemClock.uptimeMillis()
-                if (!focused) focusSince = 0L else if (focusSince == 0L) focusSince = now
-                // Android's transition input sink can briefly shield even a drawn window.
-                focusSince != 0L && now - focusSince >= 650
-            }
-            automation.waitForIdle(150, 2000)
+            if (input != null) return input
+            return namedMenuWindow()?.takeIf { overlayType.containsMatchIn(it) && it.contains("Surface: shown=true") }
+                ?.let(::frameOf)
         }
         fun menuBounds(text: String? = null): Rect {
             val rect = Rect()
-            val frame = Regex("""\bframe=\[(-?\d+),\s*(-?\d+)\]\[(-?\d+),\s*(-?\d+)\]""")
-            await("Visible native menu control was not laid out: $text", 6000) {
-                // Match the coordinate system used by the injected tap. On this API 26
-                // build the dialog's View.getLocationOnScreen adds a status bar offset
-                // absent from its actual visible window and InputDispatcher frame.
-                val origin = shell("dumpsys input").lineSequence()
-                    .filter { it.contains("/com.cutedog.app.pet.PetMenuActivity") && !it.contains("visible=false") }
-                    .firstNotNullOfOrNull { frame.find(it) }
-                    ?: return@await false
-                InstrumentationRegistry.getInstrumentation().runOnMainSync {
-                    val menu = ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(Stage.RESUMED)
-                        .filterIsInstance<PetMenuActivity>().firstOrNull { it.hasWindowFocus() }
-                    val view = menu?.let { activity -> descendants(activity.window.decorView).firstOrNull {
-                        if (text == null) it is android.widget.ScrollView else it is android.widget.TextView && it.text.toString() == text
-                    } }
-                    val visible = Rect()
-                    if (view != null && view.isShown && view.getLocalVisibleRect(visible)) {
-                        val location = IntArray(2)
-                        view.getLocationInWindow(location)
-                        rect.set(visible)
-                        rect.offset(location[0] + origin.groupValues[1].toInt(), location[1] + origin.groupValues[2].toInt())
+            await("Visible overlay menu control was not laid out: ${text ?: "panel"}", 8000) {
+                val frame = menuInputFrame() ?: return@await false
+                if (text == null) {
+                    rect.set(frame)
+                } else {
+                    val button = label(text) ?: return@await false
+                    button.getBoundsInScreen(rect)
+                    // Align the accessibility root with the actual input frame. In particular,
+                    // API 26 can report an extra status bar offset in View screen coordinates.
+                    button.window?.root?.let { root ->
+                        val reported = Rect().also(root::getBoundsInScreen)
+                        if (reported.width() == frame.width() && reported.height() == frame.height()) {
+                            rect.offset(frame.left - reported.left, frame.top - reported.top)
+                        }
                     }
+                    if (!rect.intersect(frame)) return@await false
                 }
                 !rect.isEmpty
             }
             return rect
         }
+        fun awaitMenuInput() {
+            menuBounds("投球")
+        }
         fun choose(text: String, inPetMenu: Boolean = true) {
-            val rect = if (inPetMenu) {
-                awaitMenuInput()
-                menuBounds(text)
-            } else Rect().also { bounds ->
+            val rect = if (inPetMenu) menuBounds(text) else Rect().also { bounds ->
                 await("Visible control was not available: $text", 6000) {
                     label(text)?.getBoundsInScreen(bounds)
                     !bounds.isEmpty
@@ -339,15 +338,67 @@ class ReviewedPetDeviceTest {
             tap(rect.exactCenterX(), rect.exactCenterY())
         }
         fun tapOutsideMenu() {
-            awaitMenuInput()
             val menu = menuBounds()
             val dog = bounds()
             val display = context.resources.displayMetrics
-            val point = listOf(.12f, .5f, .88f).flatMap { y ->
+            val point = listOf(.52f, .64f, .38f, .22f, .82f).flatMap { y ->
                 listOf(.1f, .5f, .9f).map { x -> x * display.widthPixels to y * display.heightPixels }
-            }.firstOrNull { (x, y) -> !menu.contains(x.toInt(), y.toInt()) && !dog.contains(x.toInt(), y.toInt()) }
+            }.firstOrNull { (x, y) ->
+                val px = x.toInt()
+                val py = y.toInt()
+                !menu.contains(px, py) && !dog.contains(px, py) && node(ownPackage = false) { control ->
+                    if (!control.isClickable) return@node false
+                    val area = Rect().also(control::getBoundsInScreen)
+                    area.width().toLong() * area.height() < display.widthPixels.toLong() * display.heightPixels / 2 &&
+                        area.contains(px, py)
+                } == null
+            }
             requireNotNull(point) { "No unobstructed launcher point outside $menu and $dog" }
             tap(point.first, point.second)
+        }
+        fun assertBoundedOverlay(foreground: String): Rect {
+            val panel = menuBounds()
+            val dogPanel = bounds()
+            val display = context.resources.displayMetrics
+            val state = requireNotNull(namedMenuWindow()) { "Missing named interaction overlay" }
+            assertTrue("The menu must have TYPE_APPLICATION_OVERLAY", overlayType.containsMatchIn(state))
+            assertEquals("Opening the menu changed the resumed activity", foreground, foregroundActivity())
+            assertTrue("Menu $panel occupied a full screen", panel.height() < display.heightPixels * .70f)
+            assertFalse("Menu $panel covers the dog $dogPanel", Rect.intersects(panel, dogPanel))
+            return panel
+        }
+        fun screenshotForPixelComparison(): Bitmap {
+            val screenshot = requireNotNull(automation.takeScreenshot())
+            if (screenshot.config != Bitmap.Config.HARDWARE) return screenshot
+            return try { requireNotNull(screenshot.copy(Bitmap.Config.ARGB_8888, false)) }
+            finally { screenshot.recycle() }
+        }
+        fun assertLauncherPixelsUnchanged(before: Bitmap, menu: Rect, dogBefore: Rect) {
+            val after = screenshotForPixelComparison()
+            try {
+                assertEquals(before.width, after.width)
+                assertEquals(before.height, after.height)
+                val dog = Rect(dogBefore).apply { union(bounds()); inset(-24, -24) }
+                val panel = Rect(menu).apply { inset(-16, -16) }
+                var samples = 0
+                var changed = 0
+                for (yg in 2..17) for (xg in 1..19) {
+                    val x = after.width * xg / 20
+                    val y = after.height * yg / 20
+                    if (dog.contains(x, y) || panel.contains(x, y)) continue
+                    val earlier = before.getPixel(x, y)
+                    val later = after.getPixel(x, y)
+                    val delta = maxOf(
+                        kotlin.math.abs(Color.red(earlier) - Color.red(later)),
+                        kotlin.math.abs(Color.green(earlier) - Color.green(later)),
+                        kotlin.math.abs(Color.blue(earlier) - Color.blue(later)),
+                    )
+                    samples++
+                    if (delta > 24) changed++
+                }
+                assertTrue("Too little of Launcher remained outside the panel: $samples samples", samples >= 80)
+                assertTrue("Background outside the panel changed at $changed of $samples points", changed <= samples / 10)
+            } finally { after.recycle() }
         }
         try {
             automation.serviceInfo = automation.serviceInfo.apply { this.flags = flags or AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS or AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS }
@@ -388,7 +439,7 @@ class ReviewedPetDeviceTest {
                     assertTrue("Second press must land outside the drawn fur", presses.isNull("lastDownPart"))
                     assertTrue("The second press must use the edge tolerance", presses.getBoolean("lastDownUsedEdge"))
                     tapOutsideMenu()
-                    await("Outside tap did not close the menu", 5_000) { label("投球") == null }
+                    await("Outside tap did not close the menu", 5_000) { namedMenuWindow() == null }
                     assertEquals("Opening a menu must not also pet the dog",initial,growth.snapshot().interactions)
                     return@use
                 }
@@ -441,15 +492,16 @@ class ReviewedPetDeviceTest {
                     await("Single tap did not pet the dog", 5_000) { growth.snapshot().interactions == initial + 1 }
                     assertNull(label("投球"))
                     SystemClock.sleep(2100)
+                    val underlying = requireNotNull(foregroundActivity())
                     touchDog(true)
                     await("Double tap did not open the native menu", 10_000) { label("投球") != null }
-                    awaitMenuInput()
+                    assertBoundedOverlay(underlying)
                     capture("menu-above-home")
                     assertEquals("Opening the menu must not also pet or cuddle", initial + 1, growth.snapshot().interactions)
                     val freshPermission = context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED
-                    if (freshPermission && InstrumentationRegistry.getArguments().getString("cuteDogDisposable") == "true") {
-                        val permissionButton = Rect()
-                        requireNotNull(label("按住说话")).getBoundsInScreen(permissionButton)
+                    if (BuildConfig.LEGACY_SPEECH && freshPermission &&
+                        InstrumentationRegistry.getArguments().getString("cuteDogDisposable") == "true") {
+                        val permissionButton = menuBounds("按住说话")
                         // Android takes input focus on DOWN when it opens its permission dialog.
                         // The system may cancel the matching UP sent to the former window.
                         shell("input tap ${permissionButton.centerX()} ${permissionButton.centerY()}")
@@ -466,7 +518,7 @@ class ReviewedPetDeviceTest {
                         requireNotNull(allowMicrophone()).getBoundsInScreen(permissionBounds)
                         tap(permissionBounds.exactCenterX(), permissionBounds.exactCenterY())
                         await("Menu did not return after permission grant", 8000) {
-                            label("已允许使用麦克风。请再次按住说话。") != null && label("按住说话") != null
+                            label("请重新按住麦克风说话。") != null && label("按住说话") != null
                         }
                         assertEquals(PackageManager.PERMISSION_GRANTED, context.checkSelfPermission(Manifest.permission.RECORD_AUDIO))
                         awaitMenuInput()
@@ -476,8 +528,7 @@ class ReviewedPetDeviceTest {
                         InstrumentationRegistry.getArguments().getString("cuteDogDisposable") == "true") {
                         // The headless AVD supplies silent input. Verify capture, cancellation and submission
                         // without accessing a host microphone or transmitting private speech.
-                        val microphone = Rect()
-                        requireNotNull(label("按住说话")).getBoundsInScreen(microphone)
+                        val microphone = menuBounds("按住说话")
                         fun beginRecording(): Long {
                             val start = SystemClock.uptimeMillis()
                             sendTouch(MotionEvent.ACTION_DOWN, start, microphone.exactCenterX(), microphone.exactCenterY())
@@ -503,7 +554,7 @@ class ReviewedPetDeviceTest {
                     waitForClip("play_ball")
                     assertNotNull("The menu should stay visible after selection", label("投球"))
                     tapOutsideMenu()
-                    await("Outside tap did not close the menu", 5_000) { label("投球") == null }
+                    await("Outside tap did not close the menu", 5_000) { namedMenuWindow() == null }
                     val dogNode = requireNotNull(dog())
                     val action = dogNode.actionList.first { it.label?.toString() == "打开互动菜单" }
                     assertTrue(dogNode.performAction(action.id))
@@ -514,7 +565,7 @@ class ReviewedPetDeviceTest {
                     await("Due checkbox was not shown by floating dog above home", 25_000) {
                         node { it.isCheckable && it.text?.toString() == title } != null
                     }
-                    assertNull("Reminder must supersede the menu", label("喂食"))
+                    assertNull("Reminder must supersede the menu", namedMenuWindow())
                     capture("due-checkbox-above-home")
                     choose(title, inPetMenu = false)
                     await("Checkbox did not persist completion", 8000) { repo.get(id)?.completed == true }
@@ -527,6 +578,8 @@ class ReviewedPetDeviceTest {
                     automation.windows.any { it.isActive && it.root?.packageName?.toString()?.contains("launcher", ignoreCase = true) == true }
                 }
                 automation.waitForIdle(250, 5000)
+                val launcher = requireNotNull(foregroundActivity())
+                assertTrue("Expected Launcher beneath the overlay: $launcher", launcher.contains("launcher", ignoreCase = true))
                 if (scene == InteractionScene.DESKTOP_GESTURES) {
                     val lockedBounds = bounds()
                     dragVertically()
@@ -534,6 +587,7 @@ class ReviewedPetDeviceTest {
                     assertNull(label("投球"))
                     touchDog(true)
                     await("Double tap on launcher did not open menu", 8_000) { label("喂食") != null }
+                    assertBoundedOverlay(launcher)
                     capture("menu-above-launcher")
                     choose("喂食")
                     waitForClip("treat")
@@ -542,7 +596,7 @@ class ReviewedPetDeviceTest {
                     waitForClip("play_ball")
                     assertNotNull("The menu should accept a second action without reopening", label("喂食"))
                     tapOutsideMenu()
-                    await("Outside tap did not dismiss menu", 5000) { label("投球") == null }
+                    await("Outside tap did not dismiss menu", 5000) { namedMenuWindow() == null }
                     settings.locked = false
                     SystemClock.sleep(400)
                     val unlockedTop = bounds().top
@@ -566,9 +620,10 @@ class ReviewedPetDeviceTest {
                     capture("desktop-chat")
                     choose("收起聊天", inPetMenu = false)
                     awaitMenuInput()
+                    assertEquals("Closing chat should reveal Launcher behind the menu", launcher, foregroundActivity())
                     assertFalse("Closing desktop chat must restore the open interaction menu", menuBounds("投球").isEmpty)
                     tapOutsideMenu()
-                    await("Outside tap did not dismiss the menu after chatting", 5_000) { label("投球") == null }
+                    await("Outside tap did not dismiss the menu after chatting", 5_000) { namedMenuWindow() == null }
                     return@use
                 }
                 val petOutside = bounds()
@@ -576,22 +631,19 @@ class ReviewedPetDeviceTest {
                 await("Menu missing before touching the dog outside the card", 8000) { label("投球") != null }
                 awaitMenuInput()
                 tap(petOutside.exactCenterX(), petOutside.exactCenterY())
-                await("The floating dog intercepted the menu's outside tap", 5000) { label("投球") == null }
-                touchDog(true)
-                await("Menu absent before testing outside touch", 8000) { label("投球") != null }
-                awaitMenuInput()
-                val menuPanel = menuBounds()
-                val display = context.resources.displayMetrics
-                assertTrue("Menu must be a compact floating window", menuPanel.height() < display.heightPixels * .70f)
-                val dogPanel = bounds()
-                assertFalse("Menu $menuPanel covers the dog $dogPanel", Rect.intersects(menuPanel, dogPanel))
+                await("The floating dog intercepted the menu's outside tap", 5000) { namedMenuWindow() == null }
+                val baseline = screenshotForPixelComparison()
+                try {
+                    val dogBefore = bounds()
+                    touchDog(true)
+                    awaitMenuInput()
+                    val panel = assertBoundedOverlay(launcher)
+                    assertLauncherPixelsUnchanged(baseline, panel, dogBefore)
+                    capture("menu-does-not-cover-launcher")
+                } finally { baseline.recycle() }
                 tapOutsideMenu()
                 await("Tapping outside did not dismiss the menu and restore Launcher", 7000) {
-                    label("投球") == null && shell("dumpsys activity activities").lineSequence().any {
-                        (it.contains("mResumedActivity") || it.contains("topResumedActivity")) && it.contains("launcher", ignoreCase = true)
-                    } && shell("dumpsys window windows").lineSequence().none {
-                        it.trimStart().startsWith("Window #") && it.contains("/com.cutedog.app.pet.PetMenuActivity")
-                    }
+                    namedMenuWindow() == null && foregroundActivity() == launcher
                 }
                 capture("outside-touch-restores-launcher")
             }

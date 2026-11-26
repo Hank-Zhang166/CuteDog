@@ -15,6 +15,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.setValue
+import com.cutedog.app.pet.PetInteractionMenu
 import com.cutedog.app.pet.PetSettings
 import com.cutedog.app.ui.ChatScreen
 import com.cutedog.app.ui.CuteDogTheme
@@ -27,6 +28,7 @@ class PetChatActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         if (intent.hasExtra(VOICE_DRAFT) || intent.getBooleanExtra(VOICE_SETUP, false)) draftVersion++
+        PetInteractionMenu.setChatVisible(intent.getBooleanExtra(FROM_PET_PANEL, false))
     }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -51,8 +53,20 @@ class PetChatActivity : ComponentActivity() {
             y = (14 * density).roundToInt()
         }
     }
+
+    override fun onStart() {
+        super.onStart()
+        PetInteractionMenu.setChatVisible(intent.getBooleanExtra(FROM_PET_PANEL, false))
+    }
+
+    override fun onStop() {
+        if (intent.getBooleanExtra(FROM_PET_PANEL, false)) PetInteractionMenu.setChatVisible(false)
+        super.onStop()
+    }
+
     companion object {
         internal const val VOICE_DRAFT = "voice_draft"
         internal const val VOICE_SETUP = "voice_setup"
+        internal const val FROM_PET_PANEL = "from_pet_panel"
     }
 }

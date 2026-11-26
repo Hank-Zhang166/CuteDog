@@ -3,28 +3,11 @@ package com.cutedog.app.pet
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-/** All calls are on the main thread. A detached or replaced floating dog invalidates its open menu. */
 internal object PetInteractionMenu {
-    private var generation = 0L
-    private val current = MutableStateFlow<Long?>(null)
-    val session = current.asStateFlow()
-    private var onSelection: ((String) -> Unit)? = null
+    private val chat = MutableStateFlow(false)
+    val chatVisible = chat.asStateFlow()
 
-    fun open(select: (String) -> Unit): Long {
-        onSelection = select
-        return (++generation).also { current.value = it }
-    }
-
-    fun close(id: Long? = current.value) {
-        if (id != current.value) return
-        onSelection = null
-        current.value = null
-    }
-
-    fun select(id: Long, intent: String) {
-        if (id != current.value) return
-        onSelection?.invoke(intent)
-    }
+    fun setChatVisible(visible: Boolean) { chat.value = visible }
 
     const val CHAT = "open_chat"
     data class Action(val intent: String, val label: String)

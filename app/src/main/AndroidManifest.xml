@@ -20,9 +20,8 @@
         <activity android:name=".PetChatActivity" android:exported="false" android:excludeFromRecents="true"
             android:taskAffinity="${applicationId}.petChat" android:launchMode="singleTop"
             android:theme="@style/Theme.CuteDog.PetChat" android:windowSoftInputMode="stateAlwaysHidden|adjustResize" />
-        <activity android:name=".pet.PetMenuActivity" android:exported="false" android:excludeFromRecents="true"
-            android:taskAffinity="${applicationId}.petmenu" android:launchMode="singleTop"
-            android:theme="@style/Theme.CuteDog.PetMenu" android:windowSoftInputMode="stateAlwaysHidden" />
+        <activity android:name=".voice.OverlayMicrophoneActivity" android:exported="false" android:excludeFromRecents="true"
+            android:taskAffinity="${applicationId}.overlayMicrophone" android:theme="@style/Theme.CuteDog.OverlayMic" />
         <service android:name=".pet.OverlayService" android:exported="false" android:foregroundServiceType="specialUse">
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="User-started interactive companion pet in a small overlay window with persistent notification and explicit stop control" />
         </service>

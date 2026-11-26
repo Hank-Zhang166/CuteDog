@@ -25,7 +25,7 @@ python3 scripts/package-apk.py
 
 `package-apk.py` 必须在实际构建成功后运行；它使用 `apksigner` 验签及 `aapt` 读取 APK 真实清单，生成 `artifacts/` 下的 APK、SHA-256、构建信息和验签记录。此目录默认忽略，不误提交临时构建数据。测试版使用调试证书，不能视为生产签名版本；不同机器的调试证书可能不同，跨证书安装需要先卸载并会删除本地数据。
 
-GitHub Actions 包含单元测试、Lint、APK 构建，以及 API 26 / 35 的设备测试。推送 `v*` 标签触发测试版 Release 发布；工作流文件存在不代表远程运行已成功，需查看真实运行结果。
+GitHub Actions 包含单元测试、Lint、APK 构建，以及 Android 15（API 35）的设备测试。推送 `v*` 标签触发测试版 Release 发布。实际结果见对应工作流运行记录。
 
 检查已发布的 APK 时，在 Actions 手动运行 `Published APK UI validation`，按[设备验收说明](../docs/final-apk-validation.md)填写下载地址、SHA-256 和源码提交。截图、测试报告和运行日志随该次运行的 Artifacts 提供。
 

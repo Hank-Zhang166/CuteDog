@@ -4,10 +4,12 @@ import android.app.*
 import android.content.*
 import android.content.pm.ServiceInfo
 import android.graphics.PixelFormat
+import android.graphics.Rect
 import android.os.*
 import android.provider.Settings
 import android.view.*
 import com.cutedog.app.MainActivity
+import com.cutedog.app.PetChatActivity
 import com.cutedog.app.pet.animation.AuthoredStepApproval
 import com.cutedog.app.pet.animation.OverlayTravelPolicy
 import com.cutedog.app.reminder.DogReminder
@@ -17,7 +19,7 @@ import com.cutedog.app.reminder.clock
 import kotlinx.coroutines.*
 import kotlin.math.*
 
-/** Only the pet's small rectangle and a temporary bubble receive touches. */
+/** Owns the small pet, reminder and interaction windows drawn above other apps. */
 class OverlayService : Service() {
     private lateinit var wm: WindowManager
     private lateinit var pet: PetView
@@ -27,7 +29,9 @@ class OverlayService : Service() {
     private val bubbleScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var attached = false
     private var hidden = false
-    private val menuOpen get() = PetInteractionMenu.session.value != null
+    private var menu: PetMenuView? = null
+    private var outsideMenuDown = -1L
+    private val menuOpen get() = menu != null
     private var menuMovementUntil = 0L
     private val menuAllowsTravel get() = !menuOpen || SystemClock.uptimeMillis() < menuMovementUntil
     private var bubble: PetBubbleView? = null
@@ -230,6 +234,14 @@ class OverlayService : Service() {
         prefs = PetSettings(this); wm = getSystemService(WindowManager::class.java)
         pet = PetView(this)
         pet.onInteractionMenu = ::showInteractionMenu
+        var consumePetGesture = false
+        pet.setOnTouchListener { _, event ->
+            if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+                consumePetGesture = menu?.isShown == true || event.downTime == outsideMenuDown
+                if (consumePetGesture) dismissInteractionMenu()
+            }
+            consumePetGesture
+        }
         androidx.core.view.ViewCompat.addAccessibilityAction(pet, "打开互动菜单") { _, _ -> showInteractionMenu() }
         pet.onAuthoredFrameCommitted = ::consumeAuthoredMovement
         pet.onAuthoredStepAllowed = ::allowAuthoredStep
@@ -254,14 +266,10 @@ class OverlayService : Service() {
             PixelFormat.TRANSLUCENT).apply { gravity = Gravity.TOP or Gravity.LEFT }
         configure()
         bubbleScope.launch {
-            PetInteractionMenu.session.collect { menu ->
-                // The dog is above the floating window. Let Android deliver any outside
-                // tap to the menu and restore dog input when the menu closes.
-                val pass = WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
-                val flags = if (menu == null) params.flags and pass.inv() else params.flags or pass
-                if (params.flags != flags) {
-                    params.flags = flags
-                    if (attached) safelyUpdate()
+            PetInteractionMenu.chatVisible.collect { visible ->
+                menu?.let {
+                    if (visible) it.stopVoice()
+                    it.visibility = if (visible) View.INVISIBLE else View.VISIBLE
                 }
             }
         }
@@ -296,7 +304,7 @@ class OverlayService : Service() {
         getSystemService(AppOpsManager::class.java).startWatchingMode(AppOpsManager.OPSTR_SYSTEM_ALERT_WINDOW, packageName, overlayPermissionListener)
     }
     private fun configure(resetPosition: Boolean = false) {
-        PetInteractionMenu.close()
+        dismissInteractionMenu()
         pet.setAuthoredTravelAllowed(false)
         cancelSnap()
         dismissBubble()
@@ -347,7 +355,7 @@ class OverlayService : Service() {
         pet.visibility = if (visible) View.VISIBLE else View.GONE
         main.removeCallbacks(motion)
         if (visible) { pet.resume(); lastMotion = 0; main.post(motion) }
-        else { PetInteractionMenu.close(); pet.pause(); cancelSnap(); dismissBubble(); lastMotion = 0 }
+        else { dismissInteractionMenu(); pet.pause(); cancelSnap(); dismissBubble(); lastMotion = 0 }
     }
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) { super.onConfigurationChanged(newConfig); legacyInsets = null; dismissBubble(); configure(); safelyUpdate(); pet.requestApplyInsets() }
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -408,46 +416,76 @@ class OverlayService : Service() {
     private fun showInteractionMenu(): Boolean {
         if (!attached || !pet.isShown || bubble != null || dogReminders.display.value != null) return false
         if (menuOpen) return true
+        if (PetInteractionMenu.chatVisible.value) return false
+        val origin = IntArray(2).also(pet::getLocationOnScreen)
+        val dog = Rect(origin[0], origin[1], origin[0] + pet.width, origin[1] + pet.height)
+        val viewport = Rect(insetLeft, insetTop, screenWidth - insetRight, screenHeight - insetBottom)
+        val themed = ContextThemeWrapper(this, android.R.style.Theme_Material_Light_NoActionBar)
+        val panel = PetMenuView(themed, prefs.name, onOutside = { time ->
+            outsideMenuDown = time
+            dismissInteractionMenu()
+        },
+            onAction = ::selectMenuAction, onVoiceSetup = { openPanelChat(voiceSetup = true) })
+        val bounds = panel.place(viewport, dog) ?: return false
+        val window = WindowManager.LayoutParams(bounds.width(), bounds.height(),
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+            PixelFormat.TRANSLUCENT).apply {
+            setTitle("CuteDog interaction panel")
+            gravity = Gravity.TOP or Gravity.LEFT
+            x = bounds.left
+            y = bounds.top
+            if (Build.VERSION.SDK_INT >= 30) setFitInsetsTypes(0)
+        }
         cancelSnap()
         route.clear()
         menuMovementUntil = 0L
         pet.setAuthoredTravelAllowed(false)
-        val session = PetInteractionMenu.open { action ->
-            if (pet.isShown && dogReminders.display.value == null) {
-                // Allow an explicit moving action to finish while the panel is still open.
-                if (action == "trot" || action == "jump") menuMovementUntil = SystemClock.uptimeMillis() + 14_000L
-                pet.interact(action)
-            }
-        }
-        val usableWidth = max(1, screenWidth - insetLeft - insetRight)
-        val usableHeight = max(1, screenHeight - insetTop - insetBottom)
-        val origin = IntArray(2).also(pet::getLocationOnScreen)
-        val dogLeft = origin[0] - insetLeft
-        val dogTop = origin[1] - insetTop
-        val bounds = floatArrayOf(
-            dogLeft.toFloat() / usableWidth, dogTop.toFloat() / usableHeight,
-            (dogLeft + pet.width).toFloat() / usableWidth, (dogTop + pet.height).toFloat() / usableHeight,
-        )
         return try {
-            startActivity(Intent(this, PetMenuActivity::class.java).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_NO_ANIMATION)
-                putExtra(PetMenuActivity.SESSION, session)
-                putExtra(PetMenuActivity.DOG_BOUNDS, bounds)
-                putExtra(PetMenuActivity.VIEWPORT, intArrayOf(usableWidth, usableHeight, insetLeft, insetTop))
-            })
+            wm.addView(panel, window)
+            menu = panel
             true
-        } catch (_: android.content.ActivityNotFoundException) {
-            PetInteractionMenu.close(session); false
         } catch (_: SecurityException) {
-            PetInteractionMenu.close(session); false
+            false
+        } catch (_: WindowManager.BadTokenException) {
+            false
+        } catch (_: WindowManager.InvalidDisplayException) {
+            false
         }
     }
+
+    private fun selectMenuAction(action: String) {
+        if (!menuOpen || !pet.isShown || dogReminders.display.value != null) return
+        if (action == PetInteractionMenu.CHAT) {
+            openPanelChat()
+            return
+        }
+        if (action == "trot" || action == "jump") menuMovementUntil = SystemClock.uptimeMillis() + 14_000L
+        pet.interact(action)
+    }
+
+    private fun openPanelChat(voiceSetup: Boolean = false) {
+        val intent = Intent(this, PetChatActivity::class.java)
+            .putExtra(PetChatActivity.FROM_PET_PANEL, true)
+            .putExtra(PetChatActivity.VOICE_SETUP, voiceSetup)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_NO_ANIMATION)
+        runCatching { startActivity(intent) }
+    }
+
+    private fun dismissInteractionMenu() {
+        val panel = menu ?: return
+        menu = null
+        panel.stopVoice()
+        runCatching { wm.removeViewImmediate(panel) }
+    }
+
     private fun updateReminder(display: DogReminder?) {
         if (display == null || dragging) {
             dismissBubble()
             return
         }
-        PetInteractionMenu.close()
+        dismissInteractionMenu()
         val task = display
         val view = PetBubbleView(this).apply {
             showReminder(task.title, task.clock())
@@ -513,7 +551,7 @@ class OverlayService : Service() {
     override fun onDestroy() {
         bubbleScope.cancel()
         dogReminders.setVisible(false)
-        PetInteractionMenu.close()
+        dismissInteractionMenu()
         main.removeCallbacksAndMessages(null); stepApproval.clear(); cancelSnap(); dismissBubble(); pet.pause()
         if (attached) { savePosition(); runCatching { wm.removeView(pet) }; attached = false }
         unregisterReceiver(events)

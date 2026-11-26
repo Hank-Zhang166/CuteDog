@@ -1,6 +1,7 @@
 package com.cutedog.app.voice
 
 import android.app.AlertDialog
+import android.content.Context
 import android.os.SystemClock
 import android.util.Log
 import androidx.activity.ComponentActivity
@@ -28,6 +29,7 @@ internal class RealtimeVoiceConversation(
     private val onStatus: (String) -> Unit,
     private val onSetup: () -> Unit,
     private val client: DoubaoRealtimeClient = DoubaoRealtimeClient(),
+    private val onTurnEnd: () -> Unit = {},
 ) {
     private val settings = DoubaoSettings(activity)
     private var active: Capture? = null
@@ -45,14 +47,9 @@ internal class RealtimeVoiceConversation(
         }
         if (!settings.microphoneUploadAccepted) {
             if (consent?.isShowing != true) {
-                consent = AlertDialog.Builder(activity)
-                    .setTitle("使用豆包实时语音？")
-                    .setMessage("按住时录音会实时发给豆包，以便松手后更快回答。启用搜索时豆包会按需查询。听写和回答保存在本机聊天记录，近期对话会随请求发给豆包。滑出按钮会停止本轮。")
-                    .setNegativeButton("暂不使用", null)
-                    .setPositiveButton("同意") { _, _ ->
-                        settings.microphoneUploadAccepted = true
-                        onStatus("请重新按住麦克风说话。")
-                    }.show()
+                consent = showRealtimeMicrophoneConsent(activity) { accepted ->
+                    if (accepted) onStatus("请重新按住麦克风说话。")
+                }
             }
             return false
         }
@@ -88,7 +85,10 @@ internal class RealtimeVoiceConversation(
             } finally {
                 recorder.discard()
                 input.cancel()
-                if (active === capture) active = null
+                if (active === capture) {
+                    active = null
+                    onTurnEnd()
+                }
             }
         }
         return true
@@ -187,4 +187,18 @@ internal class RealtimeVoiceConversation(
             listOf(DoubaoHistory("user", user.content.take(1_000)),
                 DoubaoHistory("assistant", reply.content.take(1_000)))
         }
+}
+
+internal fun showRealtimeMicrophoneConsent(context: Context, onDismiss: (Boolean) -> Unit): AlertDialog {
+    var accepted = false
+    return AlertDialog.Builder(context)
+        .setTitle("使用豆包实时语音？")
+        .setMessage("按住时录音会实时发给豆包，以便松手后更快回答。启用搜索时豆包会按需查询。听写和回答保存在本机聊天记录，近期对话会随请求发给豆包。滑出按钮会停止本轮。")
+        .setNegativeButton("暂不使用", null)
+        .setPositiveButton("同意") { _, _ ->
+            DoubaoSettings(context).microphoneUploadAccepted = true
+            accepted = true
+        }
+        .setOnDismissListener { onDismiss(accepted) }
+        .show()
 }

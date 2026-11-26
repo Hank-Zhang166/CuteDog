@@ -1,6 +1,6 @@
 # CuteDog
 
-CuteDog 是一只 Android 桌面萨摩耶。可以轻抚、喂零食、投球、提醒待办，也可以按住麦克风聊天。当前源码为 **0.2.1-preview.5**，支持 Android 8.0 及以上，使用豆包实时语音播放回答。
+CuteDog 是一只 Android 桌面萨摩耶。可以轻抚、喂零食、投球、提醒待办，也可以按住麦克风聊天。当前源码为 **0.2.1-preview.6**，支持 Android 8.0 及以上，使用豆包实时语音播放回答。
 
 [已发布的 APK 和动作素材](https://github.com/Hank-Zhang166/CuteDog/releases/latest) · [观看 56 项动作与左右追球 MP4](https://github.com/Hank-Zhang166/CuteDog/releases/download/v0.2.1-preview.4/CuteDog-actions.mp4) · [可编辑的 Live2D 工程](https://github.com/Hank-Zhang166/CuteDog/releases/download/v0.2.1-preview.4/CuteDog-Live2D-project.zip)
 
